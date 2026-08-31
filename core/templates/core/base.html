@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Qasida Library</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans min-h-screen flex flex-col">
+    <nav class="bg-emerald-700 text-white p-4 shadow-md">
+        <div class="container mx-auto flex justify-between items-center">
+            <a href="{% url 'home' %}" class="text-xl font-bold">Qasida Library</a>
+            <div>
+                <a href="{% url 'search' %}" class="hover:text-emerald-200">Search</a>
+            </div>
+        </div>
+    </nav>
+    
+    <main class="container mx-auto p-4 flex-grow">
+        {% if messages %}
+            <div class="mb-4">
+                {% for message in messages %}
+                    <div class="p-3 mb-2 rounded {% if message.tags == 'error' %}bg-red-200 text-red-800{% else %}bg-green-200 text-green-800{% endif %}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+        
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="bg-gray-800 text-gray-400 p-4 text-center mt-auto">
+        <p>&copy; 2024 Qasida Library. All rights reserved.</p>
+    </footer>
+</body>
+</html>

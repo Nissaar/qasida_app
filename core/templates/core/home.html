@@ -1,0 +1,33 @@
+{% extends 'core/base.html' %}
+
+{% block content %}
+<div class="text-center py-10">
+    <h1 class="text-4xl font-bold text-emerald-800 mb-4">Welcome to Qasida Library</h1>
+    <p class="text-lg text-gray-600 mb-8">Discover naats, qasidas, madih, and manqabat in multiple languages.</p>
+    
+    <form action="{% url 'search' %}" method="get" class="max-w-xl mx-auto flex">
+        <input type="text" name="q" placeholder="Search lyrics, titles, or authors..." class="flex-grow p-3 border border-gray-300 rounded-l-md focus:outline-none focus:ring-2 focus:ring-emerald-500">
+        <button type="submit" class="bg-emerald-600 text-white p-3 rounded-r-md hover:bg-emerald-700 transition">Search</button>
+    </form>
+</div>
+
+<div class="mt-8">
+    <h2 class="text-2xl font-semibold mb-4">Recently Added</h2>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {% for qasida in qasidas %}
+        <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+            <h3 class="text-xl font-semibold text-emerald-700"><a href="{% url 'qasida_detail' qasida.id %}">{{ qasida.title|default:"Untitled Qasida" }}</a></h3>
+            <p class="text-sm text-gray-500 mb-2">{{ qasida.author|default:"Unknown Author" }} &bull; {{ qasida.language|default:"Unknown Lang" }}</p>
+            <p class="text-gray-700 line-clamp-3 mb-4">{{ qasida.lyrics|truncatewords:20 }}</p>
+            <div class="flex flex-wrap gap-2">
+                {% for tag in qasida.tags.all %}
+                    <span class="bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded">{{ tag.name }}</span>
+                {% endfor %}
+            </div>
+        </div>
+        {% empty %}
+        <p class="text-gray-500">No qasidas found.</p>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

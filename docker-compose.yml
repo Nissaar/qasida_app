@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: qasida_db
+      POSTGRES_USER: qasida_user
+      POSTGRES_PASSWORD: qasida_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  web:
+    build: 
+      context: .
+      network: "host"
+    command: gunicorn qasida_app.wsgi:application --bind 0.0.0.0:8000
+    entrypoint: /app/entrypoint.sh
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - DB_NAME=qasida_db
+      - DB_USER=qasida_user
+      - DB_PASSWORD=qasida_password
+      - DB_HOST=db
+      - DB_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+
+  celery_worker:
+    build:
+      context: .
+      network: "host"
+    command: celery -A qasida_app worker -l info
+    volumes:
+      - .:/app
+    environment:
+      - DB_NAME=qasida_db
+      - DB_USER=qasida_user
+      - DB_PASSWORD=qasida_password
+      - DB_HOST=db
+      - DB_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+
+  celery_beat:
+    build:
+      context: .
+      network: "host"
+    command: celery -A qasida_app beat -l info
+    volumes:
+      - .:/app
+    environment:
+      - DB_NAME=qasida_db
+      - DB_USER=qasida_user
+      - DB_PASSWORD=qasida_password
+      - DB_HOST=db
+      - DB_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+
+volumes:
+  postgres_data:

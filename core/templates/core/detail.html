@@ -1,0 +1,53 @@
+{% extends 'core/base.html' %}
+
+{% block content %}
+<div class="bg-white p-8 rounded-lg shadow-sm">
+    <h1 class="text-3xl font-bold text-emerald-800 mb-2">{{ qasida.title|default:"Untitled Qasida" }}</h1>
+    <div class="text-gray-600 mb-6 flex gap-4">
+        <span><strong>Author:</strong> {{ qasida.author|default:"Unknown" }}</span>
+        <span><strong>Language:</strong> {{ qasida.language|default:"Unknown" }}</span>
+        {% if qasida.source_url %}
+            <span><strong>Source:</strong> <a href="{{ qasida.source_url }}" target="_blank" class="text-blue-500 hover:underline">Link</a></span>
+        {% endif %}
+    </div>
+
+    <div class="mb-6">
+        <h2 class="text-lg font-semibold mb-2">Tags</h2>
+        <div class="flex flex-wrap gap-2">
+            {% for tag in qasida.tags.all %}
+                <span class="bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full text-sm">{{ tag.name }}</span>
+            {% empty %}
+                <span class="text-gray-500 text-sm">No tags available.</span>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="prose max-w-none mb-10 whitespace-pre-line text-lg leading-relaxed text-gray-800 bg-gray-50 p-6 rounded border border-gray-100">
+{{ qasida.lyrics }}
+    </div>
+
+    <hr class="my-8">
+
+    <div class="bg-gray-50 p-6 rounded">
+        <h2 class="text-2xl font-semibold mb-4">Suggest an Edit</h2>
+        <p class="text-sm text-gray-600 mb-4">Have corrections for the lyrics or suggestions for tags? Let us know!</p>
+        
+        <form method="post">
+            {% csrf_token %}
+            <div class="mb-4">
+                <label class="block text-sm font-medium mb-1">Your Email (Required)</label>
+                <input type="email" name="email" required class="w-full p-2 border rounded focus:ring-emerald-500 focus:border-emerald-500">
+            </div>
+            <div class="mb-4">
+                <label class="block text-sm font-medium mb-1">Suggested Lyrics</label>
+                <textarea name="suggested_lyrics" rows="6" class="w-full p-2 border rounded focus:ring-emerald-500 focus:border-emerald-500">{{ qasida.lyrics }}</textarea>
+            </div>
+            <div class="mb-4">
+                <label class="block text-sm font-medium mb-1">Suggest Tags (Comma separated)</label>
+                <input type="text" name="suggested_tags" placeholder="e.g. shadhili, arabic, spiritual" class="w-full p-2 border rounded focus:ring-emerald-500 focus:border-emerald-500">
+            </div>
+            <button type="submit" class="bg-emerald-600 text-white px-6 py-2 rounded hover:bg-emerald-700 transition">Submit Suggestion</button>
+        </form>
+    </div>
+</div>
+{% endblock %}
