@@ -29,3 +29,21 @@ class Suggestion(models.Model):
 
     def __str__(self):
         return f"Suggestion for {self.qasida} by {self.email}"
+
+class SourceWebsite(models.Model):
+    name = models.CharField(max_length=200)
+    url = models.URLField(max_length=500, unique=True)
+    is_active = models.BooleanField(default=True)
+    parser_type = models.CharField(
+        max_length=50,
+        choices=[
+            ('mynaatbook', 'My Naat Book (React JS)'),
+            ('desertechoblog', 'Desert Echo Blog (WordPress)'),
+            ('damas', 'Damas Nur (WordPress)')
+        ],
+        default='mynaatbook'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name

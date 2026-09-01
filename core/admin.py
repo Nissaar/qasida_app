@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Tag, Qasida, Suggestion
+from .models import Tag, Qasida, Suggestion, SourceWebsite
 
 @admin.register(Tag)
 class TagAdmin(admin.ModelAdmin):
@@ -41,3 +41,9 @@ class SuggestionAdmin(admin.ModelAdmin):
         queryset.update(is_approved=False, is_reviewed=True)
         self.message_user(request, f"{queryset.count()} suggestions rejected.")
     reject_suggestions.short_description = "Reject selected suggestions"
+
+@admin.register(SourceWebsite)
+class SourceWebsiteAdmin(admin.ModelAdmin):
+    list_display = ('name', 'url', 'parser_type', 'is_active')
+    list_filter = ('is_active', 'parser_type')
+    search_fields = ('name', 'url')
