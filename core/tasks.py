@@ -13,15 +13,29 @@ def scrape_mynaatbook(website):
     We fetch the JS bundle, extract the JSON-like objects using regex, and load them.
     """
     print(f"Scraping mynaatbook: {website.url}")
-    # The actual data is currently bundled in this JS file:
-    js_url = "https://www.mynaatbook.com/static/js/main.9c3048ce.js"
     headers = {'User-Agent': 'QasidaAppBot/1.0 (+http://your-app-domain.com)'}
     
     try:
+        # First, fetch the main page to find the main JS bundle
+        main_page = requests.get(website.url, headers=headers, timeout=10)
+        main_page.raise_for_status()
+
+        # Look for the main JS bundle (e.g., /static/js/main.9c3048ce.js)
+        js_match = re.search(r'src="(/static/js/main\.[a-f0-9]+\.js)"', main_page.text)
+        if not js_match:
+            print(f"Could not find main JS bundle on {website.url}")
+            return
+
+        js_path = js_match.group(1)
+        base_url = website.url.rstrip('/')
+        js_url = f"{base_url}{js_path}"
+
+        print(f"Found JS bundle: {js_url}")
+
         response = requests.get(js_url, headers=headers, timeout=10)
         response.raise_for_status()
     except requests.RequestException as e:
-        print(f"Error fetching JS from {js_url}: {e}")
+        print(f"Error fetching from {website.url}: {e}")
         return
 
     text = response.text
@@ -66,7 +80,7 @@ def scrape_desertechoblog(website):
 
     soup = BeautifulSoup(response.content, 'html.parser')
     # Find all article/post links on the homepage
-    post_links = [a['href'] for a in soup.select('h2.entry-title a, h1.entry-title a, article a[rel="bookmark"]')]
+    post_links = [a['href'] for a in soup.select('a') if a.has_attr('href') and ('/201' in a['href'] or '/202' in a['href'])]
     post_links = list(set(post_links)) # Remove duplicates
     
     # Often blogs have an archive or multiple pages, but for now we scrape links on the front page
@@ -118,13 +132,11 @@ def scrape_damas(website):
     print(f"Scraping damas: {website.url}")
     headers = {'User-Agent': 'QasidaAppBot/1.0 (+http://your-app-domain.com)'}
 
-    # Use their poetry archive page as the main index
-    archive_url = "https://damas.nur.nu/30536/poetry-archive/"
     try:
-        response = requests.get(archive_url, headers=headers, timeout=10)
+        response = requests.get(website.url, headers=headers, timeout=10)
         response.raise_for_status()
     except requests.RequestException as e:
-        print(f"Error fetching {archive_url}: {e}")
+        print(f"Error fetching {website.url}: {e}")
         return
 
     soup = BeautifulSoup(response.content, 'html.parser')
