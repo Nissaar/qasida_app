@@ -20,7 +20,6 @@ services:
   web:
     build: 
       context: .
-      network: "host"
     command: gunicorn qasida_app.wsgi:application --bind 0.0.0.0:8000
     entrypoint: /app/entrypoint.sh
     volumes:
@@ -42,7 +41,6 @@ services:
   celery_worker:
     build:
       context: .
-      network: "host"
     command: celery -A qasida_app worker -l info
     volumes:
       - .:/app
@@ -61,7 +59,6 @@ services:
   celery_beat:
     build:
       context: .
-      network: "host"
     command: celery -A qasida_app beat -l info
     volumes:
       - .:/app
