@@ -1,0 +1,5 @@
+media/
+staticfiles/
+__pycache__/
+*.pyc
+celerybeat-schedule

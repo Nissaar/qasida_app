@@ -1,0 +1,46 @@
+{# Facet rail. Counts are scoped to the current filters, so an option that
+   would return nothing is simply not listed. #}
+<form method="get" action="{% url 'search' %}" class="card p-4">
+    <label for="facet-q" class="eyebrow block mb-2">Search</label>
+    <input id="facet-q" type="search" name="q" dir="auto" value="{{ query }}" placeholder="Title, line or author" class="input">
+    {% if lang_filter %}<input type="hidden" name="lang" value="{{ lang_filter }}">{% endif %}
+    {% if tag_filter %}<input type="hidden" name="tag" value="{{ tag_filter }}">{% endif %}
+    <button type="submit" class="btn-primary w-full mt-3">Search</button>
+</form>
+
+<div class="card p-4">
+    <h2 class="eyebrow mb-2">Language</h2>
+    <ul class="space-y-0.5">
+        {% for entry in all_languages %}
+        {% if entry.language|lower == lang_filter|lower %}
+        <li><a href="?{{ qs_without_lang }}" class="facet-on" title="Remove this filter"><span>{{ entry.language }}</span><span class="facet-count">{{ entry.n }} &times;</span></a></li>
+        {% else %}
+        <li><a href="?{{ qs_without_lang }}{% if qs_without_lang %}&amp;{% endif %}lang={{ entry.language|urlencode }}" class="facet"><span>{{ entry.language }}</span><span class="facet-count">{{ entry.n }}</span></a></li>
+        {% endif %}
+        {% endfor %}
+    </ul>
+</div>
+
+<div class="card p-4">
+    <h2 class="eyebrow">Tags</h2>
+    <p class="text-[11px] text-stone-400 dark:text-stone-500 mb-2">Counts follow your current filters.</p>
+    {% for group in tag_groups %}
+    <details class="border-t border-stone-100 dark:border-stone-800 first:border-t-0 py-1" {% if group.has_active or forloop.first %}open{% endif %}>
+        <summary class="cursor-pointer flex items-center justify-between text-sm font-medium py-1.5">
+            <span>{{ group.label }}</span>
+            <span class="facet-count">{{ group.items|length }}</span>
+        </summary>
+        <ul class="space-y-0.5 pb-2 max-h-60 overflow-y-auto thin-scroll">
+            {% for tag in group.items %}
+            {% if tag.is_active %}
+            <li><a href="?{{ qs_without_tag }}" class="facet-on" title="Remove this filter"><span>{{ tag.label }}</span><span class="facet-count">{{ tag.n }} &times;</span></a></li>
+            {% else %}
+            <li><a href="?{{ qs_without_tag }}{% if qs_without_tag %}&amp;{% endif %}tag={{ tag.name|urlencode }}" class="facet"><span>{{ tag.label }}</span><span class="facet-count">{{ tag.n }}</span></a></li>
+            {% endif %}
+            {% endfor %}
+        </ul>
+    </details>
+    {% empty %}
+    <p class="text-sm text-stone-500">No tags match the current filters.</p>
+    {% endfor %}
+</div>

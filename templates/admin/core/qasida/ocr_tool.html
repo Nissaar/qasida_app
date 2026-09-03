@@ -1,0 +1,75 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
+    &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+    &rsaquo; <a href="{% url 'admin:core_qasida_changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+    &rsaquo; {% translate 'Extract text' %}
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+    <p style="max-width:46em;">
+        Upload a scanned page, a screenshot or a PDF and the text is read off it with
+        Tesseract, running locally. Copy the result into a qasida's lyrics field and
+        correct it there &mdash; OCR of vocalised script is approximate.
+    </p>
+
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <fieldset class="module aligned">
+            {% for field in form %}
+            <div class="form-row">
+                {{ field.label_tag }}
+                {{ field }}
+                {% if field.help_text %}<div class="help">{{ field.help_text }}</div>{% endif %}
+                {% for error in field.errors %}<ul class="errorlist"><li>{{ error }}</li></ul>{% endfor %}
+            </div>
+            {% endfor %}
+        </fieldset>
+        <div class="submit-row">
+            <input type="submit" value="{% translate 'Extract text' %}" class="default">
+            <a href="{% url 'admin:core_qasida_changelist' %}" class="closelink">{% translate 'Back to qasidas' %}</a>
+        </div>
+    </form>
+
+    {% if notes %}
+    <div class="module" style="margin-top:1.5em;">
+        <h2>{% translate 'Result' %}</h2>
+        <ul style="padding:8px 24px;">
+            {% for note in notes %}<li>{{ note }}</li>{% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    {% if extracted_text %}
+    <div class="module" style="margin-top:1em;">
+        <h2>{% translate 'Extracted text' %}</h2>
+        <div style="padding:10px;">
+            <textarea id="ocr-output" rows="26" readonly
+                      style="width:100%; box-sizing:border-box; font-family:'Noto Naskh Arabic',serif; font-size:1.05rem; line-height:2.1; direction:auto; unicode-bidi:plaintext;">{{ extracted_text }}</textarea>
+            <p style="margin-top:8px;">
+                <button type="button" class="button" id="ocr-copy">{% translate 'Copy to clipboard' %}</button>
+                <span id="ocr-copied" style="margin-left:8px; display:none;">{% translate 'Copied.' %}</span>
+            </p>
+        </div>
+    </div>
+    <script>
+    document.getElementById('ocr-copy').addEventListener('click', function () {
+        var box = document.getElementById('ocr-output');
+        box.select();
+        navigator.clipboard.writeText(box.value).then(function () {
+            var flag = document.getElementById('ocr-copied');
+            flag.style.display = 'inline';
+            setTimeout(function () { flag.style.display = 'none'; }, 2500);
+        }).catch(function () {
+            /* Older browsers: the text is already selected for a manual copy. */
+        });
+    });
+    </script>
+    {% endif %}
+</div>
+{% endblock %}

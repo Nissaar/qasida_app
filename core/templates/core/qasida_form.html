@@ -1,0 +1,57 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Edit {{ qasida.title|default:"qasida" }} | Qasida Library{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto">
+    <nav class="mb-4 text-sm">
+        <a href="{% url 'qasida_detail' qasida.pk %}" class="text-stone-500 dark:text-stone-400 hover:text-brand-700 dark:hover:text-brand-300">&larr; Back to the qasida</a>
+    </nav>
+
+    <h1 class="text-2xl font-bold tracking-tight mb-1">Edit qasida</h1>
+    <p class="text-sm text-stone-500 dark:text-stone-400 mb-5">Changes are published immediately.</p>
+
+    <form method="post" class="space-y-5">
+        {% csrf_token %}
+
+        <div class="card p-5 space-y-4">
+            {% for field in form %}
+            {% if field.name != 'lyrics' %}
+            <div>
+                <label for="{{ field.id_for_label }}" class="block text-sm font-medium mb-1">{{ field.label }}</label>
+                {{ field }}
+                {% if field.help_text %}<p class="text-xs text-stone-500 dark:text-stone-400 mt-1">{{ field.help_text }}</p>{% endif %}
+                {% for error in field.errors %}<p class="text-sm text-red-600 dark:text-red-400 mt-1">{{ error }}</p>{% endfor %}
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+
+        {% if qasida.images.all %}
+        <div class="card p-5">
+            <h2 class="eyebrow mb-1">Scanned pages</h2>
+            <p class="text-xs text-stone-500 dark:text-stone-400 mb-3">The original, for checking the text against.</p>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {% for scan in qasida.images.all %}
+                <a href="{{ scan.image.url }}" target="_blank" rel="noopener"
+                   class="block rounded-lg overflow-hidden border border-stone-200 dark:border-stone-700 hover:border-brand-400 transition">
+                    <img src="{{ scan.image.url }}" alt="{{ scan.caption }}" loading="lazy" class="w-full h-28 object-cover object-top">
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="card p-5">
+            <label for="{{ form.lyrics.id_for_label }}" class="block text-sm font-medium mb-1">{{ form.lyrics.label }}</label>
+            {{ form.lyrics }}
+            {% for error in form.lyrics.errors %}<p class="text-sm text-red-600 dark:text-red-400 mt-1">{{ error }}</p>{% endfor %}
+        </div>
+
+        <div class="flex flex-wrap gap-3">
+            <button type="submit" class="btn-primary">Save changes</button>
+            <a href="{% url 'qasida_detail' qasida.pk %}" class="btn-ghost">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

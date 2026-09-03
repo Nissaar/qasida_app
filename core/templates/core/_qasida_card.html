@@ -1,0 +1,54 @@
+{# One card, used by the home grid and the listing grid. #}
+<article class="card-link overflow-hidden flex flex-col">
+    {% with scan=qasida.images.first %}
+    {% if scan %}
+    <a href="{% url 'qasida_detail' qasida.id %}" class="block bg-stone-100 dark:bg-stone-800" tabindex="-1" aria-hidden="true">
+        <img src="{{ scan.image.url }}" alt="" loading="lazy" decoding="async"
+             class="w-full h-40 object-cover object-top">
+    </a>
+    {% endif %}
+    {% endwith %}
+
+    <div class="p-4 flex flex-col flex-grow">
+        <h3 dir="auto" class="font-semibold leading-snug">
+            <a href="{% url 'qasida_detail' qasida.id %}" class="text-brand-800 dark:text-brand-200 hover:underline decoration-brand-400">
+                {{ qasida.title|default:"Untitled qasida" }}
+            </a>
+        </h3>
+
+        {% if qasida.arabic_title %}
+        <p dir="rtl" lang="ar" class="font-naskh text-base text-stone-600 dark:text-stone-300 mt-0.5 leading-relaxed">{{ qasida.arabic_title }}</p>
+        {% endif %}
+
+        <p class="text-xs text-stone-500 dark:text-stone-400 mt-1.5">
+            {% if qasida.author %}<span dir="auto">{{ qasida.author }}</span> &middot; {% endif %}{{ qasida.language|default:"Unknown" }}
+        </p>
+
+        {% if qasida.translation or qasida.transliteration or qasida.media.exists %}
+        <p class="flex flex-wrap gap-1.5 mt-2">
+            {% if qasida.translation %}<span class="chip">translated</span>{% endif %}
+            {% if qasida.transliteration %}<span class="chip">latin script</span>{% endif %}
+            {% if qasida.media.exists %}<span class="chip">recording</span>{% endif %}
+        </p>
+        {% endif %}
+
+        {% if qasida.text_quality != 'ok' %}
+        <p class="mt-2"><span class="badge-warn">
+            <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg>
+            {% if qasida.text_quality == 'ocr' %}Reconstructed{% else %}Read the scans{% endif %}
+        </span></p>
+        {% endif %}
+
+        <p dir="auto" class="mt-2 text-sm text-stone-600 dark:text-stone-400 line-clamp-3 flex-grow">
+            {{ qasida.lyrics|truncatewords:20|default:"Available as scanned pages." }}
+        </p>
+
+        {% if qasida.tags.all %}
+        <div class="flex flex-wrap gap-1.5 mt-3">
+            {% for tag in qasida.tags.all|slice:":3" %}
+            <a href="{% url 'browse' %}?tag={{ tag.name|urlencode }}" class="chip">{{ tag.name }}</a>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+</article>

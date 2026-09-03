@@ -1,0 +1,22 @@
+{% load i18n %}
+<h3 class="q-filter-head">{% translate 'Find' %}</h3>
+{% for choice in choices %}
+<form method="get" class="q-find">
+    {# Keep the other active filters when this form submits. #}
+    {% for key, value in choice.other_params %}
+    <input type="hidden" name="{{ key }}" value="{{ value }}">
+    {% endfor %}
+    {% for field in choice.fields %}
+    <label class="q-find-row">
+        <span>{{ field.label }}</span>
+        <input type="text" name="{{ field.name }}" value="{{ field.value }}" placeholder="{% translate 'contains…' %}">
+    </label>
+    {% endfor %}
+    <div class="q-find-actions">
+        <button type="submit" class="q-btn-primary">{% translate 'Apply' %}</button>
+        {% if choice.has_value %}
+        <a class="q-btn-quiet" href="?{% for key, value in choice.other_params %}{{ key }}={{ value }}&amp;{% endfor %}">{% translate 'Clear' %}</a>
+        {% endif %}
+    </div>
+</form>
+{% endfor %}

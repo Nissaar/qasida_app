@@ -1,0 +1,32 @@
+{% load i18n static %}
+<button class="sticky toggle-nav-sidebar" id="toggle-nav-sidebar" aria-label="{% translate 'Toggle navigation' %}"></button>
+<nav class="sticky" id="nav-sidebar" aria-label="{% translate 'Sidebar' %}">
+    {# The brand sits in the sidebar rather than a top bar, as in JewelMS. #}
+    <div class="q-brand">
+        <a href="{% url 'admin:index' %}" class="q-brand-mark">
+            <img src="{% static 'core/img/favicon-32.png' %}" alt="" width="26" height="26">
+            <span>QASIDA</span>
+        </a>
+    </div>
+
+    <input type="search" id="nav-filter"
+           placeholder="{% translate 'Start typing to filter…' %}"
+           aria-label="{% translate 'Filter navigation items' %}">
+
+    {% include 'admin/app_list.html' with app_list=available_apps show_changelinks=False %}
+
+    <div class="q-side-tools">
+        <a class="q-side-link" href="{% url 'admin:core_qasida_ocr_tool' %}">{% translate 'Extract text' %}</a>
+        <a class="q-side-link" href="/">{% translate 'View the site' %}</a>
+    </div>
+
+    {% if user.is_authenticated %}
+    <div class="q-side-user">
+        <span class="q-avatar">{{ user.get_username|slice:":1"|upper }}</span>
+        <span class="q-side-user-meta">
+            <b>{{ user.get_username }}</b>
+            <a href="{% url 'admin:logout' %}">{% translate 'Log out' %}</a>
+        </span>
+    </div>
+    {% endif %}
+</nav>

@@ -1,0 +1,85 @@
+{% extends 'core/base.html' %}
+
+{% block title %}{{ heading }} | Qasida Library{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-3 mb-5">
+    <div>
+        <h1 class="text-2xl font-bold tracking-tight">{{ heading }}</h1>
+        <p class="text-sm text-stone-500 dark:text-stone-400 mt-0.5">
+            <span class="font-semibold text-stone-700 dark:text-stone-200 tabular-nums">{{ total }}</span>
+            {% if has_filters %}of {{ library_total }} {% endif %}{{ total|pluralize:"work,works" }}
+        </p>
+    </div>
+    {% if has_filters %}
+    <a href="{% url 'browse' %}" class="btn-ghost">Clear filters</a>
+    {% endif %}
+</div>
+
+{% if has_filters %}
+<div class="flex flex-wrap items-center gap-2 mb-5">
+    {% if query %}<span class="chip-on">&ldquo;{{ query }}&rdquo;</span>{% endif %}
+    {% if lang_filter %}<a href="?{{ qs_without_lang }}" class="chip-on" title="Remove">{{ lang_filter }} &times;</a>{% endif %}
+    {% if tag_filter %}<a href="?{{ qs_without_tag }}" class="chip-on" title="Remove">{{ tag_filter }} &times;</a>{% endif %}
+</div>
+{% endif %}
+
+<div class="lg:grid lg:grid-cols-[16rem_1fr] lg:gap-6">
+    <!-- Filters: a sticky rail on desktop, a collapsed drawer on phones. -->
+    <aside class="mb-5 lg:mb-0">
+        <details class="card p-4 lg:hidden mb-4" {% if has_filters %}open{% endif %}>
+            <summary class="cursor-pointer font-medium text-sm flex items-center justify-between">
+                <span>Filters</span>
+                <svg class="h-4 w-4 text-stone-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+            </summary>
+            <div class="mt-4">{% include 'core/_facets.html' %}</div>
+        </details>
+        <div class="hidden lg:block lg:sticky lg:top-20 space-y-4">
+            {% include 'core/_facets.html' %}
+        </div>
+    </aside>
+
+    <div>
+        {% if page_obj.object_list %}
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+            {% for qasida in page_obj %}
+                {% include 'core/_qasida_card.html' %}
+            {% endfor %}
+        </div>
+
+        {% if page_obj.paginator.num_pages > 1 %}
+        <nav class="mt-8 flex items-center justify-between gap-3" aria-label="Pagination">
+            {% if page_obj.has_previous %}
+            <a href="?{{ querystring }}{% if querystring %}&amp;{% endif %}page={{ page_obj.previous_page_number }}" class="btn-ghost">&larr; Previous</a>
+            {% else %}<span class="btn-ghost opacity-40 pointer-events-none">&larr; Previous</span>{% endif %}
+
+            <span class="text-sm text-stone-500 dark:text-stone-400 tabular-nums">
+                Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+            </span>
+
+            {% if page_obj.has_next %}
+            <a href="?{{ querystring }}{% if querystring %}&amp;{% endif %}page={{ page_obj.next_page_number }}" class="btn-ghost">Next &rarr;</a>
+            {% else %}<span class="btn-ghost opacity-40 pointer-events-none">Next &rarr;</span>{% endif %}
+        </nav>
+        {% endif %}
+
+        {% else %}
+        <div class="card p-10 text-center">
+            <p class="text-4xl mb-3" aria-hidden="true">&#9906;</p>
+            {% if library_total == 0 %}
+            <h2 class="font-semibold text-lg">Nothing published yet</h2>
+            <p class="text-sm text-stone-500 dark:text-stone-400 mt-1 max-w-sm mx-auto">
+                Works are checked by an editor before they appear here. Please look again shortly.
+            </p>
+            {% else %}
+            <h2 class="font-semibold text-lg">Nothing matches</h2>
+            <p class="text-sm text-stone-500 dark:text-stone-400 mt-1 max-w-sm mx-auto">
+                No work matches this combination. Try removing a filter, or search the whole library.
+            </p>
+            <a href="{% url 'browse' %}" class="btn-primary mt-5">Browse all {{ library_total }}</a>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

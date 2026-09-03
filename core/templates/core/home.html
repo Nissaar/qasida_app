@@ -1,33 +1,116 @@
 {% extends 'core/base.html' %}
 
 {% block content %}
-<div class="text-center py-10">
-    <h1 class="text-4xl font-bold text-emerald-800 mb-4">Welcome to Qasida Library</h1>
-    <p class="text-lg text-gray-600 mb-8">Discover naats, qasidas, madih, and manqabat in multiple languages.</p>
-    
-    <form action="{% url 'search' %}" method="get" class="max-w-xl mx-auto flex">
-        <input type="text" name="q" placeholder="Search lyrics, titles, or authors..." class="flex-grow p-3 border border-gray-300 rounded-l-md focus:outline-none focus:ring-2 focus:ring-emerald-500">
-        <button type="submit" class="bg-emerald-600 text-white p-3 rounded-r-md hover:bg-emerald-700 transition">Search</button>
-    </form>
-</div>
+<section class="text-center pt-6 pb-10">
+    <h1 class="text-3xl sm:text-5xl font-bold tracking-tight text-brand-900 dark:text-brand-100">Qasida Library</h1>
+    <p dir="rtl" lang="ar" class="font-naskh text-xl sm:text-2xl text-brand-700 dark:text-brand-300 mt-2">مكتبة القصائد</p>
+    <p class="mt-4 text-stone-600 dark:text-stone-400 max-w-xl mx-auto">
+        Naats, qasidas, madih and manqabat &mdash; searchable in Arabic and Urdu, readable offline.
+    </p>
 
-<div class="mt-8">
-    <h2 class="text-2xl font-semibold mb-4">Recently Added</h2>
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {% for qasida in qasidas %}
-        <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-            <h3 class="text-xl font-semibold text-emerald-700"><a href="{% url 'qasida_detail' qasida.id %}">{{ qasida.title|default:"Untitled Qasida" }}</a></h3>
-            <p class="text-sm text-gray-500 mb-2">{{ qasida.author|default:"Unknown Author" }} &bull; {{ qasida.language|default:"Unknown Lang" }}</p>
-            <p class="text-gray-700 line-clamp-3 mb-4">{{ qasida.lyrics|truncatewords:20 }}</p>
-            <div class="flex flex-wrap gap-2">
-                {% for tag in qasida.tags.all %}
-                    <span class="bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded">{{ tag.name }}</span>
-                {% endfor %}
-            </div>
+    <form action="{% url 'search' %}" method="get" role="search" class="mt-7 max-w-xl mx-auto">
+        <div class="relative">
+            <svg class="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-stone-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <label for="hero-q" class="sr-only">Search the library</label>
+            <input id="hero-q" type="search" name="q" dir="auto" placeholder="Search a line, a title or an author&hellip;"
+                   class="input pl-11 pr-28 py-3.5 text-base rounded-2xl shadow-soft">
+            <button type="submit" class="btn-primary absolute right-1.5 top-1/2 -translate-y-1/2">Search</button>
         </div>
-        {% empty %}
-        <p class="text-gray-500">No qasidas found.</p>
+        <p class="text-xs text-stone-500 dark:text-stone-400 mt-2">Arabic can be typed without vowel marks.</p>
+    </form>
+
+    <div class="flex flex-wrap justify-center gap-2 mt-6">
+        <a href="{% url 'browse' %}" class="btn-primary">Browse all {{ library_total }}</a>
+        {% for entry in languages %}
+        <a href="{% url 'browse' %}?lang={{ entry.language|urlencode }}" class="btn-ghost">
+            {{ entry.language }} <span class="opacity-60 tabular-nums">{{ entry.n }}</span>
+        </a>
+        {% endfor %}
+        <a href="{% url 'random_qasida' %}" class="btn-ghost">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.4" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1.4" fill="currentColor"/><circle cx="15.5" cy="8.5" r="1.4" fill="currentColor"/><circle cx="8.5" cy="15.5" r="1.4" fill="currentColor"/></svg>
+            Open something at random
+        </a>
+    </div>
+</section>
+
+{% if poets %}
+<section class="mb-10">
+    <div class="flex items-baseline justify-between gap-3 mb-3">
+        <h2 class="text-xl font-semibold">Poets</h2>
+        <span class="text-xs text-stone-400">by number of works held</span>
+    </div>
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+        {% for entry in poets %}
+        <a href="{% url 'poet' entry.author %}" class="card-link p-4 flex items-center gap-3">
+            <span class="shrink-0 h-9 w-9 rounded-full bg-brand-100 dark:bg-brand-900 text-brand-800 dark:text-brand-200 grid place-items-center text-sm font-semibold">
+                {{ entry.author|slice:":1"|upper }}
+            </span>
+            <span class="min-w-0">
+                <span dir="auto" class="block text-sm font-medium truncate">{{ entry.author }}</span>
+                <span class="block text-xs text-stone-500 dark:text-stone-400 tabular-nums">{{ entry.n }} works</span>
+            </span>
+        </a>
         {% endfor %}
     </div>
-</div>
+</section>
+{% endif %}
+
+{% if forms %}
+<section class="mb-10">
+    <h2 class="text-xl font-semibold mb-3">By form</h2>
+    <div class="flex flex-wrap gap-2">
+        {% for tag in forms %}
+        <a href="{% url 'browse' %}?tag={{ tag.name|urlencode }}" class="chip">
+            {{ tag.label }} <span class="opacity-50 tabular-nums">{{ tag.n }}</span>
+        </a>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+{% if maqamat %}
+<section class="mb-10">
+    <div class="flex items-baseline justify-between gap-3 mb-3">
+        <h2 class="text-xl font-semibold">By maqam</h2>
+        <span class="text-xs text-stone-400">the melodic mode it is sung in</span>
+    </div>
+    <div class="flex flex-wrap gap-2">
+        {% for tag in maqamat %}
+        <a href="{% url 'browse' %}?tag={{ tag.name|urlencode }}" class="chip">
+            {{ tag.label }} <span class="opacity-50 tabular-nums">{{ tag.n }}</span>
+        </a>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+{% for group in featured_groups %}
+<section class="mb-10">
+    <div class="flex items-baseline justify-between gap-3 mb-4">
+        <h2 class="text-xl font-semibold">Substantial works in {{ group.language }}</h2>
+        <a href="{% url 'browse' %}?lang={{ group.language|urlencode }}" class="text-sm font-medium text-brand-700 dark:text-brand-300 hover:underline">
+            All {{ group.total }} &rarr;
+        </a>
+    </div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {% for qasida in group.works %}
+            {% include 'core/_qasida_card.html' %}
+        {% endfor %}
+    </div>
+</section>
+{% endfor %}
+
+{% if transliterated_count %}
+<section class="mb-6">
+    <div class="card p-5 sm:flex sm:items-center sm:justify-between gap-4">
+        <div>
+            <h2 class="font-semibold">Can't read the script?</h2>
+            <p class="text-sm text-stone-500 dark:text-stone-400 mt-0.5">
+                {{ transliterated_count }} works carry a Latin transliteration alongside the original.
+            </p>
+        </div>
+        <a href="{% url 'browse' %}?tag=transliterated" class="btn-primary mt-3 sm:mt-0 shrink-0">Show them</a>
+    </div>
+</section>
+{% endif %}
 {% endblock %}

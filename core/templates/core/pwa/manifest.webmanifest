@@ -1,0 +1,22 @@
+{% load static %}{
+  "name": "Qasida Library",
+  "short_name": "Qasida",
+  "description": "Naats, qasidas, madih and manqabat in Arabic and Urdu.",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f6f5f1",
+  "theme_color": "#046c4e",
+  "lang": "en",
+  "dir": "auto",
+  "categories": ["books", "education", "music"],
+  "icons": [
+    { "src": "{% static 'core/img/icon-192.png' %}", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "{% static 'core/img/icon-512.png' %}", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "{% static 'core/img/icon-maskable-512.png' %}", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Browse the library", "short_name": "Browse", "url": "/browse/" },
+    { "name": "Search", "short_name": "Search", "url": "/search/" }
+  ]
+}

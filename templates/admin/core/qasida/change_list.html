@@ -1,0 +1,12 @@
+{% extends "admin/change_list.html" %}
+{% load i18n %}
+
+{# Put the OCR bench next to Add, which is where an editor looks for tools. #}
+{% block object-tools-items %}
+<li>
+    <a href="{% url 'admin:core_qasida_ocr_tool' %}" class="addlink" style="background-image:none; padding-left:16px;">
+        {% translate 'Extract text from a PDF or image' %}
+    </a>
+</li>
+{{ block.super }}
+{% endblock %}

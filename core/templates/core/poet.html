@@ -1,0 +1,35 @@
+{% extends 'core/base.html' %}
+
+{% block title %}{{ poet_name }} | Qasida Library{% endblock %}
+
+{% block content %}
+<nav class="mb-4 text-sm">
+    <a href="{% url 'home' %}" class="text-stone-500 dark:text-stone-400 hover:text-brand-700 dark:hover:text-brand-300">&larr; Home</a>
+</nav>
+
+<header class="flex items-center gap-4 mb-6">
+    <span class="shrink-0 h-14 w-14 rounded-full bg-brand-100 dark:bg-brand-900 text-brand-800 dark:text-brand-200 grid place-items-center text-xl font-semibold">
+        {{ poet_name|slice:":1"|upper }}
+    </span>
+    <div>
+        <h1 dir="auto" class="text-2xl font-bold tracking-tight">{{ poet_name }}</h1>
+        <p class="text-sm text-stone-500 dark:text-stone-400 tabular-nums">{{ total }} work{{ total|pluralize }}</p>
+    </div>
+</header>
+
+{% if page_obj.object_list %}
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+    {% for qasida in page_obj %}{% include 'core/_qasida_card.html' %}{% endfor %}
+</div>
+
+{% if page_obj.paginator.num_pages > 1 %}
+<nav class="mt-8 flex items-center justify-between gap-3" aria-label="Pagination">
+    {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}" class="btn-ghost">&larr; Previous</a>{% else %}<span class="btn-ghost opacity-40 pointer-events-none">&larr; Previous</span>{% endif %}
+    <span class="text-sm text-stone-500 dark:text-stone-400 tabular-nums">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+    {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}" class="btn-ghost">Next &rarr;</a>{% else %}<span class="btn-ghost opacity-40 pointer-events-none">Next &rarr;</span>{% endif %}
+</nav>
+{% endif %}
+{% else %}
+<p class="card p-8 text-center text-stone-500">Nothing attributed to this name.</p>
+{% endif %}
+{% endblock %}

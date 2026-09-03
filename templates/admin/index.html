@@ -1,0 +1,84 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block coltype %}colMS{% endblock %}
+{% block bodyclass %}{{ block.super }} dashboard{% endblock %}
+{% block breadcrumbs %}{% endblock %}
+
+{% block content %}
+<div id="content-main" class="q-dash">
+
+    {# Figures worth knowing on arrival, as plain text rather than in a frame. #}
+    <div class="q-stats">
+        <div><b>{{ library_total }}</b><span>{% translate 'works' %}</span></div>
+        <div><b>{{ library_pending }}</b><span>{% translate 'awaiting review' %}</span></div>
+        <div><b>{{ library_scans }}</b><span>{% translate 'scanned pages' %}</span></div>
+        <div><b>{{ library_tags }}</b><span>{% translate 'tags in use' %}</span></div>
+    </div>
+
+    {# A flat grid: no outer card, so cards are not nested inside cards. #}
+    <h2 class="q-section">{% translate 'Tools' %}</h2>
+    <div class="q-tools">
+        <a class="q-tool" href="{% url 'admin:core_qasida_changelist' %}?review_state__exact=pending">
+            <strong>{% translate 'Review queue' %}</strong>
+            <span>{% blocktranslate count counter=library_pending %}{{ counter }} work waiting. Nothing is public until approved.{% plural %}{{ counter }} works waiting. Nothing is public until approved.{% endblocktranslate %}</span>
+        </a>
+        <a class="q-tool" href="{% url 'admin:core_qasida_ocr_tool' %}">
+            <strong>{% translate 'Extract text' %}</strong>
+            <span>{% translate 'Read a PDF or screenshot with OCR, then paste it in.' %}</span>
+        </a>
+        <a class="q-tool" href="{% url 'admin:core_suggestion_changelist' %}?is_reviewed__exact=0">
+            <strong>{% translate 'Reader suggestions' %}</strong>
+            <span>{% translate 'Corrections sent in from the public site.' %}</span>
+        </a>
+        <a class="q-tool" href="{% url 'admin:core_sourcewebsite_changelist' %}">
+            <strong>{% translate 'Crawl sources' %}</strong>
+            <span>{% translate 'Sites the crawlers read, and what each has produced.' %}</span>
+        </a>
+    </div>
+
+    {# One borderless list instead of a card per app. #}
+    <h2 class="q-section">{% translate 'Manage' %}</h2>
+    <div class="q-manage">
+        {% for app in app_list %}
+        {% for model in app.models %}
+        <div class="q-manage-row">
+            {% if model.admin_url %}
+            <a class="q-manage-name" href="{{ model.admin_url }}">{{ model.name }}</a>
+            {% else %}
+            <span class="q-manage-name">{{ model.name }}</span>
+            {% endif %}
+            <span class="q-manage-app">{{ app.name }}</span>
+            {% if model.add_url %}
+            <a class="q-manage-add" href="{{ model.add_url }}">{% translate 'New' %}</a>
+            {% endif %}
+        </div>
+        {% endfor %}
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
+
+{% block sidebar %}
+<div id="content-related" class="q-aside">
+    <h2 class="q-section">{% translate 'Recent activity' %}</h2>
+    {% load log %}
+    {% get_admin_log 12 as admin_log for_user user %}
+    {% if not admin_log %}
+    <p class="q-empty">{% translate 'Nothing yet.' %}</p>
+    {% else %}
+    <ul class="q-activity">
+        {% for entry in admin_log %}
+        <li>
+            {% if entry.is_deletion or not entry.get_admin_url %}
+            <span>{{ entry.object_repr }}</span>
+            {% else %}
+            <a href="{{ entry.get_admin_url }}">{{ entry.object_repr }}</a>
+            {% endif %}
+            <em>{{ entry.content_type.name|capfirst }}{% if entry.is_addition %} · added{% elif entry.is_change %} · changed{% elif entry.is_deletion %} · deleted{% endif %}</em>
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+</div>
+{% endblock %}

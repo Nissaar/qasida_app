@@ -1,53 +1,322 @@
 {% extends 'core/base.html' %}
+{% load qasida_extras %}
+
+{% block title %}{{ qasida.title|default:"Qasida" }} | Qasida Library{% endblock %}
 
 {% block content %}
-<div class="bg-white p-8 rounded-lg shadow-sm">
-    <h1 class="text-3xl font-bold text-emerald-800 mb-2">{{ qasida.title|default:"Untitled Qasida" }}</h1>
-    <div class="text-gray-600 mb-6 flex gap-4">
-        <span><strong>Author:</strong> {{ qasida.author|default:"Unknown" }}</span>
-        <span><strong>Language:</strong> {{ qasida.language|default:"Unknown" }}</span>
-        {% if qasida.source_url %}
-            <span><strong>Source:</strong> <a href="{{ qasida.source_url }}" target="_blank" class="text-blue-500 hover:underline">Link</a></span>
-        {% endif %}
-    </div>
+<nav class="mb-4 text-sm">
+    <a href="{% url 'browse' %}" class="text-stone-500 dark:text-stone-400 hover:text-brand-700 dark:hover:text-brand-300">&larr; Back to the library</a>
+</nav>
 
-    <div class="mb-6">
-        <h2 class="text-lg font-semibold mb-2">Tags</h2>
-        <div class="flex flex-wrap gap-2">
-            {% for tag in qasida.tags.all %}
-                <span class="bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full text-sm">{{ tag.name }}</span>
-            {% empty %}
-                <span class="text-gray-500 text-sm">No tags available.</span>
-            {% endfor %}
+<div class="lg:grid lg:grid-cols-[1fr_18rem] lg:gap-6 lg:items-start">
+    <div>
+        <header class="card p-6 mb-5">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="min-w-0">
+                    <h1 dir="auto" class="text-2xl sm:text-3xl font-bold tracking-tight text-brand-900 dark:text-brand-100">
+                        {{ qasida.title|default:"Untitled qasida" }}
+                    </h1>
+                    {% if qasida.arabic_title %}
+                    <p dir="rtl" lang="ar" class="font-naskh text-2xl text-brand-700 dark:text-brand-300 mt-1 leading-relaxed">{{ qasida.arabic_title }}</p>
+                    {% endif %}
+                    {% if qasida.author %}
+                    <p dir="auto" class="text-sm text-stone-500 dark:text-stone-400 mt-2">{{ qasida.author }}</p>
+                    {% endif %}
+                </div>
+                {% if user.is_staff %}
+                <a href="{% url 'qasida_edit' qasida.pk %}" class="btn-primary shrink-0">
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 20h4L20 8l-4-4L4 16Z"/></svg>
+                    Edit
+                </a>
+                {% endif %}
+            </div>
+        </header>
+
+        {% if qasida.text_quality != 'ok' %}
+        <div class="rounded-2xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/60 p-4 mb-5">
+            <p class="font-semibold text-amber-900 dark:text-amber-100 flex items-center gap-2">
+                <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg>
+                {% if qasida.text_quality == 'ocr' %}This text was reconstructed automatically{% else %}This text is unreliable{% endif %}
+            </p>
+            <p class="text-sm text-amber-800 dark:text-amber-200 mt-1.5">
+                {% if qasida.text_quality == 'ocr' %}
+                    The source publishes this qasida as a document whose text could not be read in
+                    order, so it was rebuilt from the page layout. Word breaks in particular may be
+                    wrong &mdash; check it against the scanned pages.
+                {% else %}
+                    The source publishes this qasida as a document whose text could not be read
+                    accurately. Please read the scanned pages, which are the original.
+                {% endif %}
+            </p>
         </div>
+        {% endif %}
+
+        {% if qasida.media.all %}
+        <section class="card p-5 mb-5" id="recordings">
+            <h2 class="eyebrow mb-3">Recordings</h2>
+
+            {# Nothing is requested from YouTube until a reader presses play. #}
+            <div id="player-slot" class="relative rounded-xl overflow-hidden bg-stone-900 aspect-video">
+                {% with first=qasida.media.first %}
+                <button type="button" class="play-trigger group absolute inset-0 w-full h-full"
+                        data-embed="{{ first.embed_url }}" aria-label="Play {{ first.title|default:'recording' }}">
+                    {% if first.thumbnail_url %}
+                    <img src="{{ first.thumbnail_url }}" alt="" loading="lazy"
+                         class="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition">
+                    {% endif %}
+                    <span class="absolute inset-0 grid place-items-center">
+                        <span class="h-16 w-16 rounded-full bg-white/90 grid place-items-center shadow-lift group-hover:scale-105 transition">
+                            <svg class="h-7 w-7 text-brand-800 ml-1" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+                        </span>
+                    </span>
+                </button>
+                {% endwith %}
+            </div>
+
+            {% if qasida.media.count > 1 %}
+            <ul class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {% for item in qasida.media.all %}
+                <li>
+                    <button type="button"
+                            class="recording-pick w-full text-left flex items-center gap-3 rounded-xl border border-stone-200 dark:border-stone-700 p-2 hover:border-brand-400 transition"
+                            data-embed="{{ item.embed_url }}">
+                        {% if item.thumbnail_url %}
+                        <img src="{{ item.thumbnail_url }}" alt="" loading="lazy" class="h-12 w-20 object-cover rounded-lg shrink-0">
+                        {% endif %}
+                        <span class="min-w-0">
+                            <span class="block text-sm font-medium truncate">{{ item.title|default:"Recording" }}</span>
+                            <span class="block text-xs text-stone-500 dark:text-stone-400">{{ forloop.counter }} of {{ qasida.media.count }}</span>
+                        </span>
+                    </button>
+                </li>
+                {% endfor %}
+            </ul>
+            {% elif qasida.media.first.title %}
+            <p class="text-sm text-stone-500 dark:text-stone-400 mt-2">{{ qasida.media.first.title }}</p>
+            {% endif %}
+        </section>
+        {% endif %}
+
+        {% if qasida.images.all %}
+        <section class="card p-5 mb-5">
+            <h2 class="eyebrow mb-3">Scanned pages</h2>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {% for scan in qasida.images.all %}
+                <figure>
+                    <a href="{{ scan.image.url }}" target="_blank" rel="noopener"
+                       class="block rounded-xl overflow-hidden border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 hover:border-brand-400 transition">
+                        <img src="{{ scan.image.url }}" loading="lazy" decoding="async"
+                             alt="{{ scan.caption|default:'Scanned page' }} of {{ qasida.title }}" class="w-full h-auto">
+                    </a>
+                    {% if scan.caption %}
+                    <figcaption class="text-xs text-center text-stone-500 dark:text-stone-400 mt-1.5">{{ scan.caption }}</figcaption>
+                    {% endif %}
+                </figure>
+                {% endfor %}
+            </div>
+            <p class="text-xs text-stone-400 dark:text-stone-500 mt-3">Open any page to view it full size.</p>
+        </section>
+        {% endif %}
+
+        {% if qasida.lyrics|length > 1 %}
+        <section class="card p-6 mb-5" id="lyrics">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+                <h2 class="eyebrow">Lyrics</h2>
+                <div class="flex items-center gap-2">
+                    {% if qasida.text_quality == 'ocr' %}<span class="badge-warn">reconstructed</span>{% endif %}
+                    {% if qasida.transliteration %}
+                    <button type="button" id="latin-toggle" class="btn-ghost py-1 px-2.5 text-xs"
+                            aria-pressed="true" aria-controls="lyrics">Hide Latin</button>
+                    {% endif %}
+                    {% if qasida|translation_is_aligned %}
+                    <button type="button" id="translation-toggle" class="btn-ghost py-1 px-2.5 text-xs"
+                            aria-pressed="true" aria-controls="lyrics">Hide translation</button>
+                    {% endif %}
+                </div>
+            </div>
+
+            {# One block per stanza: the original, then its Latin script, then
+               its translation - each layer only where it lines up. #}
+            <div class="divide-y divide-stone-100 dark:divide-stone-800">
+                {% for row in qasida|stanza_rows %}
+                <div class="py-5 first:pt-0 last:pb-0">
+                    <div dir="auto" lang="{{ qasida.language|lower }}" class="prose-lyrics">{{ row.original }}</div>
+                    {% if row.latin %}
+                    <div dir="ltr" class="latin-block mt-2.5 max-w-3xl whitespace-pre-line text-sm sm:text-base text-stone-500 dark:text-stone-400 leading-relaxed">{{ row.latin }}</div>
+                    {% endif %}
+                    {% if row.translation %}
+                    <div dir="ltr" class="translation-block mt-2.5 max-w-3xl pl-3 border-l-2 border-brand-200 dark:border-brand-800 whitespace-pre-line text-sm sm:text-base text-stone-600 dark:text-stone-300 leading-relaxed italic">{{ row.translation }}</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+        {% elif not qasida.images.all %}
+        <div class="card p-8 text-center text-stone-500 dark:text-stone-400 mb-5">
+            <p>No lyrics have been recorded for this qasida yet.</p>
+        </div>
+        {% endif %}
+
+        {% if qasida.translation and not qasida|translation_is_aligned %}
+        <section class="card p-6 mb-5" id="translation">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <h2 class="eyebrow">Translation</h2>
+                <span class="text-xs {% if qasida.translation_origin == 'machine' %}text-amber-700 dark:text-amber-300{% else %}text-stone-400 dark:text-stone-500{% endif %}">
+                    {% if qasida.translation_origin == 'machine' %}
+                        machine translated &mdash; may be inaccurate
+                    {% else %}
+                        as published by the source
+                    {% endif %}
+                </span>
+            </div>
+            {# Stanza counts do not always match the original, so this is shown
+               as its own passage rather than paired verse by verse. #}
+            <div dir="auto" class="max-w-3xl whitespace-pre-line text-base sm:text-lg leading-relaxed text-stone-700 dark:text-stone-200">{{ qasida.translation }}</div>
+        </section>
+        {% endif %}
+
+        <details class="card p-5">
+            <summary class="cursor-pointer font-semibold flex items-center justify-between">
+                <span>Suggest a correction</span>
+                <svg class="h-4 w-4 text-stone-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+            </summary>
+            <p class="text-sm text-stone-500 dark:text-stone-400 mt-2 mb-4">
+                Corrections are reviewed before they are published. Your email is only used to follow up.
+            </p>
+            <form method="post" class="space-y-4">
+                {% csrf_token %}
+                <div>
+                    <label for="s-email" class="block text-sm font-medium mb-1">Your email <span class="text-stone-400">(required)</span></label>
+                    <input id="s-email" type="email" name="email" required class="input">
+                </div>
+                <div>
+                    <label for="s-lyrics" class="block text-sm font-medium mb-1">Corrected lyrics</label>
+                    <textarea id="s-lyrics" name="suggested_lyrics" rows="10" dir="auto" class="input font-naskh leading-loose">{{ qasida.lyrics }}</textarea>
+                </div>
+                <div>
+                    <label for="s-tags" class="block text-sm font-medium mb-1">Tags to add</label>
+                    <input id="s-tags" type="text" name="suggested_tags" placeholder="comma separated" class="input">
+                </div>
+                <button type="submit" class="btn-primary">Submit suggestion</button>
+            </form>
+        </details>
     </div>
 
-    <div class="prose max-w-none mb-10 whitespace-pre-line text-lg leading-relaxed text-gray-800 bg-gray-50 p-6 rounded border border-gray-100">
-{{ qasida.lyrics }}
-    </div>
+    <aside class="mt-5 lg:mt-0 space-y-4 lg:sticky lg:top-20">
+        <div class="card p-5">
+            <h2 class="eyebrow mb-3">Details</h2>
+            <dl class="space-y-2.5 text-sm">
+                <div class="flex justify-between gap-3">
+                    <dt class="text-stone-500 dark:text-stone-400">Language</dt>
+                    <dd class="font-medium">{{ qasida.language|default:"Unknown" }}</dd>
+                </div>
+                {% if qasida.author %}
+                <div class="flex justify-between gap-3">
+                    <dt class="text-stone-500 dark:text-stone-400">Author</dt>
+                    <dd dir="auto" class="font-medium text-right">{{ qasida.author }}</dd>
+                </div>
+                {% endif %}
+                <div class="flex justify-between gap-3">
+                    <dt class="text-stone-500 dark:text-stone-400">Text</dt>
+                    <dd class="font-medium">{{ qasida.get_text_quality_display }}</dd>
+                </div>
+                {% if qasida.translation %}
+                <div class="flex justify-between gap-3">
+                    <dt class="text-stone-500 dark:text-stone-400">Translation</dt>
+                    <dd class="font-medium text-right">{{ qasida.get_translation_origin_display }}</dd>
+                </div>
+                {% endif %}
+                {% if qasida.images.count %}
+                <div class="flex justify-between gap-3">
+                    <dt class="text-stone-500 dark:text-stone-400">Scans</dt>
+                    <dd class="font-medium tabular-nums">{{ qasida.images.count }}</dd>
+                </div>
+                {% endif %}
+                {% if qasida.source_url %}
+                <div class="pt-2 border-t border-stone-100 dark:border-stone-800">
+                    <a href="{{ qasida.source_url }}" target="_blank" rel="noopener"
+                       class="text-brand-700 dark:text-brand-300 hover:underline inline-flex items-center gap-1">
+                        View the original
+                        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 5h5v5M19 5l-7 7M11 5H6a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-5"/></svg>
+                    </a>
+                </div>
+                {% endif %}
+            </dl>
+        </div>
 
-    <hr class="my-8">
-
-    <div class="bg-gray-50 p-6 rounded">
-        <h2 class="text-2xl font-semibold mb-4">Suggest an Edit</h2>
-        <p class="text-sm text-gray-600 mb-4">Have corrections for the lyrics or suggestions for tags? Let us know!</p>
-        
-        <form method="post">
-            {% csrf_token %}
-            <div class="mb-4">
-                <label class="block text-sm font-medium mb-1">Your Email (Required)</label>
-                <input type="email" name="email" required class="w-full p-2 border rounded focus:ring-emerald-500 focus:border-emerald-500">
+        {% if qasida.tags.all %}
+        <div class="card p-5">
+            <h2 class="eyebrow mb-3">Tags</h2>
+            <div class="flex flex-wrap gap-1.5">
+                {% for tag in qasida.tags.all %}
+                <a href="{% url 'browse' %}?tag={{ tag.name|urlencode }}" class="chip">{{ tag.name }}</a>
+                {% endfor %}
             </div>
-            <div class="mb-4">
-                <label class="block text-sm font-medium mb-1">Suggested Lyrics</label>
-                <textarea name="suggested_lyrics" rows="6" class="w-full p-2 border rounded focus:ring-emerald-500 focus:border-emerald-500">{{ qasida.lyrics }}</textarea>
-            </div>
-            <div class="mb-4">
-                <label class="block text-sm font-medium mb-1">Suggest Tags (Comma separated)</label>
-                <input type="text" name="suggested_tags" placeholder="e.g. shadhili, arabic, spiritual" class="w-full p-2 border rounded focus:ring-emerald-500 focus:border-emerald-500">
-            </div>
-            <button type="submit" class="bg-emerald-600 text-white px-6 py-2 rounded hover:bg-emerald-700 transition">Submit Suggestion</button>
-        </form>
-    </div>
+        </div>
+        {% endif %}
+    </aside>
 </div>
+
+{% if qasida.media.all %}
+<script>
+(function () {
+    var slot = document.getElementById('player-slot');
+    if (!slot) return;
+
+    function load(embed) {
+        if (!embed) return;
+        var frame = document.createElement('iframe');
+        frame.src = embed + '?autoplay=1&rel=0';
+        frame.title = 'Recording';
+        frame.allow = 'accelerometer; autoplay; encrypted-media; picture-in-picture';
+        frame.allowFullscreen = true;
+        frame.className = 'absolute inset-0 w-full h-full border-0';
+        slot.textContent = '';
+        slot.appendChild(frame);
+    }
+
+    slot.addEventListener('click', function (event) {
+        var trigger = event.target.closest('.play-trigger');
+        if (trigger) load(trigger.dataset.embed);
+    });
+
+    document.querySelectorAll('.recording-pick').forEach(function (button) {
+        button.addEventListener('click', function () {
+            load(button.dataset.embed);
+            slot.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+        });
+    });
+})();
+</script>
+{% endif %}
+
+{% if qasida.transliteration or qasida.translation %}
+<script>
+(function () {
+    /* Each layer toggles independently and the choice is remembered. */
+    [
+        {button: 'latin-toggle', selector: '.latin-block', key: 'showLatin', label: 'Latin'},
+        {button: 'translation-toggle', selector: '.translation-block', key: 'showTranslation', label: 'translation'}
+    ].forEach(function (layer) {
+        var button = document.getElementById(layer.button);
+        if (!button) return;
+        var blocks = document.querySelectorAll(layer.selector);
+        if (!blocks.length) return;
+        function apply(show) {
+            blocks.forEach(function (b) { b.hidden = !show; });
+            button.textContent = (show ? 'Hide ' : 'Show ') + layer.label;
+            button.setAttribute('aria-pressed', show ? 'true' : 'false');
+        }
+        var show = true;
+        try { show = localStorage.getItem(layer.key) !== '0'; } catch (e) { /* default on */ }
+        apply(show);
+        button.addEventListener('click', function () {
+            show = !show;
+            apply(show);
+            try { localStorage.setItem(layer.key, show ? '1' : '0'); } catch (e) { /* ignore */ }
+        });
+    });
+})();
+</script>
+{% endif %}
 {% endblock %}

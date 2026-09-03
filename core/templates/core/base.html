@@ -1,37 +1,256 @@
-<!DOCTYPE html>
-<html lang="en">
+{% load static %}<!DOCTYPE html>
+<html lang="en" class="h-full">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Qasida Library</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-100 text-gray-800 font-sans min-h-screen flex flex-col">
-    <nav class="bg-emerald-700 text-white p-4 shadow-md">
-        <div class="container mx-auto flex justify-between items-center">
-            <a href="{% url 'home' %}" class="text-xl font-bold">Qasida Library</a>
-            <div>
-                <a href="{% url 'search' %}" class="hover:text-emerald-200">Search</a>
-            </div>
-        </div>
-    </nav>
-    
-    <main class="container mx-auto p-4 flex-grow">
-        {% if messages %}
-            <div class="mb-4">
-                {% for message in messages %}
-                    <div class="p-3 mb-2 rounded {% if message.tags == 'error' %}bg-red-200 text-red-800{% else %}bg-green-200 text-green-800{% endif %}">
-                        {{ message }}
-                    </div>
-                {% endfor %}
-            </div>
-        {% endif %}
-        
-        {% block content %}{% endblock %}
-    </main>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>{% block title %}Qasida Library{% endblock %}</title>
+    <meta name="description" content="Naats, qasidas, madih and manqabat in Arabic and Urdu.">
 
-    <footer class="bg-gray-800 text-gray-400 p-4 text-center mt-auto">
-        <p>&copy; 2024 Qasida Library. All rights reserved.</p>
-    </footer>
+    <link rel="manifest" href="{% url 'manifest' %}">
+    <meta name="theme-color" content="#065f46" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#0c0a09" media="(prefers-color-scheme: dark)">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Qasida">
+    <link rel="apple-touch-icon" href="{% static 'core/img/apple-touch-icon.png' %}">
+    <link rel="icon" href="{% static 'core/img/favicon-32.png' %}" sizes="32x32">
+
+    <!-- Resolve the theme before first paint, otherwise dark users see a white flash. -->
+    <script>
+        (function () {
+            try {
+                var saved = localStorage.getItem('theme');
+                var dark = saved ? saved === 'dark'
+                                 : window.matchMedia('(prefers-color-scheme: dark)').matches;
+                if (dark) document.documentElement.classList.add('dark');
+            } catch (e) { /* private mode: fall back to light */ }
+        })();
+    </script>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: { extend: {
+                colors: {
+                    paper: { light: '#faf9f7', dark: '#0c0a09' },
+                    brand: {
+                        50: '#ecfdf5', 100: '#d1fae5', 200: '#a7f3d0', 300: '#6ee7b7',
+                        400: '#34d399', 500: '#10b981', 600: '#059669', 700: '#047857',
+                        800: '#065f46', 900: '#064e3b',
+                    },
+                },
+                fontFamily: {
+                    sans: ['Inter', 'system-ui', 'sans-serif'],
+                    naskh: ['"Noto Naskh Arabic"', 'serif'],
+                },
+                boxShadow: {
+                    soft: '0 1px 2px rgba(28,25,23,.04), 0 8px 24px -12px rgba(28,25,23,.10)',
+                    lift: '0 2px 4px rgba(28,25,23,.06), 0 16px 32px -16px rgba(28,25,23,.18)',
+                },
+                borderRadius: { '2xl': '1rem', '3xl': '1.5rem' },
+            } },
+        };
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Naskh+Arabic:wght@400;500;700&display=swap" rel="stylesheet">
+
+    <style type="text/tailwindcss">
+        @layer components {
+            /* One card definition, used by every surface in the app. */
+            .card { @apply bg-white dark:bg-stone-900 rounded-2xl border border-stone-200/80 dark:border-stone-800 shadow-soft; }
+            .card-link { @apply card transition duration-200 hover:shadow-lift hover:-translate-y-0.5 hover:border-brand-300 dark:hover:border-brand-700; }
+
+            .btn { @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-stone-900; }
+            .btn-primary { @apply btn bg-brand-700 text-white hover:bg-brand-800 active:bg-brand-900; }
+            .btn-ghost { @apply btn border border-stone-300 dark:border-stone-700 text-stone-700 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800; }
+            .btn-quiet { @apply btn text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800; }
+
+            .input { @apply w-full rounded-xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950 px-3 py-2 text-sm text-stone-900 dark:text-stone-100 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500; }
+
+            .chip { @apply inline-flex items-center gap-1.5 rounded-full border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-1 text-xs font-medium text-stone-600 dark:text-stone-300 transition hover:border-brand-400 hover:text-brand-800 dark:hover:text-brand-200; }
+            .chip-on { @apply chip bg-brand-700 border-brand-700 text-white hover:text-white dark:bg-brand-700 dark:border-brand-700; }
+
+            .facet { @apply flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-sm text-stone-700 dark:text-stone-300 transition hover:bg-stone-100 dark:hover:bg-stone-800; }
+            .facet-on { @apply flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-sm bg-brand-700 text-white; }
+            .facet-count { @apply text-xs tabular-nums opacity-60; }
+
+            .eyebrow { @apply text-xs font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-500; }
+            .stat { @apply card px-4 py-3 text-center; }
+            .stat-value { @apply block text-2xl font-bold text-brand-800 dark:text-brand-300 tabular-nums; }
+            .stat-label { @apply block text-xs text-stone-500 dark:text-stone-400 mt-0.5; }
+
+            .badge-warn { @apply inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-950 px-2 py-0.5 text-xs font-medium text-amber-800 dark:text-amber-200; }
+            /* A readable measure: without a cap, a wide monitor stretches a
+               verse across the whole screen and RTL text drifts to the edge. */
+            .prose-lyrics { @apply font-naskh whitespace-pre-line text-lg sm:text-xl text-stone-800 dark:text-stone-100; line-height: 2.2; max-width: 46rem; }
+            .tabbar-item { @apply flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-medium text-stone-500 dark:text-stone-400 transition; }
+            .tabbar-on { @apply text-brand-700 dark:text-brand-300; }
+        }
+    </style>
+    <style>
+        /* Fluid root: Tailwind's sizes are all in rem, so the whole page scales
+           with the viewport instead of staying fixed on a wide monitor. rem
+           also follows the browser's own font size, so zoom and accessibility
+           settings are respected. */
+        html { font-size: clamp(15px, 0.22vw + 14px, 18px); }
+        /* Scraped text can contain very long unbroken runs. Without this they
+           refuse to wrap and push out of their container. */
+        body { overflow-wrap: anywhere; }
+        .prose-lyrics, .latin-block, .translation-block,
+        .qasida-lyrics, pre, code, td, th { overflow-wrap: anywhere; word-break: break-word; }
+        /* A flex or grid child will not shrink below its content unless told. */
+        main, main * { min-width: 0; }
+        img, svg, video, iframe, table { max-width: 100%; }
+        .prose-lyrics:dir(rtl) { text-align: right; }
+        [dir="auto"] { unicode-bidi: plaintext; }
+        /* Tailwind's utilities layer overrides Preflight's [hidden] rule for any
+           element carrying a display class (flex, grid, block). Without this the
+           hidden attribute silently does nothing. */
+        [hidden] { display: none !important; }
+        .safe-b { padding-bottom: env(safe-area-inset-bottom); }
+        .safe-t { padding-top: env(safe-area-inset-top); }
+        @media (display-mode: standalone) { .hide-in-app { display: none; } }
+        /* Scrollbars inside the filter rail should not shout. */
+        .thin-scroll::-webkit-scrollbar { width: 6px; }
+        .thin-scroll::-webkit-scrollbar-thumb { background: rgba(120,113,108,.35); border-radius: 3px; }
+    </style>
+</head>
+<body class="min-h-full flex flex-col bg-paper-light dark:bg-paper-dark text-stone-800 dark:text-stone-100 antialiased">
+
+<a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:m-2 focus:rounded-lg focus:bg-white focus:px-3 focus:py-2 focus:text-sm dark:focus:bg-stone-900">Skip to content</a>
+
+<header class="sticky top-0 z-30 safe-t bg-white/85 dark:bg-stone-950/85 backdrop-blur-md border-b border-stone-200/80 dark:border-stone-800">
+    <div class="mx-auto max-w-6xl 2xl:max-w-[88rem] px-4 sm:px-6 h-14 flex items-center gap-3">
+        <a href="{% url 'home' %}" class="flex items-center gap-2 shrink-0 font-semibold tracking-tight text-brand-900 dark:text-brand-200">
+            <img src="{% static 'core/img/favicon-32.png' %}" alt="" width="26" height="26" class="rounded-lg">
+            <span class="hidden xs:inline sm:inline">Qasida Library</span>
+        </a>
+
+        <form action="{% url 'search' %}" method="get" role="search" class="hidden md:flex flex-1 max-w-lg mx-auto">
+            <label for="hdr-q" class="sr-only">Search</label>
+            <div class="relative w-full">
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-stone-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                <input id="hdr-q" type="search" name="q" dir="auto" value="{{ query|default:'' }}"
+                       placeholder="Search a line, title or author&hellip;" class="input pl-9">
+            </div>
+        </form>
+
+        <nav class="ml-auto flex items-center gap-1 shrink-0">
+            <a href="{% url 'browse' %}" class="btn-quiet hidden sm:inline-flex">Browse</a>
+            {% if user.is_staff %}
+            {% if library_pending %}
+            <a href="/admin/core/qasida/?review_state__exact=pending" class="btn-quiet hidden sm:inline-flex">
+                <span class="badge-warn">{{ library_pending }} to review</span>
+            </a>
+            {% endif %}
+            <a href="{% url 'suggestion_inbox' %}" class="btn-quiet hidden sm:inline-flex">Suggestions</a>
+            <a href="/admin/" class="btn-quiet hidden lg:inline-flex hide-in-app">Admin</a>
+            {% endif %}
+            <button id="theme-toggle" type="button" class="btn-quiet px-2" aria-label="Switch between light and dark">
+                <svg class="h-5 w-5 dark:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+                <svg class="h-5 w-5 hidden dark:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19"/></svg>
+            </button>
+        </nav>
+    </div>
+</header>
+
+<main id="main" class="mx-auto w-full max-w-6xl 2xl:max-w-[88rem] px-4 sm:px-6 py-6 flex-grow pb-28 sm:pb-10">
+    {% if messages %}
+    <div class="mb-5 space-y-2">
+        {% for message in messages %}
+        <div class="rounded-xl px-4 py-3 text-sm {% if message.tags == 'error' %}bg-red-50 dark:bg-red-950 text-red-800 dark:text-red-200 border border-red-200 dark:border-red-900{% else %}bg-brand-50 dark:bg-brand-900/40 text-brand-900 dark:text-brand-100 border border-brand-200 dark:border-brand-800{% endif %}">
+            {{ message }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% block content %}{% endblock %}
+</main>
+
+<!-- Bottom tab bar: primary navigation on phones, where a top nav is out of thumb reach. -->
+<nav class="sm:hidden fixed bottom-0 inset-x-0 z-30 safe-b bg-white/95 dark:bg-stone-950/95 backdrop-blur-md border-t border-stone-200 dark:border-stone-800">
+    <div class="grid {% if user.is_staff %}grid-cols-4{% else %}grid-cols-3{% endif %}">
+        {% url 'home' as u_home %}{% url 'browse' as u_browse %}{% url 'search' as u_search %}
+        <a href="{{ u_home }}" class="tabbar-item {% if request.resolver_match.url_name == 'home' %}tabbar-on{% endif %}">
+            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/></svg>
+            Home
+        </a>
+        <a href="{{ u_browse }}" class="tabbar-item {% if request.resolver_match.url_name == 'browse' %}tabbar-on{% endif %}">
+            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="7" height="7" rx="1.5"/><rect x="14" y="4" width="7" height="7" rx="1.5"/><rect x="3" y="15" width="7" height="5" rx="1.5"/><rect x="14" y="15" width="7" height="5" rx="1.5"/></svg>
+            Browse
+        </a>
+        <a href="{{ u_search }}" class="tabbar-item {% if request.resolver_match.url_name == 'search' %}tabbar-on{% endif %}">
+            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            Search
+        </a>
+        {% if user.is_staff %}
+        <a href="{% url 'suggestion_inbox' %}" class="tabbar-item {% if request.resolver_match.url_name == 'suggestion_inbox' %}tabbar-on{% endif %}">
+            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 13h4l1.5 3h5L16 13h4"/><path d="M4 13 6.5 5h11L20 13v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1Z"/></svg>
+            Inbox
+        </a>
+        {% endif %}
+    </div>
+</nav>
+
+<footer class="hidden sm:block border-t border-stone-200 dark:border-stone-800 py-6 text-center text-sm text-stone-500 dark:text-stone-400">
+    <p>{{ library_total }} works &middot; {{ library_scans }} scanned pages &middot; {{ library_tags }} tags</p>
+    <p class="mt-1">Spotted a mistake? Every qasida page takes corrections.</p>
+</footer>
+
+<div id="install-banner" hidden class="fixed bottom-20 sm:bottom-4 inset-x-3 sm:inset-x-auto sm:right-4 sm:w-80 z-40 card p-3 flex items-center gap-3">
+    <img src="{% static 'core/img/favicon-32.png' %}" alt="" width="32" height="32" class="rounded-lg">
+    <p id="install-message" class="text-sm flex-grow leading-snug">Install the library for offline reading.</p>
+    <button id="install-dismiss" class="btn-quiet px-2" aria-label="Dismiss">&times;</button>
+    <button id="install-go" class="btn-primary py-1.5 px-3">Install</button>
+</div>
+
+<script>
+document.getElementById('theme-toggle').addEventListener('click', function () {
+    var dark = document.documentElement.classList.toggle('dark');
+    try { localStorage.setItem('theme', dark ? 'dark' : 'light'); } catch (e) { /* ignore */ }
+});
+
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+        navigator.serviceWorker.register('{% url "service_worker" %}').catch(function (e) {
+            console.warn('Service worker registration failed:', e);
+        });
+    });
+}
+
+/* Fired only when installable and not yet installed, so this cannot show for
+   someone who already added the app. */
+(function () {
+    var banner = document.getElementById('install-banner');
+    var message = document.getElementById('install-message');
+    var deferred = null;
+    var KEY = 'installBannerDismissed';
+    window.addEventListener('beforeinstallprompt', function (event) {
+        event.preventDefault();
+        deferred = event;
+        try { if (localStorage.getItem(KEY)) return; } catch (e) { /* show anyway */ }
+        banner.hidden = false;
+    });
+    document.getElementById('install-go').addEventListener('click', function () {
+        if (deferred) {
+            banner.hidden = true;
+            deferred.prompt();
+            deferred = null;
+            return;
+        }
+        /* No prompt to show - tell the reader how to install by hand rather
+           than appearing to do nothing. */
+        message.textContent = 'Use your browser menu, then "Install app" or "Add to Home Screen".';
+        document.getElementById('install-go').hidden = true;
+    });
+    document.getElementById('install-dismiss').addEventListener('click', function () {
+        banner.hidden = true;
+        try { localStorage.setItem(KEY, '1'); } catch (e) { /* ignore */ }
+    });
+    window.addEventListener('appinstalled', function () { banner.hidden = true; });
+})();
+</script>
 </body>
 </html>

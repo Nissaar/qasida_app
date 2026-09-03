@@ -6,3 +6,7 @@ beautifulsoup4==4.12.3
 requests==2.32.3
 gunicorn==22.0.0
 whitenoise==6.7.0
+pymupdf==1.28.2
+pillow==11.3.0
+pytesseract==0.3.13
+argostranslate==1.11.0

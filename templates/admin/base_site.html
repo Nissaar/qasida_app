@@ -1,0 +1,54 @@
+{% extends "admin/base.html" %}
+{% load static %}
+
+{% block title %}{% if subtitle %}{{ subtitle }} | {% endif %}{{ title }} | Qasida Library{% endblock %}
+
+{% block extrastyle %}
+{{ block.super }}
+<link rel="icon" href="{% static 'core/img/favicon-32.png' %}" sizes="32x32">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Naskh+Arabic:wght@400;600&display=swap" rel="stylesheet">
+<style>
+    /* The admin exposes its palette as custom properties, so rebranding is a
+       matter of redefining them rather than overriding rules. */
+    :root {
+        --primary: #047857;
+        --secondary: #047857;
+        --accent: #0e9f6e;
+        --primary-fg: #ffffff;
+        --header-color: #d1fae5;
+        --header-bg: #04543d;
+        --header-branding-color: #ffffff;
+        --header-link-color: #ffffff;
+        --breadcrumbs-fg: #065f46;
+        --breadcrumbs-link-fg: #04543d;
+        --breadcrumbs-bg: #d1fae5;
+        --link-fg: #047857;
+        --link-hover-color: #04543d;
+        --button-bg: #047857;
+        --button-hover-bg: #04543d;
+        --default-button-bg: #0e9f6e;
+        --default-button-hover-bg: #047857;
+        --font-family-primary: Inter, system-ui, sans-serif;
+    }
+</style>
+<!-- Loaded after the palette so its card styling wins over the stock slabs. -->
+<link rel="stylesheet" href="{% static 'core/css/admin.css' %}">
+{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<script src="{% static 'core/js/admin.js' %}" defer></script>
+{% endblock %}
+
+{% block branding %}
+<h1 id="site-name">
+    <a href="{% url 'admin:index' %}">
+        <img src="{% static 'core/img/favicon-32.png' %}" alt="" width="24" height="24"
+             style="vertical-align:-6px; margin-right:.5rem; border-radius:6px;">
+        Qasida Library administration
+    </a>
+</h1>
+{% endblock %}
+
+{# The sidebar carries the brand, navigation, tools and the signed-in user,
+   so the top bar is left to Django's own controls rather than repeating them. #}
