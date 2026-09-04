@@ -78,9 +78,34 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.qasida.rule=Host(`${SITE_HOST}`)"
+      - "traefik.http.routers.qasida.priority=1"
       - "traefik.http.routers.qasida.entrypoints=websecure"
       - "traefik.http.routers.qasida.tls.certresolver=leresolver"
       - "traefik.http.services.qasida.loadbalancer.server.port=8000"
+      - "traefik.docker.network=frontend"
+
+  # Scanned pages are static files, and Django holding a gunicorn worker open
+  # to hand one over is wasteful. Traefik routes /media/* here instead.
+  media:
+    image: nginx:alpine
+    restart: always
+    networks:
+      - frontend
+    expose:
+      - 80
+    volumes:
+      # Read-only: only the web and worker containers write scans.
+      - ./media:/usr/share/nginx/html/media:ro
+      - ./nginx/media.conf:/etc/nginx/conf.d/default.conf:ro
+    labels:
+      - "traefik.enable=true"
+      # A higher priority than the Django router, so /media/* is matched here
+      # and everything else falls through to the app.
+      - "traefik.http.routers.qasida-media.rule=Host(`${SITE_HOST}`) && PathPrefix(`/media`)"
+      - "traefik.http.routers.qasida-media.priority=100"
+      - "traefik.http.routers.qasida-media.entrypoints=websecure"
+      - "traefik.http.routers.qasida-media.tls.certresolver=leresolver"
+      - "traefik.http.services.qasida-media.loadbalancer.server.port=80"
       - "traefik.docker.network=frontend"
 
   celery_worker:
