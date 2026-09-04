@@ -28,6 +28,27 @@ DEBUG = os.environ.get("DJANGO_DEBUG", "") == "True"
 
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
+# Behind a TLS-terminating proxy (Traefik), the request reaches Django over
+# plain HTTP. Without this Django builds http:// URLs and rejects form posts,
+# because the browser's Origin says https while Django believes otherwise.
+# Only trust the header when a proxy is actually in front, or a client could
+# claim to be on HTTPS.
+if os.environ.get("DJANGO_BEHIND_PROXY", "") == "True":
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    USE_X_FORWARDED_HOST = True
+
+# Django 4+ checks the Origin header against this list for unsafe methods, so
+# the admin and the suggestion form need the site's own https origin here.
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
+# Cookies only over HTTPS once a proxy terminates TLS for us.
+SESSION_COOKIE_SECURE = os.environ.get("DJANGO_SECURE_COOKIES", "") == "True"
+CSRF_COOKIE_SECURE = SESSION_COOKIE_SECURE
+
 
 # Application definition
 

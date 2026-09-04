@@ -3,3 +3,7 @@ staticfiles/
 __pycache__/
 *.pyc
 celerybeat-schedule
+.env
+db/
+redis/
+beat/
