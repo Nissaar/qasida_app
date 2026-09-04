@@ -1,0 +1,119 @@
+# Production stack, fronted by Traefik.
+#
+# Same principle as the Ghost deployment: two external networks, with only the
+# web container joined to `frontend` so Traefik can reach it. Postgres, Redis
+# and the Celery containers stay on `backend`, unreachable from outside.
+#
+# Nothing here publishes a host port. Traefik routes to the container port over
+# the frontend network, which is what `expose` declares.
+#
+#   docker network create frontend   # once, if they do not exist yet
+#   docker network create backend
+#   cp .env.prod.example .env && edit it
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# The development docker-compose.yml is unchanged and still uses host
+# networking, which suits a WSL setup but cannot work behind Traefik.
+
+networks:
+  default:
+  frontend:
+    external: true
+  backend:
+    external: true
+
+services:
+  db:
+    image: postgres:15
+    restart: always
+    networks:
+      - backend
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - ./db:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    networks:
+      - backend
+    volumes:
+      - ./redis:/data
+
+  web:
+    build:
+      context: .
+    restart: always
+    depends_on:
+      - db
+      - redis
+    networks:
+      - frontend
+      - backend
+    expose:
+      - 8000
+    command: gunicorn qasida_app.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120
+    entrypoint: /app/entrypoint.sh
+    volumes:
+      # Scanned pages live here and must outlive the container.
+      - ./media:/app/media
+    environment: &django_env
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS}
+      DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS}
+      # Traefik terminates TLS, so Django is told to trust the forwarded
+      # scheme and to mark its cookies secure.
+      DJANGO_BEHIND_PROXY: "True"
+      DJANGO_SECURE_COOKIES: "True"
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_HOST: db
+      DB_PORT: 5432
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.qasida.rule=Host(`${SITE_HOST}`)"
+      - "traefik.http.routers.qasida.entrypoints=websecure"
+      - "traefik.http.routers.qasida.tls.certresolver=leresolver"
+      - "traefik.http.services.qasida.loadbalancer.server.port=8000"
+      - "traefik.docker.network=frontend"
+
+  celery_worker:
+    build:
+      context: .
+    restart: always
+    depends_on:
+      - db
+      - redis
+    networks:
+      - backend
+    command: celery -A qasida_app worker -l info --concurrency 2
+    volumes:
+      # The crawlers write scans, so the worker needs the same directory.
+      - ./media:/app/media
+    environment: *django_env
+    labels:
+      - "traefik.enable=false"
+
+  celery_beat:
+    build:
+      context: .
+    restart: always
+    depends_on:
+      - db
+      - redis
+    networks:
+      - backend
+    # The schedule file is kept on a volume; in the container filesystem it
+    # would be lost on every recreate and the schedule would drift.
+    command: celery -A qasida_app beat -l info --schedule /app/beat/celerybeat-schedule
+    volumes:
+      - ./beat:/app/beat
+    environment: *django_env
+    labels:
+      - "traefik.enable=false"
