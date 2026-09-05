@@ -31,5 +31,6 @@ urlpatterns = [
     path('qasida/<int:pk>/', views.qasida_by_id, name='qasida_by_id'),
     path('qasida/<slug:slug>/', views.qasida_detail, name='qasida_detail'),
     path('qasida/<slug:slug>/edit/', views.qasida_edit, name='qasida_edit'),
+    path('qasida/<slug:slug>/download/', views.qasida_download, name='qasida_download'),
     path('suggestions/', views.suggestion_inbox, name='suggestion_inbox'),
 ]

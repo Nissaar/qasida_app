@@ -195,6 +195,45 @@
         </section>
         {% endif %}
 
+        {# Only the layers this work actually has are offered. #}
+        <details class="card p-5 mb-5">
+            <summary class="cursor-pointer font-semibold flex items-center justify-between">
+                <span>Download this qasida</span>
+                <svg class="h-4 w-4 text-stone-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 4v12m0 0 4-4m-4 4-4-4M4 20h16"/></svg>
+            </summary>
+            <p class="text-sm text-stone-500 dark:text-stone-400 mt-2 mb-4">
+                A plain text file, so it opens anywhere and keeps the script intact.
+                Choose what to include.
+            </p>
+            <form method="get" action="{% url 'qasida_download' qasida.slug %}" class="space-y-3">
+                <label class="flex items-center gap-2.5 text-sm">
+                    <input type="checkbox" name="original" value="1" checked
+                           class="rounded border-stone-300 dark:border-stone-600 text-brand-700 focus:ring-brand-500">
+                    <span>Original text{% if qasida.language %} ({{ qasida.language }}){% endif %}</span>
+                </label>
+                {% if qasida.transliteration %}
+                <label class="flex items-center gap-2.5 text-sm">
+                    <input type="checkbox" name="latin" value="1" checked
+                           class="rounded border-stone-300 dark:border-stone-600 text-brand-700 focus:ring-brand-500">
+                    <span>Transliteration <span class="text-stone-400">(Latin script)</span></span>
+                </label>
+                {% endif %}
+                {% if qasida.translation %}
+                <label class="flex items-center gap-2.5 text-sm">
+                    <input type="checkbox" name="translation" value="1"
+                           class="rounded border-stone-300 dark:border-stone-600 text-brand-700 focus:ring-brand-500">
+                    <span>Translation
+                        <span class="text-stone-400">({% if qasida.translation_origin == 'machine' %}machine, may be inaccurate{% else %}from the source{% endif %})</span>
+                    </span>
+                </label>
+                {% endif %}
+                <button type="submit" class="btn-primary mt-1">
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 4v12m0 0 4-4m-4 4-4-4M4 20h16"/></svg>
+                    Download
+                </button>
+            </form>
+        </details>
+
         <details class="card p-5">
             <summary class="cursor-pointer font-semibold flex items-center justify-between">
                 <span>Suggest a correction</span>

@@ -5,10 +5,12 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.core.paginator import Paginator
 from django.db.models import Count, Q
 from django.db.models.functions import Length
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from .forms import QasidaForm
 from .models import Collection, Qasida, Suggestion, Tag
+from .export import LAYERS, available_layers, build_text, filename_for
 from .search import normalize
 
 PAGE_SIZE = 24
@@ -380,3 +382,22 @@ def collection(request, slug):
         'parts': parts,
         'total': parts.count(),
     })
+
+
+def qasida_download(request, slug):
+    """
+    Hand back the chosen layers of a work as a text file.
+
+    Which layers to include comes from the query string, so the same link can
+    be shared for just the original, or the original beside its translation.
+    """
+    qasida = get_object_or_404(_visible(request), slug=slug)
+
+    present = available_layers(qasida)
+    asked = [name for name in LAYERS if request.GET.get(name) == '1']
+    layers = [name for name in asked if name in present] or ['original']
+
+    response = HttpResponse(build_text(qasida, layers),
+                            content_type='text/plain; charset=utf-8')
+    response['Content-Disposition'] = f'attachment; filename="{filename_for(qasida, layers)}"'
+    return response
