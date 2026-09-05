@@ -38,6 +38,125 @@
     </div>
 </section>
 
+{% if user.is_authenticated %}
+{# Someone signed in gets their own shelf here, in place of the invitation. #}
+<section class="band mb-12">
+    <div class="section-head">
+        <div>
+            <h2 class="section-title">Welcome back, {{ user.username }}</h2>
+            <p class="text-sm text-stone-500 dark:text-stone-400 mt-0.5">
+                {% if saved_total %}{{ saved_total }} work{{ saved_total|pluralize }} saved to your library{% else %}Your library is empty so far{% endif %}
+            </p>
+        </div>
+        <a href="{% url 'my_library' %}" class="view-all">My library &rarr;</a>
+    </div>
+    <div class="grid gap-4 lg:grid-cols-2">
+        <div class="panel">
+            <div class="panel-head">
+                <h3 class="panel-title">Continue reading</h3>
+                <a href="{% url 'my_history' %}" class="view-all">All &rarr;</a>
+            </div>
+            {% if recent_reads %}
+            <div class="panel-body">
+                {% for entry in recent_reads %}
+                <a href="{{ entry.qasida.get_absolute_url }}" class="panel-item">
+                    <span dir="auto" class="block text-sm font-medium">{{ entry.qasida.title|default:"Untitled qasida" }}</span>
+                    <span class="tile-count">{{ entry.last_read_at|timesince }} ago</span>
+                </a>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="p-5 text-sm text-stone-500 dark:text-stone-400">
+                Open any qasida and it appears here, so you can find your way back to it.
+            </p>
+            {% endif %}
+        </div>
+        <div class="panel">
+            <div class="panel-head">
+                <h3 class="panel-title">Saved</h3>
+                <a href="{% url 'my_library' %}" class="view-all">All &rarr;</a>
+            </div>
+            {% if recent_saves %}
+            <div class="panel-body">
+                {% for favourite in recent_saves %}
+                <a href="{{ favourite.qasida.get_absolute_url }}" class="panel-item">
+                    <span dir="auto" class="block text-sm font-medium">{{ favourite.qasida.title|default:"Untitled qasida" }}</span>
+                    <span class="tile-count">saved {{ favourite.created_at|date:"j M Y" }}</span>
+                </a>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="p-5 text-sm text-stone-500 dark:text-stone-400">
+                Press <span class="font-medium">Save</span> on a qasida to keep it here.
+            </p>
+            {% endif %}
+        </div>
+    </div>
+</section>
+{% else %}
+{# The case for an account, made where a visitor will actually meet it. #}
+<section class="band mb-12">
+    <div class="sm:flex sm:items-end sm:justify-between gap-6 mb-6">
+        <div>
+            <h2 class="section-title">Reading regularly? Open an account</h2>
+            <p class="text-sm text-stone-600 dark:text-stone-400 mt-1 max-w-xl leading-relaxed">
+                Everything on this site is free to read without signing in, and always will be.
+                An account exists for one reason: so that a library of {{ library_total }} works
+                becomes <em>your</em> shelf of the handful you actually return to.
+            </p>
+        </div>
+        <div class="flex gap-2 mt-4 sm:mt-0 shrink-0">
+            <a href="{% url 'register' %}" class="btn-primary">Create an account</a>
+            <a href="{% url 'login' %}" class="btn-ghost">Sign in</a>
+        </div>
+    </div>
+    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div class="card p-4">
+            <span class="h-9 w-9 rounded-full bg-brand-100 dark:bg-brand-900 text-brand-800 dark:text-brand-200 grid place-items-center mb-3">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 20s-7-4.5-7-9.5A3.5 3.5 0 0 1 12 8a3.5 3.5 0 0 1 7 2.5C19 15.5 12 20 12 20Z"/></svg>
+            </span>
+            <h3 class="font-medium">Save what you find</h3>
+            <p class="text-sm text-stone-500 dark:text-stone-400 mt-1 leading-relaxed">
+                One press keeps a qasida in your library, with a private note about why, if you want one.
+            </p>
+        </div>
+        <div class="card p-4">
+            <span class="h-9 w-9 rounded-full bg-brand-100 dark:bg-brand-900 text-brand-800 dark:text-brand-200 grid place-items-center mb-3">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+            </span>
+            <h3 class="font-medium">Pick up where you left off</h3>
+            <p class="text-sm text-stone-500 dark:text-stone-400 mt-1 leading-relaxed">
+                The works you opened are listed for you, so a poem you read last week is not lost again.
+            </p>
+        </div>
+        <div class="card p-4">
+            <span class="h-9 w-9 rounded-full bg-brand-100 dark:bg-brand-900 text-brand-800 dark:text-brand-200 grid place-items-center mb-3">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7V5h16v2M9 20h6M12 5v15"/></svg>
+            </span>
+            <h3 class="font-medium">Read it your way</h3>
+            <p class="text-sm text-stone-500 dark:text-stone-400 mt-1 leading-relaxed">
+                Set the size of the verse, and whether the Latin script and translation show,
+                once &mdash; on every device you sign in from.
+            </p>
+        </div>
+        <div class="card p-4">
+            <span class="h-9 w-9 rounded-full bg-brand-100 dark:bg-brand-900 text-brand-800 dark:text-brand-200 grid place-items-center mb-3">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 20h4L20 8l-4-4L4 16Z"/></svg>
+            </span>
+            <h3 class="font-medium">Follow your corrections</h3>
+            <p class="text-sm text-stone-500 dark:text-stone-400 mt-1 leading-relaxed">
+                Much of this text was read off scans by machine. Send a fix and see
+                whether an editor used it.
+            </p>
+        </div>
+    </div>
+    <p class="text-xs text-stone-400 dark:text-stone-500 mt-4">
+        A username, an email address and a password &mdash; nothing else is asked for,
+        and the address is only ever used to sign you in and to reset your password.
+    </p>
+</section>
+{% endif %}
+
 {# Two panels side by side, each grouping its tiles behind one header. #}
 <section class="grid gap-4 lg:grid-cols-2 mb-12">
     {% if poets %}

@@ -1,0 +1,52 @@
+{% extends 'core/account/_shell.html' %}
+
+{% block title %}Recently read | Qasida Library{% endblock %}
+
+{% block panel %}
+<div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+    <p class="text-sm text-stone-500 dark:text-stone-400">
+        The last <span class="font-semibold text-stone-700 dark:text-stone-200 tabular-nums">{{ total }}</span>
+        work{{ total|pluralize }} you opened. Only you can see this.
+    </p>
+    {% if total %}
+    <form method="post" action="{% url 'clear_history' %}"
+          onsubmit="return confirm('Clear your whole reading history? Saved works are not affected.');">
+        {% csrf_token %}
+        <button type="submit" class="btn-ghost">Clear history</button>
+    </form>
+    {% endif %}
+</div>
+
+{% if page_obj.object_list %}
+<ul class="card divide-y divide-stone-100 dark:divide-stone-800">
+    {% for entry in page_obj %}
+    <li class="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-5 py-3.5">
+        <div class="min-w-0">
+            <a href="{{ entry.qasida.get_absolute_url }}" dir="auto"
+               class="font-medium text-brand-800 dark:text-brand-200 hover:underline">
+                {{ entry.qasida.title|default:"Untitled qasida" }}</a>
+            <p class="text-xs text-stone-500 dark:text-stone-400 mt-0.5">
+                {% if entry.qasida.author %}<span dir="auto">{{ entry.qasida.author }}</span> &middot; {% endif %}
+                read {{ entry.last_read_at|date:"j M Y, H:i" }}
+                {% if entry.read_count > 1 %}&middot; {{ entry.read_count }} times{% endif %}
+            </p>
+        </div>
+        <form method="post" action="{% url 'toggle_favourite' entry.qasida.slug %}" class="shrink-0">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{% url 'my_history' %}">
+            <button type="submit" class="btn-ghost py-1 px-2.5 text-xs">Save</button>
+        </form>
+    </li>
+    {% endfor %}
+</ul>
+{% include 'core/account/_pagination.html' %}
+{% else %}
+<div class="card p-10 text-center">
+    <p class="font-display text-xl text-brand-900 dark:text-brand-100">Nothing read yet</p>
+    <p class="text-sm text-stone-500 dark:text-stone-400 mt-2">
+        Once you open a qasida it appears here, so you can find your way back to it.
+    </p>
+    <a href="{% url 'random_qasida' %}" class="btn-primary mt-6">Open something at random</a>
+</div>
+{% endif %}
+{% endblock %}

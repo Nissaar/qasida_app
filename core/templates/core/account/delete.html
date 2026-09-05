@@ -1,0 +1,39 @@
+{% extends 'core/account/_shell.html' %}
+
+{% block title %}Close your account | Qasida Library{% endblock %}
+
+{% block panel %}
+<div class="max-w-lg">
+    <section class="card p-6 border-red-200 dark:border-red-900">
+        <h2 class="font-display text-xl text-red-800 dark:text-red-200">Close this account</h2>
+        <p class="text-sm text-stone-600 dark:text-stone-300 mt-3 leading-relaxed">
+            This cannot be undone. Your {{ saved_count }} saved work{{ saved_count|pluralize }},
+            your reading history and your reading preferences are deleted with the account.
+        </p>
+        <p class="text-sm text-stone-600 dark:text-stone-300 mt-3 leading-relaxed">
+            Corrections you sent stay in the library, because an editor may already have
+            used them to fix a text, but they are no longer linked to you.
+        </p>
+        <p class="text-sm text-stone-500 dark:text-stone-400 mt-3">
+            The qasidas themselves belong to the library and are untouched.
+        </p>
+
+        <form method="post" class="space-y-4 mt-6">
+            {% csrf_token %}
+            <div>
+                <label for="confirm-password" class="block text-sm font-medium mb-1">
+                    Confirm with your password
+                </label>
+                <input id="confirm-password" type="password" name="password" required
+                       autocomplete="current-password" class="input">
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <button type="submit" class="btn bg-red-700 text-white hover:bg-red-800">
+                    Delete my account
+                </button>
+                <a href="{% url 'account_settings' %}" class="btn-ghost">Keep my account</a>
+            </div>
+        </form>
+    </section>
+</div>
+{% endblock %}

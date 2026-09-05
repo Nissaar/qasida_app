@@ -1,0 +1,13 @@
+{% if page_obj.has_other_pages %}
+<nav class="flex items-center justify-between gap-3 mt-6" aria-label="Pagination">
+    {% if page_obj.has_previous %}
+    <a href="?page={{ page_obj.previous_page_number }}{% if query %}&amp;q={{ query|urlencode }}{% endif %}" class="btn-ghost">&larr; Newer</a>
+    {% else %}<span></span>{% endif %}
+    <span class="text-sm text-stone-500 dark:text-stone-400 tabular-nums">
+        Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+    </span>
+    {% if page_obj.has_next %}
+    <a href="?page={{ page_obj.next_page_number }}{% if query %}&amp;q={{ query|urlencode }}{% endif %}" class="btn-ghost">Older &rarr;</a>
+    {% else %}<span></span>{% endif %}
+</nav>
+{% endif %}

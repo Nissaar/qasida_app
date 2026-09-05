@@ -1,0 +1,74 @@
+{% extends 'core/account/_shell.html' %}
+
+{% block title %}Saved qasidas | Qasida Library{% endblock %}
+
+{% block panel %}
+<div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+    <p class="text-sm text-stone-500 dark:text-stone-400">
+        <span class="font-semibold text-stone-700 dark:text-stone-200 tabular-nums">{{ total }}</span>
+        saved work{{ total|pluralize }}
+    </p>
+    <form method="get" role="search" class="flex-grow sm:flex-grow-0 sm:w-72">
+        <label for="saved-q" class="sr-only">Search what you saved</label>
+        <input id="saved-q" type="search" name="q" dir="auto" value="{{ query }}"
+               placeholder="Search what you saved&hellip;" class="input">
+    </form>
+</div>
+
+{% if page_obj.object_list %}
+<div class="space-y-3">
+    {% for favourite in page_obj %}
+    {% with qasida=favourite.qasida %}
+    <article class="card p-4 sm:p-5">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="min-w-0">
+                <h2 dir="auto" class="font-display text-lg">
+                    <a href="{{ qasida.get_absolute_url }}" class="text-brand-800 dark:text-brand-200 hover:underline">
+                        {{ qasida.title|default:"Untitled qasida" }}</a>
+                </h2>
+                {% if qasida.arabic_title %}
+                <p dir="rtl" lang="ar" class="font-naskh text-base text-stone-600 dark:text-stone-300 mt-0.5">{{ qasida.arabic_title }}</p>
+                {% endif %}
+                <p class="text-xs text-stone-500 dark:text-stone-400 mt-1">
+                    {% if qasida.author %}<span dir="auto">{{ qasida.author }}</span> &middot; {% endif %}{{ qasida.language|default:"Unknown" }}
+                    &middot; saved {{ favourite.created_at|date:"j M Y" }}
+                </p>
+            </div>
+            <form method="post" action="{% url 'toggle_favourite' qasida.slug %}" class="shrink-0">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{% url 'my_library' %}">
+                <button type="submit" class="btn-ghost py-1 px-2.5 text-xs">Remove</button>
+            </form>
+        </div>
+
+        <details class="mt-3" {% if favourite.note %}open{% endif %}>
+            <summary class="cursor-pointer text-xs text-stone-500 dark:text-stone-400 hover:text-brand-700 dark:hover:text-brand-300">
+                {% if favourite.note %}Your note{% else %}Add a private note{% endif %}
+            </summary>
+            <form method="post" action="{% url 'favourite_note' favourite.pk %}" class="flex flex-wrap gap-2 mt-2">
+                {% csrf_token %}
+                <input type="text" name="note" maxlength="280" dir="auto" value="{{ favourite.note }}"
+                       placeholder="Why you saved this, for your own reference" class="input flex-grow sm:w-auto">
+                <button type="submit" class="btn-ghost">Save note</button>
+            </form>
+        </details>
+    </article>
+    {% endwith %}
+    {% endfor %}
+</div>
+{% include 'core/account/_pagination.html' %}
+{% else %}
+<div class="card p-10 text-center">
+    <p class="font-display text-xl text-brand-900 dark:text-brand-100">
+        {% if query %}Nothing saved matches that.{% else %}You have not saved anything yet.{% endif %}
+    </p>
+    <p class="text-sm text-stone-500 dark:text-stone-400 mt-2 max-w-md mx-auto leading-relaxed">
+        {% if query %}Try a different word, or clear the search.
+        {% else %}Press <span class="font-medium">Save</span> on any qasida and it will be waiting here,
+        on every device you sign in from.{% endif %}
+    </p>
+    <a href="{% if query %}{% url 'my_library' %}{% else %}{% url 'browse' %}{% endif %}" class="btn-primary mt-6">
+        {% if query %}Show everything saved{% else %}Browse the library{% endif %}</a>
+</div>
+{% endif %}
+{% endblock %}

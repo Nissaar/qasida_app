@@ -1,0 +1,44 @@
+{% extends 'core/account/_shell.html' %}
+
+{% block title %}My corrections | Qasida Library{% endblock %}
+
+{% block panel %}
+<p class="text-sm text-stone-500 dark:text-stone-400 mb-4">
+    Corrections you have sent, and what an editor did with them.
+</p>
+
+{% if page_obj.object_list %}
+<ul class="card divide-y divide-stone-100 dark:divide-stone-800">
+    {% for correction in page_obj %}
+    <li class="px-4 sm:px-5 py-3.5">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+            <a href="{{ correction.qasida.get_absolute_url }}" dir="auto"
+               class="font-medium text-brand-800 dark:text-brand-200 hover:underline">
+                {{ correction.qasida.title|default:"Untitled qasida" }}</a>
+            {% if not correction.is_reviewed %}
+            <span class="badge-warn">Waiting to be reviewed</span>
+            {% elif correction.is_approved %}
+            <span class="inline-flex items-center gap-1 rounded-full bg-brand-100 dark:bg-brand-900 px-2 py-0.5 text-xs font-medium text-brand-800 dark:text-brand-200">Applied &mdash; thank you</span>
+            {% else %}
+            <span class="inline-flex items-center gap-1 rounded-full bg-stone-100 dark:bg-stone-800 px-2 py-0.5 text-xs font-medium text-stone-600 dark:text-stone-300">Not used</span>
+            {% endif %}
+        </div>
+        <p class="text-xs text-stone-500 dark:text-stone-400 mt-1">
+            Sent {{ correction.created_at|date:"j M Y" }}{% if correction.suggested_tags %} &middot; tags: {{ correction.suggested_tags }}{% endif %}
+        </p>
+    </li>
+    {% endfor %}
+</ul>
+{% include 'core/account/_pagination.html' %}
+{% else %}
+<div class="card p-10 text-center">
+    <p class="font-display text-xl text-brand-900 dark:text-brand-100">No corrections yet</p>
+    <p class="text-sm text-stone-500 dark:text-stone-400 mt-2 max-w-md mx-auto leading-relaxed">
+        Much of this library was read off scanned pages by machine, so mistakes are
+        expected. Every qasida page has a form to put one right, and while you are
+        signed in you can follow what happened to it here.
+    </p>
+    <a href="{% url 'browse' %}" class="btn-primary mt-6">Browse the library</a>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,5 +1,7 @@
+from django.conf import settings
 from django.contrib.postgres.indexes import GinIndex
-from django.db import models
+from django.db import IntegrityError, models, transaction
+from django.utils import timezone
 from django.utils.text import slugify
 
 from .search import build_document
@@ -258,9 +260,17 @@ class QasidaMedia(models.Model):
 
 class Suggestion(models.Model):
     qasida = models.ForeignKey(Qasida, on_delete=models.CASCADE, related_name='suggestions')
+    # Set when the correction came from a signed-in reader, so they can be
+    # shown what became of it. Anonymous corrections are still accepted and
+    # leave this empty; the account being deleted does not withdraw the
+    # correction, it only detaches it.
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                             on_delete=models.SET_NULL, related_name='suggestions')
     suggested_lyrics = models.TextField(blank=True)
     suggested_tags = models.CharField(max_length=200, blank=True, help_text="Comma-separated suggested tags")
-    email = models.EmailField(help_text="Email for contact regarding this suggestion")
+    # Compulsory for an anonymous correction, which has no other way to be
+    # followed up; taken from the account otherwise.
+    email = models.EmailField(blank=True, help_text="Email for contact regarding this suggestion")
     is_approved = models.BooleanField(default=False)
     is_reviewed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -307,3 +317,134 @@ class SourceWebsite(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class Favourite(models.Model):
+    """
+    A work someone signed in has saved.
+
+    The point of an account on a library this size is being able to find your
+    way back to something, so this is the smallest possible record: who, what,
+    when, and an optional line of your own about why.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name='favourites')
+    qasida = models.ForeignKey(Qasida, on_delete=models.CASCADE,
+                               related_name='favourited_by')
+    note = models.CharField(max_length=280, blank=True,
+                            help_text="A private note, visible only to you.")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('-created_at',)
+        constraints = [
+            models.UniqueConstraint(fields=('user', 'qasida'), name='unique_favourite'),
+        ]
+
+    def __str__(self):
+        return f"{self.user} saved {self.qasida}"
+
+
+class ReadingHistory(models.Model):
+    """
+    The works a signed-in reader has opened, most recent first.
+
+    One row per work rather than per visit: the useful question is "what was I
+    reading", not "how did I get here", and collapsing repeat visits keeps the
+    list short enough to be scanned. Nothing is recorded for anonymous
+    visitors, and the reader can clear the whole list.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name='reading_history')
+    qasida = models.ForeignKey(Qasida, on_delete=models.CASCADE,
+                               related_name='read_by')
+    # Explicit rather than auto_now, so a save with update_fields controls it.
+    last_read_at = models.DateTimeField(default=timezone.now)
+    read_count = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        ordering = ('-last_read_at',)
+        verbose_name_plural = 'reading history'
+        constraints = [
+            models.UniqueConstraint(fields=('user', 'qasida'), name='unique_reading_history'),
+        ]
+
+    # Kept per reader, so the list stays scannable and one account cannot grow
+    # a row for every work in the library.
+    KEEP_PER_READER = 200
+
+    @classmethod
+    def record(cls, user, qasida):
+        """
+        Note that this reader has just opened this work.
+
+        Repeat visits move the existing row rather than adding one, so the
+        list answers "what was I reading" instead of "how often". Trimming
+        only runs when a row is genuinely new, which keeps the cost of an
+        ordinary page view to a single upsert.
+        """
+        moved = cls.objects.filter(user=user, qasida=qasida).update(
+            last_read_at=timezone.now(), read_count=models.F('read_count') + 1)
+        if moved:
+            return
+        try:
+            # Two tabs opening the same work at once both miss the update
+            # above; the unique constraint settles it and the loser has
+            # nothing left to do.
+            with transaction.atomic():
+                cls.objects.create(user=user, qasida=qasida)
+        except IntegrityError:
+            return
+
+        cls.objects.filter(user=user).exclude(
+            pk__in=cls.objects.filter(user=user)
+            .order_by('-last_read_at')
+            .values_list('pk', flat=True)[:cls.KEEP_PER_READER]
+        ).delete()
+
+    def __str__(self):
+        return f"{self.user} read {self.qasida}"
+
+
+class ReaderProfile(models.Model):
+    """
+    How one reader wants the verse laid out.
+
+    The qasida page can already hide the transliteration or the translation,
+    but that choice lives in the browser's local storage, so it is lost on
+    another device and in a private window. An account makes it stick, and
+    lets the type size be set for people who find the default hard to read -
+    which for a page whose whole content is vocalised Arabic is not a small
+    thing.
+    """
+    SIZE_SMALL = 'sm'
+    SIZE_MEDIUM = 'md'
+    SIZE_LARGE = 'lg'
+    SIZE_CHOICES = [
+        (SIZE_SMALL, 'Compact'),
+        (SIZE_MEDIUM, 'Comfortable'),
+        (SIZE_LARGE, 'Large'),
+    ]
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                related_name='reader_profile')
+    show_transliteration = models.BooleanField(
+        default=True, help_text="Show the Latin script beside the original.")
+    show_translation = models.BooleanField(
+        default=True, help_text="Show the translation beside the original.")
+    lyrics_size = models.CharField(max_length=2, choices=SIZE_CHOICES, default=SIZE_MEDIUM,
+                                   help_text="How large the verse itself is set.")
+
+    @classmethod
+    def for_user(cls, user):
+        """The reader's preferences, created on first use.
+
+        Built on demand rather than by a signal on user creation, so accounts
+        made before this existed - and by createsuperuser, which fires no
+        such thing - are covered by the same path.
+        """
+        profile, _ = cls.objects.get_or_create(user=user)
+        return profile
+
+    def __str__(self):
+        return f"Reading preferences for {self.user}"

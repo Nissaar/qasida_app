@@ -1,4 +1,5 @@
 {# One card, used by the home grid and the listing grid. #}
+{% load qasida_extras %}
 <article class="card-link overflow-hidden flex flex-col">
     {% with scan=qasida.images.first %}
     {% if scan %}
@@ -10,11 +11,26 @@
     {% endwith %}
 
     <div class="p-4 flex flex-col flex-grow">
-        <h3 dir="auto" class="font-display text-[1.05rem] leading-snug">
-            <a href="{{ qasida.get_absolute_url }}" class="text-brand-800 dark:text-brand-200 hover:underline decoration-brand-400">
-                {{ qasida.title|default:"Untitled qasida" }}
-            </a>
-        </h3>
+        <div class="flex items-start gap-2">
+            <h3 dir="auto" class="font-display text-[1.05rem] leading-snug flex-grow">
+                <a href="{{ qasida.get_absolute_url }}" class="text-brand-800 dark:text-brand-200 hover:underline decoration-brand-400">
+                    {{ qasida.title|default:"Untitled qasida" }}
+                </a>
+            </h3>
+            {% if user.is_authenticated %}
+            {% is_favourited qasida as saved %}
+            <form method="post" action="{% url 'toggle_favourite' qasida.slug %}" class="favourite-form shrink-0 -mt-1 -mr-1">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <button type="submit" data-saved="{{ saved|yesno:'1,0' }}" aria-pressed="{{ saved|yesno:'true,false' }}"
+                        class="p-1.5 rounded-lg text-stone-400 hover:text-brand-700 dark:hover:text-brand-300 hover:bg-stone-100 dark:hover:bg-stone-800 transition {% if saved %}text-brand-700 dark:text-brand-300{% endif %}"
+                        title="{% if saved %}Remove from your library{% else %}Save to your library{% endif %}">
+                    <span class="sr-only favourite-label">{% if saved %}Saved{% else %}Save{% endif %}</span>
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="{% if saved %}currentColor{% else %}none{% endif %}" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 20s-7-4.5-7-9.5A3.5 3.5 0 0 1 12 8a3.5 3.5 0 0 1 7 2.5C19 15.5 12 20 12 20Z"/></svg>
+                </button>
+            </form>
+            {% endif %}
+        </div>
 
         {% if qasida.arabic_title %}
         <p dir="rtl" lang="ar" class="font-naskh text-base text-stone-600 dark:text-stone-300 mt-0.5 leading-relaxed">{{ qasida.arabic_title }}</p>

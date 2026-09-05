@@ -12,8 +12,12 @@ const SHELL_ASSETS = [
   '{% static "core/img/favicon-32.png" %}',
 ];
 
-/* Never cached: staff areas and anything behind a session. */
-const BYPASS = [/^\/admin\//, /^\/suggestions\//, /\/edit\/$/];
+/* Never cached: staff areas, and every page that is about one person rather
+   than about the library - a saved list, a reading history, an email address.
+   These would otherwise be stored on the device and served back offline to
+   whoever opens the browser next. */
+const BYPASS = [/^\/admin\//, /^\/suggestions\//, /\/edit\/$/,
+                /^\/my\//, /^\/accounts\//];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -60,7 +64,10 @@ async function networkFirst(request) {
   const cache = await caches.open(PAGE_CACHE);
   try {
     const response = await fetch(request);
-    if (response.ok) {
+    /* A page the server marked no-store is not ours to keep, whatever the
+       path patterns above happen to cover. */
+    const control = response.headers.get('Cache-Control') || '';
+    if (response.ok && !control.includes('no-store')) {
       cache.put(request, response.clone());
       trim(PAGE_CACHE, 60);
     }

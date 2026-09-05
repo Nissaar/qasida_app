@@ -1,0 +1,50 @@
+{% extends 'core/account/_shell.html' %}
+
+{% block title %}Account settings | Qasida Library{% endblock %}
+
+{% block panel %}
+<div class="grid gap-4 lg:grid-cols-2 lg:items-start">
+    <section class="card p-5 sm:p-6">
+        <h2 class="font-display text-lg text-brand-900 dark:text-brand-100">How the verse is set</h2>
+        <p class="text-sm text-stone-500 dark:text-stone-400 mt-1 mb-5 leading-relaxed">
+            These follow your account, so a qasida looks the same on your phone as on
+            your desktop. Any page can still be changed on the spot without touching this.
+        </p>
+        <form method="post" class="space-y-4">
+            {% csrf_token %}
+            {% include 'core/_form.html' with form=preferences_form %}
+            <button type="submit" name="save_preferences" value="1" class="btn-primary">Save preferences</button>
+        </form>
+    </section>
+
+    <div class="space-y-4">
+        <section class="card p-5 sm:p-6">
+            <h2 class="font-display text-lg text-brand-900 dark:text-brand-100">Sign-in details</h2>
+            <p class="text-sm text-stone-500 dark:text-stone-400 mt-1 mb-5">
+                Your username is <span class="font-medium text-stone-700 dark:text-stone-200">{{ user.username }}</span>.
+                You can sign in with it or with your address.
+            </p>
+            <form method="post" class="space-y-4">
+                {% csrf_token %}
+                {% include 'core/_form.html' with form=email_form %}
+                <button type="submit" name="save_email" value="1" class="btn-primary">Save email</button>
+            </form>
+            <p class="mt-5 pt-5 border-t border-stone-100 dark:border-stone-800">
+                <a href="{% url 'password_change' %}" class="btn-ghost">Change your password</a>
+            </p>
+        </section>
+
+        <section class="card p-5 sm:p-6">
+            <h2 class="font-display text-lg text-brand-900 dark:text-brand-100">What is on this account</h2>
+            <dl class="grid grid-cols-3 gap-3 mt-4 text-center">
+                <div><dt class="stat-label order-2">saved</dt><dd class="stat-value tabular-nums">{{ saved_count }}</dd></div>
+                <div><dt class="stat-label order-2">read</dt><dd class="stat-value tabular-nums">{{ history_count }}</dd></div>
+                <div><dt class="stat-label order-2">corrections</dt><dd class="stat-value tabular-nums">{{ corrections_count }}</dd></div>
+            </dl>
+            <p class="mt-5 pt-5 border-t border-stone-100 dark:border-stone-800">
+                <a href="{% url 'delete_account' %}" class="text-sm text-red-700 dark:text-red-300 hover:underline">Close this account</a>
+            </p>
+        </section>
+    </div>
+</div>
+{% endblock %}
