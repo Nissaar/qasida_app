@@ -25,7 +25,11 @@
         <span class="q-avatar">{{ user.get_username|slice:":1"|upper }}</span>
         <span class="q-side-user-meta">
             <b>{{ user.get_username }}</b>
-            <a href="{% url 'admin:logout' %}">{% translate 'Log out' %}</a>
+            {# Django 5 refuses to log out on a GET, so this has to be a post. #}
+            <form method="post" action="{% url 'admin:logout' %}">
+                {% csrf_token %}
+                <button type="submit">{% translate 'Log out' %}</button>
+            </form>
         </span>
     </div>
     {% endif %}

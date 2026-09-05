@@ -1,0 +1,30 @@
+{% extends 'core/account/auth_shell.html' %}
+
+{% block title %}Sign in | Qasida Library{% endblock %}
+{% block heading %}Sign in{% endblock %}
+
+{% block intro %}
+<p class="text-sm text-stone-500 dark:text-stone-400 mt-1.5">
+    Use your username or the email address you registered with.
+</p>
+{% endblock %}
+
+{% block body %}
+<form method="post" class="space-y-4 mt-6">
+    {% csrf_token %}
+    {% include 'core/_form.html' %}
+    {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+    <button type="submit" class="btn-primary w-full">Sign in</button>
+</form>
+<p class="text-sm text-stone-500 dark:text-stone-400 mt-4">
+    <a href="{% url 'password_reset' %}" class="text-brand-700 dark:text-brand-300 hover:underline">Forgotten your password?</a>
+</p>
+{% endblock %}
+
+{% block below %}
+<p class="text-sm text-center text-stone-500 dark:text-stone-400 mt-5">
+    No account yet?
+    <a href="{% url 'register' %}{% if next %}?next={{ next|urlencode }}{% endif %}" class="text-brand-700 dark:text-brand-300 font-medium hover:underline">Create one</a>
+    &mdash; it takes a moment and it is free.
+</p>
+{% endblock %}

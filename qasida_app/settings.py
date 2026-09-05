@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 
 import os
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -133,19 +134,63 @@ CELERY_BEAT_SCHEDULE = {
 # https://docs.djangoproject.com/en/6.1/ref/settings/#auth-password-validators
 
 AUTH_PASSWORD_VALIDATORS = [
+    # Refuses a password built out of the username or email.
     {
         "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
     },
+    # Ten rather than Django's eight. Length is the single largest factor in
+    # how hard a password is to guess, and it costs the person nothing to type.
     {
         "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 10},
     },
+    # Django ships a list of the 20,000 commonest passwords.
     {
         "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
     },
     {
         "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
     },
+    # One character class only - all letters, all digits - is what most weak
+    # passwords that survive the list above look like.
+    {
+        "NAME": "core.validators.ComplexityValidator",
+    },
 ]
+
+
+# Authentication
+#
+# Readers sign in with a username or an email address, so the project backend
+# is tried first; Django's own stays behind it, which keeps the admin and any
+# management command working exactly as before.
+
+AUTHENTICATION_BACKENDS = [
+    "core.auth_backends.UsernameOrEmailBackend",
+    "django.contrib.auth.backends.ModelBackend",
+]
+
+LOGIN_URL = "login"
+LOGIN_REDIRECT_URL = "my_library"
+# No LOGOUT_REDIRECT_URL on purpose: signing out renders a page that
+# confirms it happened, and that page is what empties the offline cache
+# of anything rendered while signed in.
+
+# A session cookie that outlives the browser is only kept when the person asks
+# for it on the sign-in form; otherwise the login view shortens it to the
+# session. Two weeks is Django's default and is the "remember me" duration.
+SESSION_COOKIE_AGE = 60 * 60 * 24 * 14
+SESSION_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_HTTPONLY = True
+
+# Failed sign-in attempts allowed before the form starts refusing, which stops
+# it being used to walk a password list. Counted separately per account and per
+# address: readers on one mosque or household connection share an address, so
+# that limit is much looser - it is there to catch a machine grinding through
+# accounts, not a family getting a password wrong. See core.account_views.
+LOGIN_ATTEMPT_LIMIT = 8
+LOGIN_ATTEMPT_LIMIT_PER_IP = 40
+LOGIN_ATTEMPT_WINDOW = 15 * 60
 
 
 # Internationalization
@@ -174,9 +219,43 @@ MEDIA_ROOT = BASE_DIR / "media"
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
 
-MAILERS = {
+# Password reset is the only mail this site sends. The console backend is the
+# default so a development container never tries to reach a mail server; set
+# DJANGO_EMAIL_BACKEND to the SMTP backend in production and the reset link is
+# delivered for real.
+EMAIL_BACKEND = os.environ.get(
+    "DJANGO_EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
+EMAIL_HOST = os.environ.get("DJANGO_EMAIL_HOST", "")
+EMAIL_PORT = int(os.environ.get("DJANGO_EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.environ.get("DJANGO_EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("DJANGO_EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.environ.get("DJANGO_EMAIL_USE_TLS", "True") == "True"
+DEFAULT_FROM_EMAIL = os.environ.get("DJANGO_DEFAULT_FROM_EMAIL", "no-reply@localhost")
+SERVER_EMAIL = DEFAULT_FROM_EMAIL
+
+# How long a password reset link stays usable.
+PASSWORD_RESET_TIMEOUT = 60 * 60 * 3
+
+
+# Cache
+#
+# Used for the sign-in attempt counters and nothing else, so it shares the
+# Redis that Celery already needs, on a different database. Every read and
+# write goes through a helper that swallows connection errors: if Redis is
+# away the site keeps working, it simply stops counting.
+
+def _cache_location():
+    override = os.environ.get("DJANGO_CACHE_URL", "").strip()
+    if override:
+        return override
+    parts = urlparse(CELERY_BROKER_URL)
+    return urlunparse(parts._replace(path="/1"))
+
+
+CACHES = {
     "default": {
-        "BACKEND": "django.core.mail.backends.console.EmailBackend",
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": _cache_location(),
     },
 }
 

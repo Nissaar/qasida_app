@@ -84,3 +84,43 @@ def translation_is_aligned(qasida):
     original = _display_stanzas(qasida.lyrics)
     translated = _display_stanzas(qasida.translation)
     return bool(translated) and len(translated) == len(original)
+
+
+@register.simple_tag(takes_context=True)
+def is_favourited(context, qasida):
+    """
+    Whether the signed-in reader has saved this work.
+
+    A card grid asks this two dozen times on one page, so the reader's whole
+    set of saved ids is fetched once and kept on the request. Favourite lists
+    are personal and small; one query beats one per card by a wide margin.
+    """
+    request = context.get('request')
+    user = getattr(request, 'user', None)
+    if request is None or user is None or not user.is_authenticated:
+        return False
+
+    ids = getattr(request, '_favourite_ids', None)
+    if ids is None:
+        from core.models import Favourite
+        ids = set(Favourite.objects.filter(user=user).values_list('qasida_id', flat=True))
+        request._favourite_ids = ids
+    return qasida.pk in ids
+
+
+@register.simple_tag(takes_context=True)
+def reader_profile(context):
+    """
+    The signed-in reader's layout preferences, or None.
+
+    Cached on the request: the qasida page consults it in two places.
+    """
+    request = context.get('request')
+    user = getattr(request, 'user', None)
+    if request is None or user is None or not user.is_authenticated:
+        return None
+
+    if not hasattr(request, '_reader_profile'):
+        from core.models import ReaderProfile
+        request._reader_profile = ReaderProfile.for_user(user)
+    return request._reader_profile

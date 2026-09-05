@@ -1,0 +1,28 @@
+{% extends 'core/account/auth_shell.html' %}
+
+{% block title %}Signed out | Qasida Library{% endblock %}
+{% block heading %}You are signed out{% endblock %}
+
+{% block body %}
+<p class="text-sm text-stone-500 dark:text-stone-400 mt-2">
+    Everything you saved is waiting for you next time.
+</p>
+<div class="flex flex-wrap gap-2 mt-6">
+    <a href="{% url 'login' %}" class="btn-primary">Sign in again</a>
+    <a href="{% url 'browse' %}" class="btn-ghost">Keep browsing</a>
+</div>
+{% endblock %}
+
+{% block below %}
+<script>
+/* Pages seen while signed in were stored for offline reading. They are of no
+   use to whoever opens this browser next, so they go when the session does.
+   Scans and static files are left alone: they are the same for everyone. */
+if (window.caches) {
+    caches.keys().then(function (names) {
+        names.filter(function (name) { return name.endsWith('-pages'); })
+             .forEach(function (name) { caches.delete(name); });
+    }).catch(function () { /* nothing cached, or storage refused */ });
+}
+</script>
+{% endblock %}

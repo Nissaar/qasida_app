@@ -9,7 +9,8 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from .forms import QasidaForm
-from .models import Collection, Qasida, Suggestion, Tag
+from .models import (Collection, Favourite, Qasida, ReadingHistory,
+                     Suggestion, Tag)
 from .export import LAYERS, available_layers, build_text, filename_for
 from .search import normalize
 
@@ -176,6 +177,7 @@ HOME_POET_COUNT = 8
 HOME_FORM_COUNT = 10
 HOME_MAQAM_COUNT = 8
 HOME_FEATURED_PER_LANGUAGE = 3
+HOME_PERSONAL_COUNT = 4
 
 
 def _top_poets(scope, limit):
@@ -218,6 +220,19 @@ def home(request):
                             .annotate(n=Count('parts', filter=Q(parts__in=scope)))
                             .filter(n__gt=0).order_by('-n', 'name')[:6])
 
+    # A signed-in reader is shown their own shelf where a visitor is shown the
+    # case for having one. Both occupy the same place on the page, so the
+    # invitation is not simply repeated at someone who has already accepted it.
+    personal = {}
+    if request.user.is_authenticated:
+        personal = {
+            'recent_reads': (ReadingHistory.objects.filter(user=request.user)
+                             .select_related('qasida')[:HOME_PERSONAL_COUNT]),
+            'recent_saves': (Favourite.objects.filter(user=request.user)
+                             .select_related('qasida')[:HOME_PERSONAL_COUNT]),
+            'saved_total': Favourite.objects.filter(user=request.user).count(),
+        }
+
     return render(request, 'core/home.html', {
         'languages': languages,
         'collections': featured_collections,
@@ -226,6 +241,7 @@ def home(request):
         'maqamat': _tags_in_group(scope, 'Maqam (melodic mode)', HOME_MAQAM_COUNT),
         'featured_groups': featured,
         'transliterated_count': scope.exclude(transliteration='').count(),
+        **personal,
     })
 
 
@@ -252,13 +268,21 @@ def qasida_detail(request, slug):
     qasida = get_object_or_404(_visible(request), slug=slug)
 
     if request.method == 'POST':
-        email = request.POST.get('email')
-        suggested_lyrics = request.POST.get('suggested_lyrics')
-        suggested_tags = request.POST.get('suggested_tags')
+        # A signed-in reader is already reachable, so their address is taken
+        # from the account rather than typed again; an anonymous one has no
+        # other way to be followed up, so it stays compulsory for them.
+        email = (request.POST.get('email') or '').strip()
+        if not email and request.user.is_authenticated:
+            email = request.user.email
+        # Both default to empty rather than None: neither column accepts NULL,
+        # so a form posted without one of them used to raise IntegrityError.
+        suggested_lyrics = request.POST.get('suggested_lyrics') or ''
+        suggested_tags = request.POST.get('suggested_tags') or ''
 
-        if email:
+        if email or request.user.is_authenticated:
             Suggestion.objects.create(
                 qasida=qasida,
+                user=request.user if request.user.is_authenticated else None,
                 email=email,
                 suggested_lyrics=suggested_lyrics,
                 suggested_tags=suggested_tags
@@ -267,6 +291,9 @@ def qasida_detail(request, slug):
             return redirect('qasida_detail', slug=qasida.slug)
         else:
             messages.error(request, 'Email is required to submit a suggestion.')
+    elif request.user.is_authenticated:
+        # Only on a plain read, so a correction does not count as a visit.
+        ReadingHistory.record(request.user, qasida)
 
     return render(request, 'core/detail.html', {'qasida': qasida})
 
@@ -278,7 +305,7 @@ def qasida_edit(request, slug):
     if request.method == 'POST' and form.is_valid():
         form.save()
         messages.success(request, 'Qasida updated.')
-        return redirect('qasida_detail', pk=pk)
+        return redirect('qasida_detail', slug=qasida.slug)
     return render(request, 'core/qasida_form.html', {'form': form, 'qasida': qasida})
 
 

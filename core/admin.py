@@ -1,4 +1,6 @@
 from django.contrib import admin
+from django.contrib.auth import get_user_model
+from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.shortcuts import redirect, render
 from django.urls import path
 from django.db.models import Count, Max
@@ -11,8 +13,8 @@ from .tasks import enrich_qasida
 admin.site.site_header = "Qasida Library"
 admin.site.site_title = "Qasida Library"
 admin.site.index_title = "Library administration"
-from .models import (Collection, Tag, Qasida, QasidaImage, QasidaMedia,
-                     Suggestion, SourceWebsite)
+from .models import (Collection, Favourite, Tag, Qasida, QasidaImage, QasidaMedia,
+                     ReadingHistory, ReaderProfile, Suggestion, SourceWebsite)
 
 @admin.register(Tag)
 class TagAdmin(admin.ModelAdmin):
@@ -42,7 +44,7 @@ class QasidaMediaInline(admin.TabularInline):
 class QasidaAdmin(admin.ModelAdmin):
     list_display = ('title', 'review_state', 'author', 'collection', 'language',
                     'source_site', 'text_quality', 'scan_count', 'has_latin',
-                    'has_translation')
+                    'has_translation', 'saved_count')
     # The typed filters come first: author and tag have too many distinct
     # values for Django's default link-per-value rendering.
     list_filter = (TextSearchPanel, 'review_state', 'collection', 'source_site',
@@ -57,9 +59,19 @@ class QasidaAdmin(admin.ModelAdmin):
     filter_horizontal = ('tags',)
     inlines = [QasidaMediaInline, QasidaImageInline]
 
+    def get_queryset(self, request):
+        # Annotated once for the whole page rather than counted per row.
+        return super().get_queryset(request).annotate(_saves=Count('favourited_by', distinct=True))
+
     @admin.display(description='Scans')
     def scan_count(self, obj):
         return obj.images.count()
+
+    @admin.display(description='Saved by', ordering='_saves')
+    def saved_count(self, obj):
+        """How many readers keep this. Sortable, so the column doubles as a
+        way to find what is worth reviewing or correcting first."""
+        return obj._saves
 
     @admin.display(description='Latin', boolean=True)
     def has_latin(self, obj):
@@ -198,9 +210,18 @@ class QasidaAdmin(admin.ModelAdmin):
 
 @admin.register(Suggestion)
 class SuggestionAdmin(admin.ModelAdmin):
-    list_display = ('qasida', 'email', 'is_reviewed', 'is_approved', 'created_at')
+    list_display = ('qasida', 'submitted_by', 'is_reviewed', 'is_approved', 'created_at')
     list_filter = ('is_reviewed', 'is_approved')
-    search_fields = ('email', 'suggested_lyrics', 'suggested_tags')
+    search_fields = ('email', 'user__username', 'suggested_lyrics', 'suggested_tags')
+    list_select_related = ('qasida', 'user')
+    autocomplete_fields = ('user',)
+
+    @admin.display(description='From', ordering='user__username')
+    def submitted_by(self, obj):
+        """The account it came from, or the address an anonymous sender left."""
+        if obj.user:
+            return f'{obj.user.username} ({obj.user.email})' if obj.user.email else obj.user.username
+        return obj.email or 'anonymous'
     actions = ['approve_suggestions', 'reject_suggestions']
 
     def approve_suggestions(self, request, queryset):
@@ -260,3 +281,101 @@ class CollectionAdmin(admin.ModelAdmin):
     @admin.display(description='Parts', ordering='_parts')
     def part_count(self, obj):
         return obj._parts
+
+
+class ReaderProfileInline(admin.StackedInline):
+    """A reader's layout preferences, alongside their account."""
+    model = ReaderProfile
+    can_delete = False
+    verbose_name_plural = 'reading preferences'
+    extra = 0
+
+
+admin.site.unregister(get_user_model())
+
+
+@admin.register(get_user_model())
+class UserAdmin(DjangoUserAdmin):
+    """
+    Managing the people who use the site.
+
+    Django's own user admin is kept underneath - it is what makes setting a
+    password, the permission widgets and the "add user" flow work correctly -
+    with the columns and filters an editor of this library actually wants:
+    who is active, who joined when, and how much each account holds.
+
+    What an account holds is deliberately shown as counts. An editor has no
+    business reading an individual's saved list or reading history, and there
+    is no admin page here that lets them: which works are popular is on the
+    qasida list instead, as a total.
+    """
+
+    list_display = ('username', 'email', 'is_active', 'is_staff', 'is_superuser',
+                    'saved_count', 'corrections_count', 'date_joined', 'last_login')
+    list_filter = ('is_active', 'is_staff', 'is_superuser', 'date_joined', 'groups')
+    search_fields = ('username', 'email', 'first_name', 'last_name')
+    ordering = ('-date_joined',)
+    list_per_page = 50
+    inlines = [ReaderProfileInline]
+    actions = ['activate_accounts', 'deactivate_accounts']
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(
+            _saves=Count('favourites', distinct=True),
+            _corrections=Count('suggestions', distinct=True),
+        )
+
+    @admin.display(description='Saved', ordering='_saves')
+    def saved_count(self, obj):
+        return obj._saves
+
+    @admin.display(description='Corrections', ordering='_corrections')
+    def corrections_count(self, obj):
+        return obj._corrections
+
+    def get_readonly_fields(self, request, obj=None):
+        """
+        Only a superuser may hand out staff or superuser status.
+
+        Without this any staff member with permission to change users could
+        promote themselves, which makes every other permission in the admin
+        decorative.
+        """
+        readonly = list(super().get_readonly_fields(request, obj))
+        if not request.user.is_superuser:
+            readonly += ['is_superuser', 'is_staff', 'user_permissions', 'groups']
+        return readonly
+
+    def has_change_permission(self, request, obj=None):
+        # A non-superuser cannot edit a superuser's account at all.
+        if obj is not None and obj.is_superuser and not request.user.is_superuser:
+            return False
+        return super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        if obj is not None and obj.is_superuser and not request.user.is_superuser:
+            return False
+        return super().has_delete_permission(request, obj)
+
+    @admin.action(description="Let these accounts sign in again")
+    def activate_accounts(self, request, queryset):
+        count = queryset.update(is_active=True)
+        self.message_user(request, f"{count} account(s) can sign in again.")
+
+    @admin.action(description="Suspend these accounts (they keep everything)")
+    def deactivate_accounts(self, request, queryset):
+        """
+        Stop an account signing in without destroying what it holds.
+
+        Suspending rather than deleting is the reversible move, and the
+        account doing the suspending is left out so nobody can lock themselves
+        out of the admin in one click.
+        """
+        queryset = queryset.exclude(pk=request.user.pk)
+        if not request.user.is_superuser:
+            queryset = queryset.exclude(is_superuser=True)
+        count = queryset.update(is_active=False)
+        self.message_user(
+            request,
+            f"{count} account(s) suspended. Their saved works are untouched and "
+            f"come back if the account is activated again.")

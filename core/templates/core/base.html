@@ -129,6 +129,11 @@
            element carrying a display class (flex, grid, block). Without this the
            hidden attribute silently does nothing. */
         [hidden] { display: none !important; }
+        summary::-webkit-details-marker { display: none; }
+        summary.list-none { list-style: none; }
+        /* Verse size, set on the account and applied to the whole page. */
+        .lyrics-sm .prose-lyrics { font-size: 1rem; line-height: 2; }
+        .lyrics-lg .prose-lyrics { font-size: 1.55rem; line-height: 2.35; }
         .safe-b { padding-bottom: env(safe-area-inset-bottom); }
         .safe-t { padding-top: env(safe-area-inset-top); }
         @media (display-mode: standalone) { .hide-in-app { display: none; } }
@@ -172,6 +177,33 @@
             <a href="{% url 'suggestion_inbox' %}" class="navlink hidden md:inline-flex">Suggestions</a>
             <a href="/admin/" class="navlink hidden lg:inline-flex hide-in-app">Admin</a>
             {% endif %}
+
+            {% if user.is_authenticated %}
+            {# A details element rather than scripted state: the menu opens
+               with the keyboard and works before any JavaScript runs. #}
+            <details id="account-menu" class="relative hidden sm:block">
+                <summary class="navlink list-none cursor-pointer flex items-center gap-1.5" aria-haspopup="menu">
+                    <span class="h-6 w-6 rounded-full bg-brand-100 dark:bg-brand-900 text-brand-800 dark:text-brand-200 grid place-items-center text-[11px] font-semibold">
+                        {{ user.username|slice:":1"|upper }}
+                    </span>
+                    <span class="hidden lg:inline max-w-[8rem] truncate">{{ user.username }}</span>
+                    <svg class="h-3.5 w-3.5 text-stone-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                </summary>
+                <div class="card absolute right-0 mt-2 w-56 p-1.5 z-40" role="menu">
+                    <a href="{% url 'my_library' %}" class="block rounded-lg px-3 py-2 text-sm hover:bg-stone-100 dark:hover:bg-stone-800" role="menuitem">Saved qasidas</a>
+                    <a href="{% url 'my_history' %}" class="block rounded-lg px-3 py-2 text-sm hover:bg-stone-100 dark:hover:bg-stone-800" role="menuitem">Recently read</a>
+                    <a href="{% url 'my_corrections' %}" class="block rounded-lg px-3 py-2 text-sm hover:bg-stone-100 dark:hover:bg-stone-800" role="menuitem">My corrections</a>
+                    <a href="{% url 'account_settings' %}" class="block rounded-lg px-3 py-2 text-sm hover:bg-stone-100 dark:hover:bg-stone-800" role="menuitem">Settings</a>
+                    <form method="post" action="{% url 'logout' %}" class="mt-1 pt-1 border-t border-stone-100 dark:border-stone-800">
+                        {% csrf_token %}
+                        <button type="submit" class="w-full text-left rounded-lg px-3 py-2 text-sm text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800" role="menuitem">Sign out</button>
+                    </form>
+                </div>
+            </details>
+            {% else %}
+            <a href="{% url 'login' %}?next={{ request.get_full_path|urlencode }}" class="navlink hidden sm:inline-flex">Sign in</a>
+            <a href="{% url 'register' %}" class="btn-primary hidden lg:inline-flex py-1.5 px-3 ml-1">Create account</a>
+            {% endif %}
             <button id="theme-toggle" type="button" class="btn-quiet px-2 ml-1" aria-label="Switch between light and dark">
                 <svg class="h-5 w-5 dark:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
                 <svg class="h-5 w-5 hidden dark:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19"/></svg>
@@ -195,7 +227,7 @@
 
 <!-- Bottom tab bar: primary navigation on phones, where a top nav is out of thumb reach. -->
 <nav class="sm:hidden fixed bottom-0 inset-x-0 z-30 safe-b bg-white/95 dark:bg-stone-950/95 backdrop-blur-md border-t border-stone-200 dark:border-stone-800">
-    <div class="grid {% if user.is_staff %}grid-cols-4{% else %}grid-cols-3{% endif %}">
+    <div class="grid {% if user.is_staff %}grid-cols-5{% else %}grid-cols-4{% endif %}">
         {% url 'home' as u_home %}{% url 'browse' as u_browse %}{% url 'search' as u_search %}
         <a href="{{ u_home }}" class="tabbar-item {% if request.resolver_match.url_name == 'home' %}tabbar-on{% endif %}">
             <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/></svg>
@@ -209,6 +241,17 @@
             <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
             Search
         </a>
+        {% if user.is_authenticated %}
+        <a href="{% url 'my_library' %}" class="tabbar-item {% if request.resolver_match.url_name|slice:':3' == 'my_' or request.resolver_match.url_name == 'account_settings' %}tabbar-on{% endif %}">
+            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 20s-7-4.5-7-9.5A3.5 3.5 0 0 1 12 8a3.5 3.5 0 0 1 7 2.5C19 15.5 12 20 12 20Z"/></svg>
+            Saved
+        </a>
+        {% else %}
+        <a href="{% url 'login' %}" class="tabbar-item {% if request.resolver_match.url_name == 'login' or request.resolver_match.url_name == 'register' %}tabbar-on{% endif %}">
+            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 3h4a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1h-4"/><path d="M10 17l5-5-5-5M15 12H3"/></svg>
+            Sign in
+        </a>
+        {% endif %}
         {% if user.is_staff %}
         <a href="{% url 'suggestion_inbox' %}" class="tabbar-item {% if request.resolver_match.url_name == 'suggestion_inbox' %}tabbar-on{% endif %}">
             <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 13h4l1.5 3h5L16 13h4"/><path d="M4 13 6.5 5h11L20 13v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1Z"/></svg>
@@ -247,6 +290,16 @@
             <p class="text-xs text-stone-400 dark:text-stone-500 mt-3">
                 Spotted a mistake? Every qasida page takes corrections.
             </p>
+            {% if user.is_authenticated %}
+            <p class="text-xs mt-3">
+                <a href="{% url 'my_library' %}" class="text-brand-700 dark:text-brand-300 hover:underline">Your saved qasidas</a>
+            </p>
+            {% else %}
+            <p class="text-xs mt-3">
+                <a href="{% url 'register' %}" class="text-brand-700 dark:text-brand-300 hover:underline">Create a free account</a>
+                to save what you find.
+            </p>
+            {% endif %}
         </div>
     </div>
 </footer>
@@ -259,6 +312,18 @@
 </div>
 
 <script>
+/* A details menu stays open until it is told otherwise; closing it on an
+   outside click is what people expect of a dropdown. */
+document.addEventListener('click', function (event) {
+    var menu = document.getElementById('account-menu');
+    if (menu && menu.open && !menu.contains(event.target)) menu.open = false;
+});
+document.addEventListener('keydown', function (event) {
+    if (event.key !== 'Escape') return;
+    var menu = document.getElementById('account-menu');
+    if (menu) menu.open = false;
+});
+
 document.getElementById('theme-toggle').addEventListener('click', function () {
     var dark = document.documentElement.classList.toggle('dark');
     try { localStorage.setItem('theme', dark ? 'dark' : 'light'); } catch (e) { /* ignore */ }
@@ -271,6 +336,50 @@ if ('serviceWorker' in navigator) {
         });
     });
 }
+
+/* Saving a qasida without leaving the page. The form posts normally when
+   this does not run - no JavaScript, an older browser, a failed request -
+   so the button is never dead, it just costs a page load. */
+document.addEventListener('submit', function (event) {
+    var form = event.target.closest('.favourite-form');
+    if (!form) return;
+    if (!window.fetch) return;
+    event.preventDefault();
+
+    var button = form.querySelector('button');
+    var token = form.querySelector('[name=csrfmiddlewaretoken]');
+    if (!button || !token) { form.submit(); return; }
+    button.disabled = true;
+
+    fetch(form.action, {
+        method: 'POST',
+        headers: {'X-Requested-With': 'fetch', 'X-CSRFToken': token.value},
+        body: new URLSearchParams({csrfmiddlewaretoken: token.value}),
+        credentials: 'same-origin'
+    }).then(function (response) {
+        if (!response.ok) throw new Error(response.status);
+        return response.json();
+    }).then(function (data) {
+        var label = button.querySelector('.favourite-label');
+        var icon = button.querySelector('svg');
+        button.dataset.saved = data.saved ? '1' : '0';
+        button.setAttribute('aria-pressed', data.saved ? 'true' : 'false');
+        if (label) label.textContent = data.saved ? 'Saved' : 'Save';
+        if (icon) icon.setAttribute('fill', data.saved ? 'currentColor' : 'none');
+        button.title = data.saved ? 'Remove from your library' : 'Save to your library';
+        button.classList.toggle('text-brand-700', !!data.saved);
+        button.classList.toggle('dark:text-brand-300', !!data.saved);
+        if (button.classList.contains('btn-ghost') || button.classList.contains('btn-primary')) {
+            button.classList.toggle('btn-primary', !!data.saved);
+            button.classList.toggle('btn-ghost', !data.saved);
+        }
+        button.disabled = false;
+    }).catch(function () {
+        /* Fall back to the ordinary post rather than losing the press. */
+        button.disabled = false;
+        form.submit();
+    });
+});
 
 /* Fired only when installable and not yet installed, so this cannot show for
    someone who already added the app. */

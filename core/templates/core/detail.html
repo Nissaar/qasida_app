@@ -4,6 +4,9 @@
 {% block title %}{{ qasida.title|default:"Qasida" }} | Qasida Library{% endblock %}
 
 {% block content %}
+{# Only a template that extends another may set variables inside its blocks. #}
+{% reader_profile as profile %}
+{% is_favourited qasida as saved %}
 <nav class="mb-4 text-sm flex flex-wrap items-center gap-x-2 gap-y-1">
     <a href="{% url 'browse' %}" class="text-stone-500 dark:text-stone-400 hover:text-brand-700 dark:hover:text-brand-300">&larr; Back to the library</a>
     {% if qasida.collection %}
@@ -31,12 +34,31 @@
                     <p dir="auto" class="text-sm text-stone-500 dark:text-stone-400 mt-2">{{ qasida.author }}</p>
                     {% endif %}
                 </div>
-                {% if user.is_staff %}
-                <a href="{% url 'qasida_edit' qasida.slug %}" class="btn-primary shrink-0">
-                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 20h4L20 8l-4-4L4 16Z"/></svg>
-                    Edit
-                </a>
-                {% endif %}
+                <div class="flex items-center gap-2 shrink-0">
+                    {% if user.is_authenticated %}
+                    <form method="post" action="{% url 'toggle_favourite' qasida.slug %}" class="favourite-form">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <button type="submit" class="{% if saved %}btn-primary{% else %}btn-ghost{% endif %}"
+                                data-saved="{{ saved|yesno:'1,0' }}" aria-pressed="{{ saved|yesno:'true,false' }}">
+                            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="{% if saved %}currentColor{% else %}none{% endif %}" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 20s-7-4.5-7-9.5A3.5 3.5 0 0 1 12 8a3.5 3.5 0 0 1 7 2.5C19 15.5 12 20 12 20Z"/></svg>
+                            <span class="favourite-label">{% if saved %}Saved{% else %}Save{% endif %}</span>
+                        </button>
+                    </form>
+                    {% else %}
+                    <a href="{% url 'login' %}?next={{ request.get_full_path|urlencode }}" class="btn-ghost"
+                       title="Sign in to keep this in your own library">
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 20s-7-4.5-7-9.5A3.5 3.5 0 0 1 12 8a3.5 3.5 0 0 1 7 2.5C19 15.5 12 20 12 20Z"/></svg>
+                        Save
+                    </a>
+                    {% endif %}
+                    {% if user.is_staff %}
+                    <a href="{% url 'qasida_edit' qasida.slug %}" class="btn-primary">
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 20h4L20 8l-4-4L4 16Z"/></svg>
+                        Edit
+                    </a>
+                    {% endif %}
+                </div>
             </div>
         </header>
 
@@ -139,7 +161,9 @@
         {% endif %}
 
         {% if qasida.lyrics|length > 1 %}
-        <section class="card p-6 mb-5" id="lyrics">
+        <section class="card p-6 mb-5 {% if profile %}lyrics-{{ profile.lyrics_size }}{% endif %}" id="lyrics"
+                 {% if profile %}data-default-latin="{{ profile.show_transliteration|yesno:'1,0' }}"
+                 data-default-translation="{{ profile.show_translation|yesno:'1,0' }}"{% endif %}>
             <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
                 <h2 class="eyebrow">Lyrics</h2>
                 <div class="flex items-center gap-2">
@@ -244,10 +268,22 @@
             </p>
             <form method="post" class="space-y-4">
                 {% csrf_token %}
+                {% if user.is_authenticated %}
+                <p class="text-sm text-stone-500 dark:text-stone-400">
+                    Sent as <span class="font-medium text-stone-700 dark:text-stone-200">{{ user.username }}</span>.
+                    You can follow what happens to it under
+                    <a href="{% url 'my_corrections' %}" class="text-brand-700 dark:text-brand-300 hover:underline">My corrections</a>.
+                </p>
+                {% else %}
                 <div>
                     <label for="s-email" class="block text-sm font-medium mb-1">Your email <span class="text-stone-400">(required)</span></label>
                     <input id="s-email" type="email" name="email" required class="input">
+                    <p class="text-xs text-stone-400 dark:text-stone-500 mt-1">
+                        <a href="{% url 'login' %}?next={{ request.get_full_path|urlencode }}" class="text-brand-700 dark:text-brand-300 hover:underline">Sign in</a>
+                        instead and you can follow what happens to your correction.
+                    </p>
                 </div>
+                {% endif %}
                 <div>
                     <label for="s-lyrics" class="block text-sm font-medium mb-1">Corrected lyrics</label>
                     <textarea id="s-lyrics" name="suggested_lyrics" rows="10" dir="auto" class="input font-naskh leading-loose">{{ qasida.lyrics }}</textarea>
@@ -355,8 +391,8 @@
 (function () {
     /* Each layer toggles independently and the choice is remembered. */
     [
-        {button: 'latin-toggle', selector: '.latin-block', key: 'showLatin', label: 'Latin'},
-        {button: 'translation-toggle', selector: '.translation-block', key: 'showTranslation', label: 'translation'}
+        {button: 'latin-toggle', selector: '.latin-block', key: 'showLatin', label: 'Latin', dataset: 'defaultLatin'},
+        {button: 'translation-toggle', selector: '.translation-block', key: 'showTranslation', label: 'translation', dataset: 'defaultTranslation'}
     ].forEach(function (layer) {
         var button = document.getElementById(layer.button);
         if (!button) return;
@@ -367,12 +403,24 @@
             button.textContent = (show ? 'Hide ' : 'Show ') + layer.label;
             button.setAttribute('aria-pressed', show ? 'true' : 'false');
         }
+        var section = document.getElementById('lyrics');
+        var accountDefault = section ? section.dataset[layer.dataset] : undefined;
+        var signedIn = accountDefault !== undefined;
+
         var show = true;
-        try { show = localStorage.getItem(layer.key) !== '0'; } catch (e) { /* default on */ }
+        if (signedIn) {
+            /* The account's setting wins over whatever this browser remembers,
+               so the same reader sees the same layout on every device. The
+               button still changes it here, just for this visit. */
+            show = accountDefault === '1';
+        } else {
+            try { show = localStorage.getItem(layer.key) !== '0'; } catch (e) { /* default on */ }
+        }
         apply(show);
         button.addEventListener('click', function () {
             show = !show;
             apply(show);
+            if (signedIn) return;
             try { localStorage.setItem(layer.key, show ? '1' : '0'); } catch (e) { /* ignore */ }
         });
     });
