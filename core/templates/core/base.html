@@ -86,6 +86,10 @@
                verse across the whole screen and RTL text drifts to the edge. */
             .prose-lyrics { @apply font-naskh whitespace-pre-line text-lg sm:text-xl text-stone-800 dark:text-stone-100; line-height: 2.2; max-width: 46rem; }
             .tabbar-item { @apply flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-medium text-stone-500 dark:text-stone-400 transition; }
+            .navlink { @apply inline-flex items-center rounded-lg px-3 py-1.5 text-sm font-medium text-stone-600 dark:text-stone-300 transition hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-brand-800 dark:hover:text-brand-200; }
+            .navlink-on { @apply bg-brand-50 dark:bg-brand-900/40 text-brand-800 dark:text-brand-200; }
+            .tile { @apply card-link p-4 flex flex-col gap-1; }
+            .tile-count { @apply text-xs text-stone-500 dark:text-stone-400 tabular-nums; }
             .tabbar-on { @apply text-brand-700 dark:text-brand-300; }
         }
     </style>
@@ -137,18 +141,22 @@
             </div>
         </form>
 
-        <nav class="ml-auto flex items-center gap-1 shrink-0">
-            <a href="{% url 'browse' %}" class="btn-quiet hidden sm:inline-flex">Browse</a>
+        <nav class="ml-auto flex items-center gap-0.5 shrink-0">
+            {% url 'browse' as u_browse %}{% url 'poets' as u_poets %}{% url 'categories' as u_categories %}{% url 'collections' as u_collections %}
+            <a href="{{ u_browse }}" class="navlink {% if request.path == u_browse %}navlink-on{% endif %}">Qasidas</a>
+            <a href="{{ u_poets }}" class="navlink hidden sm:inline-flex {% if request.path == u_poets %}navlink-on{% endif %}">Poets</a>
+            <a href="{{ u_collections }}" class="navlink hidden md:inline-flex {% if request.path == u_collections %}navlink-on{% endif %}">Collections</a>
+            <a href="{{ u_categories }}" class="navlink hidden sm:inline-flex {% if request.path == u_categories %}navlink-on{% endif %}">Categories</a>
             {% if user.is_staff %}
             {% if library_pending %}
-            <a href="/admin/core/qasida/?review_state__exact=pending" class="btn-quiet hidden sm:inline-flex">
-                <span class="badge-warn">{{ library_pending }} to review</span>
+            <a href="/admin/core/qasida/?review_state__exact=pending" class="navlink hidden md:inline-flex">
+                <span class="badge-warn">{{ library_pending }}</span>
             </a>
             {% endif %}
-            <a href="{% url 'suggestion_inbox' %}" class="btn-quiet hidden sm:inline-flex">Suggestions</a>
-            <a href="/admin/" class="btn-quiet hidden lg:inline-flex hide-in-app">Admin</a>
+            <a href="{% url 'suggestion_inbox' %}" class="navlink hidden md:inline-flex">Suggestions</a>
+            <a href="/admin/" class="navlink hidden lg:inline-flex hide-in-app">Admin</a>
             {% endif %}
-            <button id="theme-toggle" type="button" class="btn-quiet px-2" aria-label="Switch between light and dark">
+            <button id="theme-toggle" type="button" class="btn-quiet px-2 ml-1" aria-label="Switch between light and dark">
                 <svg class="h-5 w-5 dark:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
                 <svg class="h-5 w-5 hidden dark:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19"/></svg>
             </button>
@@ -194,9 +202,37 @@
     </div>
 </nav>
 
-<footer class="hidden sm:block border-t border-stone-200 dark:border-stone-800 py-6 text-center text-sm text-stone-500 dark:text-stone-400">
-    <p>{{ library_total }} works &middot; {{ library_scans }} scanned pages &middot; {{ library_tags }} tags</p>
-    <p class="mt-1">Spotted a mistake? Every qasida page takes corrections.</p>
+<footer class="mt-10 border-t border-stone-200 dark:border-stone-800 bg-white/60 dark:bg-stone-900/40">
+    <div class="mx-auto max-w-6xl 2xl:max-w-[88rem] px-4 sm:px-6 py-8 grid gap-6 sm:grid-cols-3 text-sm">
+        <div>
+            <p class="font-semibold text-brand-900 dark:text-brand-100">Qasida Library</p>
+            <p dir="rtl" lang="ar" class="font-naskh text-base text-brand-700 dark:text-brand-300">مكتبة القصائد</p>
+            <p class="text-stone-500 dark:text-stone-400 mt-2 leading-relaxed">
+                Naats, qasidas, madih and manqabat, searchable in Arabic and Urdu and readable offline.
+            </p>
+        </div>
+        <div>
+            <p class="eyebrow mb-2">Browse</p>
+            <ul class="space-y-1.5 text-stone-600 dark:text-stone-300">
+                <li><a href="{% url 'browse' %}" class="hover:text-brand-700 dark:hover:text-brand-300">All qasidas</a></li>
+                <li><a href="{% url 'poets' %}" class="hover:text-brand-700 dark:hover:text-brand-300">Poets</a></li>
+                <li><a href="{% url 'collections' %}" class="hover:text-brand-700 dark:hover:text-brand-300">Collections</a></li>
+                <li><a href="{% url 'categories' %}" class="hover:text-brand-700 dark:hover:text-brand-300">Categories</a></li>
+                <li><a href="{% url 'random_qasida' %}" class="hover:text-brand-700 dark:hover:text-brand-300">Something at random</a></li>
+            </ul>
+        </div>
+        <div>
+            <p class="eyebrow mb-2">In the library</p>
+            <ul class="space-y-1.5 text-stone-500 dark:text-stone-400 tabular-nums">
+                <li>{{ library_total }} works</li>
+                <li>{{ library_scans }} scanned pages</li>
+                <li>{{ library_tags }} tags</li>
+            </ul>
+            <p class="text-xs text-stone-400 dark:text-stone-500 mt-3">
+                Spotted a mistake? Every qasida page takes corrections.
+            </p>
+        </div>
+    </div>
 </footer>
 
 <div id="install-banner" hidden class="fixed bottom-20 sm:bottom-4 inset-x-3 sm:inset-x-auto sm:right-4 sm:w-80 z-40 card p-3 flex items-center gap-3">

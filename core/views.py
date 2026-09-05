@@ -8,7 +8,7 @@ from django.db.models.functions import Length
 from django.shortcuts import get_object_or_404, redirect, render
 
 from .forms import QasidaForm
-from .models import Qasida, Suggestion, Tag
+from .models import Collection, Qasida, Suggestion, Tag
 from .search import normalize
 
 PAGE_SIZE = 24
@@ -310,4 +310,57 @@ def poet(request, name):
         'poet_name': name,
         'page_obj': paginator.get_page(request.GET.get('page')),
         'total': paginator.count,
+    })
+
+
+def poets(request):
+    """Every poet the library holds, with how much of each it has."""
+    scope = _visible(request)
+    entries = (scope.exclude(author='')
+               .values('author')
+               .annotate(n=Count('id'))
+               .order_by('-n', 'author'))
+    return render(request, 'core/poets.html', {
+        'poets': entries,
+        'total_poets': len(entries),
+        'unattributed': scope.filter(author='').count(),
+    })
+
+
+def categories(request):
+    """
+    The tag vocabulary, arranged by the groups used in the filter sidebar.
+
+    Form, language, melodic mode and metre each read differently, so they are
+    presented as separate sets rather than one long list.
+    """
+    scope = _visible(request)
+    groups = _grouped_tag_facets(_tag_facets(scope), None)
+    return render(request, 'core/categories.html', {
+        'groups': groups,
+        'total_tags': sum(len(group['items']) for group in groups),
+        'languages': _language_facets(scope),
+    })
+
+
+def collections(request):
+    """Works published in parts, such as the chapters of the Burdah."""
+    scope = _visible(request)
+    entries = (Collection.objects
+               .annotate(n=Count('parts', filter=Q(parts__in=scope)))
+               .filter(n__gt=0)
+               .order_by('-n', 'name'))
+    return render(request, 'core/collections.html', {'collections': entries})
+
+
+def collection(request, slug):
+    """One collection, with its parts in reading order."""
+    item = get_object_or_404(Collection, slug=slug)
+    parts = (_visible(request).filter(collection=item)
+             .prefetch_related('tags', 'images')
+             .order_by('collection_position', 'title'))
+    return render(request, 'core/collection.html', {
+        'collection': item,
+        'parts': parts,
+        'total': parts.count(),
     })

@@ -1,0 +1,30 @@
+{% extends 'core/base.html' %}
+{% block title %}Poets | Qasida Library{% endblock %}
+
+{% block content %}
+<header class="mb-6">
+    <h1 class="text-2xl font-bold tracking-tight">Poets</h1>
+    <p class="text-sm text-stone-500 dark:text-stone-400 mt-0.5">
+        <span class="font-semibold text-stone-700 dark:text-stone-200 tabular-nums">{{ total_poets }}</span>
+        named{% if unattributed %}, and {{ unattributed }} works with no attribution recorded{% endif %}
+    </p>
+</header>
+
+{% if poets %}
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+    {% for entry in poets %}
+    <a href="{% url 'poet' entry.author %}" class="tile flex-row items-center gap-3">
+        <span class="shrink-0 h-10 w-10 rounded-full bg-brand-100 dark:bg-brand-900 text-brand-800 dark:text-brand-200 grid place-items-center font-semibold">
+            {{ entry.author|slice:":1"|upper }}
+        </span>
+        <span class="min-w-0">
+            <span dir="auto" class="block font-medium truncate">{{ entry.author }}</span>
+            <span class="tile-count">{{ entry.n }} work{{ entry.n|pluralize }}</span>
+        </span>
+    </a>
+    {% endfor %}
+</div>
+{% else %}
+<p class="card p-8 text-center text-stone-500">No poets recorded yet.</p>
+{% endif %}
+{% endblock %}

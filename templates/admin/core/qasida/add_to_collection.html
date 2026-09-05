@@ -1,0 +1,62 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
+    &rsaquo; <a href="{% url 'admin:core_qasida_changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+    &rsaquo; {% translate 'Add to a collection' %}
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+    <p style="max-width:42em;">
+        {% blocktranslate count counter=queryset|length %}Adding <strong>{{ counter }}</strong> work to a collection.{% plural %}Adding <strong>{{ counter }}</strong> works to a collection.{% endblocktranslate %}
+        {% translate "They are numbered after whatever the collection already holds, so an existing order is kept." %}
+    </p>
+
+    <form method="post">
+        {% csrf_token %}
+        {% for item in queryset %}
+        <input type="hidden" name="{{ action_checkbox_name }}" value="{{ item.pk }}">
+        {% endfor %}
+        <input type="hidden" name="action" value="add_to_collection">
+
+        <fieldset class="module aligned">
+            <div class="form-row">
+                <label for="id_collection">{% translate 'Existing collection' %}</label>
+                <select name="collection" id="id_collection">
+                    <option value="">&mdash;&mdash;&mdash;&mdash;&mdash;&mdash;&mdash;&mdash;&mdash;</option>
+                    {% for c in collections %}
+                    <option value="{{ c.pk }}">{{ c.name }} ({{ c.n }} part{{ c.n|pluralize }})</option>
+                    {% endfor %}
+                </select>
+                <div class="help">{% translate 'Or leave this empty and name a new one below.' %}</div>
+            </div>
+            <div class="form-row">
+                <label for="id_new_collection">{% translate 'New collection' %}</label>
+                <input type="text" name="new_collection" id="id_new_collection"
+                       placeholder="{% translate 'e.g. Burdah' %}">
+                <div class="help">{% translate 'Takes precedence if filled in.' %}</div>
+            </div>
+        </fieldset>
+
+        <div class="submit-row">
+            <input type="submit" name="apply" value="{% translate 'Add to collection' %}" class="default">
+            <a href="{% url 'admin:core_qasida_changelist' %}" class="button">{% translate 'Cancel' %}</a>
+        </div>
+    </form>
+
+    <div class="module">
+        <h2>{% translate 'Selected works' %}</h2>
+        <ul style="padding:10px 26px;">
+            {% for item in queryset|slice:":40" %}
+            <li>{{ item.title|default:"Untitled" }}{% if item.collection %}
+                <span style="opacity:.6;">&mdash; currently in {{ item.collection.name }}</span>{% endif %}</li>
+            {% endfor %}
+            {% if queryset|length > 40 %}<li>&hellip; and {{ queryset|length|add:"-40" }} more</li>{% endif %}
+        </ul>
+    </div>
+</div>
+{% endblock %}

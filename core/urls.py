@@ -15,9 +15,15 @@ urlpatterns = [
         content_type='application/manifest+json'), name='manifest'),
     path('offline/', TemplateView.as_view(template_name='core/offline.html'), name='offline'),
     path('browse/', views.browse, name='browse'),
+    path('poets/', views.poets, name='poets'),
+    path('categories/', views.categories, name='categories'),
+    path('collections/', views.collections, name='collections'),
+    path('collection/<slug:slug>/', views.collection, name='collection'),
     path('search/', views.search, name='search'),
     path('random/', views.random_qasida, name='random_qasida'),
-    path('poet/<str:name>/', views.poet, name='poet'),
+    # `path` rather than `str`: some author fields hold two names joined with
+    # a slash, which `str` refuses to match or reverse.
+    path('poet/<path:name>/', views.poet, name='poet'),
     path('qasida/<int:pk>/', views.qasida_detail, name='qasida_detail'),
     path('qasida/<int:pk>/edit/', views.qasida_edit, name='qasida_edit'),
     path('suggestions/', views.suggestion_inbox, name='suggestion_inbox'),

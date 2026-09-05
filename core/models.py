@@ -1,5 +1,6 @@
 from django.contrib.postgres.indexes import GinIndex
 from django.db import models
+from django.utils.text import slugify
 
 from .search import build_document
 from .youtube import extract_youtube_id
@@ -9,6 +10,31 @@ class Tag(models.Model):
 
     def __str__(self):
         return self.name
+
+class Collection(models.Model):
+    """
+    A work published in parts, such as the chapters of the Burdah.
+
+    Sources list each chapter as its own entry, so the parts arrive unrelated;
+    this gives them a common parent and an order to be read in.
+    """
+    name = models.CharField(max_length=200, unique=True)
+    arabic_name = models.CharField(max_length=200, blank=True)
+    slug = models.SlugField(max_length=220, unique=True)
+    description = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('name',)
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.name)[:220]
+        super().save(*args, **kwargs)
+
 
 class QasidaQuerySet(models.QuerySet):
     def approved(self):
@@ -66,6 +92,13 @@ class Qasida(models.Model):
     source_url = models.URLField(max_length=500, blank=True, null=True)
     source_site = models.ForeignKey('SourceWebsite', null=True, blank=True,
                                     on_delete=models.SET_NULL, related_name='qasidas')
+
+    # Part of a larger work, where there is one.
+    collection = models.ForeignKey('Collection', null=True, blank=True,
+                                   on_delete=models.SET_NULL, related_name='parts')
+    collection_position = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Which part of the collection this is, counting from 1.")
 
     # Nothing crawled is published until a person has checked it. Extraction is
     # imperfect - reconstructed text, OCR, machine translation - so the public

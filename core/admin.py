@@ -1,7 +1,7 @@
 from django.contrib import admin
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.urls import path
-from django.db.models import Count
+from django.db.models import Count, Max
 from django.utils import timezone
 
 from .admin_filters import TextSearchPanel
@@ -11,7 +11,8 @@ from .tasks import enrich_qasida
 admin.site.site_header = "Qasida Library"
 admin.site.site_title = "Qasida Library"
 admin.site.index_title = "Library administration"
-from .models import Tag, Qasida, QasidaImage, QasidaMedia, Suggestion, SourceWebsite
+from .models import (Collection, Tag, Qasida, QasidaImage, QasidaMedia,
+                     Suggestion, SourceWebsite)
 
 @admin.register(Tag)
 class TagAdmin(admin.ModelAdmin):
@@ -39,18 +40,20 @@ class QasidaMediaInline(admin.TabularInline):
 
 @admin.register(Qasida)
 class QasidaAdmin(admin.ModelAdmin):
-    list_display = ('title', 'review_state', 'author', 'language', 'source_site',
-                    'text_quality', 'scan_count', 'has_latin', 'has_translation')
+    list_display = ('title', 'review_state', 'author', 'collection', 'language',
+                    'source_site', 'text_quality', 'scan_count', 'has_latin',
+                    'has_translation')
     # The typed filters come first: author and tag have too many distinct
     # values for Django's default link-per-value rendering.
-    list_filter = (TextSearchPanel, 'review_state', 'source_site', 'language',
-                   'text_quality', 'translation_origin')
+    list_filter = (TextSearchPanel, 'review_state', 'collection', 'source_site',
+                   'language', 'text_quality', 'translation_origin')
     search_help_text = ('Searches title, Arabic title, author, lyrics and transliteration. '
                         'Need to read a scan? Use the Extract text tool at ./ocr-tool/')
     actions = ['approve_for_display', 'send_back_for_review', 'reject_qasidas',
-               'enrich_selected', 'enrich_selected_overwrite']
+               'enrich_selected', 'enrich_selected_overwrite',
+               'add_to_collection', 'remove_from_collection']
     search_fields = ('title', 'arabic_title', 'author', 'lyrics', 'transliteration')
-    list_select_related = ('source_site',)
+    list_select_related = ('source_site', 'collection')
     filter_horizontal = ('tags',)
     inlines = [QasidaMediaInline, QasidaImageInline]
 
@@ -136,6 +139,57 @@ class QasidaAdmin(admin.ModelAdmin):
         if not obj.transliteration or not obj.translation:
             enrich_qasida.delay(obj.pk, False)
 
+    @admin.action(description="Add selected to a collection…")
+    def add_to_collection(self, request, queryset):
+        """
+        Attach the selected works to a collection, creating one if asked.
+
+        Positions continue from whatever the collection already holds, so an
+        existing reading order is not disturbed.
+        """
+        if 'apply' in request.POST:
+            name = (request.POST.get('new_collection') or '').strip()
+            chosen = request.POST.get('collection')
+
+            if name:
+                collection, _ = Collection.objects.get_or_create(name=name)
+            elif chosen:
+                collection = Collection.objects.filter(pk=chosen).first()
+            else:
+                collection = None
+
+            if collection is None:
+                self.message_user(request, "Pick a collection or type a name for a new one.",
+                                  level='warning')
+                return None
+
+            start = (collection.parts.aggregate(top=Max('collection_position'))['top'] or 0)
+            for offset, qasida in enumerate(queryset.order_by('title'), start=1):
+                qasida.collection = collection
+                qasida.collection_position = start + offset
+                qasida.save(update_fields=['collection', 'collection_position'])
+
+            self.message_user(
+                request,
+                f"Added {queryset.count()} work(s) to “{collection.name}”, "
+                f"numbered from {start + 1}.")
+            return redirect(request.get_full_path())
+
+        return render(request, 'admin/core/qasida/add_to_collection.html', {
+            **self.admin_site.each_context(request),
+            'title': 'Add to a collection',
+            'queryset': queryset,
+            'collections': Collection.objects.annotate(n=Count('parts')).order_by('name'),
+            'action_checkbox_name': admin.helpers.ACTION_CHECKBOX_NAME,
+            'opts': self.model._meta,
+        })
+
+    @admin.action(description="Remove selected from their collection")
+    def remove_from_collection(self, request, queryset):
+        count = queryset.update(collection=None, collection_position=None)
+        self.message_user(request, f"Removed {count} work(s) from their collection. "
+                                   f"The works themselves are untouched.")
+
     @admin.action(description="Reject (keep, never display)")
     def reject_qasidas(self, request, queryset):
         count = queryset.update(review_state=Qasida.REVIEW_REJECTED,
@@ -174,3 +228,35 @@ class SourceWebsiteAdmin(admin.ModelAdmin):
     @admin.display(description='Qasidas', ordering='_qasidas')
     def qasida_count(self, obj):
         return obj._qasidas
+
+
+class CollectionPartInline(admin.TabularInline):
+    model = Qasida
+    fk_name = 'collection'
+    extra = 0
+    fields = ('collection_position', 'title', 'review_state')
+    readonly_fields = ('title',)
+    ordering = ('collection_position',)
+    can_delete = False
+    verbose_name = 'part'
+    verbose_name_plural = 'parts, in reading order'
+    show_change_link = True
+
+    def has_add_permission(self, request, obj=None):
+        # Parts are attached from the qasida side, not created here.
+        return False
+
+
+@admin.register(Collection)
+class CollectionAdmin(admin.ModelAdmin):
+    list_display = ('name', 'arabic_name', 'part_count')
+    search_fields = ('name', 'arabic_name')
+    prepopulated_fields = {'slug': ('name',)}
+    inlines = [CollectionPartInline]
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(_parts=Count('parts'))
+
+    @admin.display(description='Parts', ordering='_parts')
+    def part_count(self, obj):
+        return obj._parts

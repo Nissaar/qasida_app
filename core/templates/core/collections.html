@@ -1,0 +1,32 @@
+{% extends 'core/base.html' %}
+{% block title %}Collections | Qasida Library{% endblock %}
+
+{% block content %}
+<header class="mb-6">
+    <h1 class="text-2xl font-bold tracking-tight">Collections</h1>
+    <p class="text-sm text-stone-500 dark:text-stone-400 mt-0.5">
+        Works published in parts, kept together and in order
+    </p>
+</header>
+
+{% if collections %}
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+    {% for item in collections %}
+    <a href="{% url 'collection' item.slug %}" class="tile">
+        <span dir="auto" class="font-semibold text-brand-800 dark:text-brand-200">{{ item.name }}</span>
+        {% if item.arabic_name %}
+        <span dir="rtl" lang="ar" class="font-naskh text-base text-stone-600 dark:text-stone-300">{{ item.arabic_name }}</span>
+        {% endif %}
+        <span class="tile-count">{{ item.n }} part{{ item.n|pluralize }}</span>
+    </a>
+    {% endfor %}
+</div>
+{% else %}
+<div class="card p-10 text-center">
+    <h2 class="font-semibold text-lg">Nothing grouped yet</h2>
+    <p class="text-sm text-stone-500 dark:text-stone-400 mt-1 max-w-sm mx-auto">
+        A collection holds the parts of a longer work, such as the chapters of the Burdah.
+    </p>
+</div>
+{% endif %}
+{% endblock %}

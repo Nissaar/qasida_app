@@ -1,0 +1,40 @@
+{% extends 'core/base.html' %}
+{% block title %}{{ collection.name }} | Qasida Library{% endblock %}
+
+{% block content %}
+<nav class="mb-4 text-sm">
+    <a href="{% url 'collections' %}" class="text-stone-500 dark:text-stone-400 hover:text-brand-700 dark:hover:text-brand-300">&larr; All collections</a>
+</nav>
+
+<header class="mb-6">
+    <h1 dir="auto" class="text-2xl sm:text-3xl font-bold tracking-tight text-brand-900 dark:text-brand-100">{{ collection.name }}</h1>
+    {% if collection.arabic_name %}
+    <p dir="rtl" lang="ar" class="font-naskh text-2xl text-brand-700 dark:text-brand-300 mt-1">{{ collection.arabic_name }}</p>
+    {% endif %}
+    <p class="text-sm text-stone-500 dark:text-stone-400 mt-1.5 tabular-nums">{{ total }} part{{ total|pluralize }}, in reading order</p>
+    {% if collection.description %}
+    <p class="text-stone-600 dark:text-stone-300 mt-3 max-w-2xl">{{ collection.description }}</p>
+    {% endif %}
+</header>
+
+<ol class="card divide-y divide-stone-100 dark:divide-stone-800">
+    {% for part in parts %}
+    <li class="flex items-center gap-4 p-4">
+        <span class="shrink-0 h-8 w-8 rounded-lg bg-brand-50 dark:bg-brand-900/50 text-brand-800 dark:text-brand-200 grid place-items-center text-sm font-semibold tabular-nums">
+            {{ part.collection_position|default:forloop.counter }}
+        </span>
+        <span class="min-w-0 flex-grow">
+            <a href="{% url 'qasida_detail' part.id %}" dir="auto" class="block font-medium text-brand-800 dark:text-brand-200 hover:underline truncate">
+                {{ part.title|default:"Untitled" }}
+            </a>
+            {% if part.arabic_title %}
+            <span dir="rtl" lang="ar" class="block font-naskh text-sm text-stone-600 dark:text-stone-300">{{ part.arabic_title }}</span>
+            {% endif %}
+        </span>
+        {% if part.media.exists %}<span class="chip shrink-0">recording</span>{% endif %}
+    </li>
+    {% empty %}
+    <li class="p-8 text-center text-stone-500">No parts are published yet.</li>
+    {% endfor %}
+</ol>
+{% endblock %}
