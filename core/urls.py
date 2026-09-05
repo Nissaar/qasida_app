@@ -24,7 +24,12 @@ urlpatterns = [
     # `path` rather than `str`: some author fields hold two names joined with
     # a slash, which `str` refuses to match or reverse.
     path('poet/<path:name>/', views.poet, name='poet'),
-    path('qasida/<int:pk>/', views.qasida_detail, name='qasida_detail'),
-    path('qasida/<int:pk>/edit/', views.qasida_edit, name='qasida_edit'),
+    # The numeric route is declared first on purpose: the slug converter also
+    # matches digits, so /qasida/2528/ would otherwise be looked up as a slug
+    # and 404. Links already published, and pages held in the service worker
+    # cache, use this shape.
+    path('qasida/<int:pk>/', views.qasida_by_id, name='qasida_by_id'),
+    path('qasida/<slug:slug>/', views.qasida_detail, name='qasida_detail'),
+    path('qasida/<slug:slug>/edit/', views.qasida_edit, name='qasida_edit'),
     path('suggestions/', views.suggestion_inbox, name='suggestion_inbox'),
 ]

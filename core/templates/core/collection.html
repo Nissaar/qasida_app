@@ -24,7 +24,7 @@
             {{ part.collection_position|default:forloop.counter }}
         </span>
         <span class="min-w-0 flex-grow">
-            <a href="{% url 'qasida_detail' part.id %}" dir="auto" class="block font-medium text-brand-800 dark:text-brand-200 hover:underline truncate">
+            <a href="{{ part.get_absolute_url }}" dir="auto" class="block font-medium text-brand-800 dark:text-brand-200 hover:underline truncate">
                 {{ part.title|default:"Untitled" }}
             </a>
             {% if part.arabic_title %}

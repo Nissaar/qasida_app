@@ -21,7 +21,7 @@
         <header class="card p-6 mb-5">
             <div class="flex flex-wrap items-start justify-between gap-3">
                 <div class="min-w-0">
-                    <h1 dir="auto" class="text-2xl sm:text-3xl font-bold tracking-tight text-brand-900 dark:text-brand-100">
+                    <h1 dir="auto" class="font-display text-3xl sm:text-4xl leading-tight text-brand-900 dark:text-brand-100">
                         {{ qasida.title|default:"Untitled qasida" }}
                     </h1>
                     {% if qasida.arabic_title %}
@@ -32,7 +32,7 @@
                     {% endif %}
                 </div>
                 {% if user.is_staff %}
-                <a href="{% url 'qasida_edit' qasida.pk %}" class="btn-primary shrink-0">
+                <a href="{% url 'qasida_edit' qasida.slug %}" class="btn-primary shrink-0">
                     <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 20h4L20 8l-4-4L4 16Z"/></svg>
                     Edit
                 </a>

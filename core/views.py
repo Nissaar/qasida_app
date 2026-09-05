@@ -212,8 +212,13 @@ def home(request):
         if works:
             featured.append({'language': entry['language'], 'total': entry['n'], 'works': works})
 
+    featured_collections = (Collection.objects
+                            .annotate(n=Count('parts', filter=Q(parts__in=scope)))
+                            .filter(n__gt=0).order_by('-n', 'name')[:6])
+
     return render(request, 'core/home.html', {
         'languages': languages,
+        'collections': featured_collections,
         'poets': _top_poets(scope, HOME_POET_COUNT),
         'forms': _tags_in_group(scope, 'Type', HOME_FORM_COUNT),
         'maqamat': _tags_in_group(scope, 'Maqam (melodic mode)', HOME_MAQAM_COUNT),
@@ -230,8 +235,19 @@ def search(request):
     return _listing(request, 'Search')
 
 
-def qasida_detail(request, pk):
-    qasida = get_object_or_404(_visible(request), pk=pk)
+def qasida_by_id(request, pk):
+    """
+    The old numeric URL, kept working.
+
+    Links to /qasida/<id>/ are already out in the world and cached by the
+    service worker, so they redirect permanently to the slug instead of 404ing.
+    """
+    qasida = get_object_or_404(Qasida, pk=pk)
+    return redirect('qasida_detail', slug=qasida.slug, permanent=True)
+
+
+def qasida_detail(request, slug):
+    qasida = get_object_or_404(_visible(request), slug=slug)
 
     if request.method == 'POST':
         email = request.POST.get('email')
@@ -246,7 +262,7 @@ def qasida_detail(request, pk):
                 suggested_tags=suggested_tags
             )
             messages.success(request, 'Your suggestion has been submitted for review.')
-            return redirect('qasida_detail', pk=pk)
+            return redirect('qasida_detail', slug=qasida.slug)
         else:
             messages.error(request, 'Email is required to submit a suggestion.')
 
@@ -254,8 +270,8 @@ def qasida_detail(request, pk):
 
 
 @staff_member_required
-def qasida_edit(request, pk):
-    qasida = get_object_or_404(Qasida, pk=pk)
+def qasida_edit(request, slug):
+    qasida = get_object_or_404(Qasida, slug=slug)
     form = QasidaForm(request.POST or None, instance=qasida)
     if request.method == 'POST' and form.is_valid():
         form.save()
@@ -293,11 +309,11 @@ def random_qasida(request):
     pick = (_visible(request).exclude(lyrics='')
             .filter(text_quality=Qasida.TEXT_OK)
             .order_by('?')
-            .values_list('pk', flat=True)
+            .values_list('slug', flat=True)
             .first())
     if pick is None:
         return redirect('browse')
-    return redirect('qasida_detail', pk=pick)
+    return redirect('qasida_detail', slug=pick)
 
 
 def poet(request, name):

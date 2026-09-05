@@ -5,7 +5,7 @@
 {% block content %}
 <div class="max-w-3xl mx-auto">
     <nav class="mb-4 text-sm">
-        <a href="{% url 'qasida_detail' qasida.pk %}" class="text-stone-500 dark:text-stone-400 hover:text-brand-700 dark:hover:text-brand-300">&larr; Back to the qasida</a>
+        <a href="{{ qasida.get_absolute_url }}" class="text-stone-500 dark:text-stone-400 hover:text-brand-700 dark:hover:text-brand-300">&larr; Back to the qasida</a>
     </nav>
 
     <h1 class="text-2xl font-bold tracking-tight mb-1">Edit qasida</h1>
@@ -50,7 +50,7 @@
 
         <div class="flex flex-wrap gap-3">
             <button type="submit" class="btn-primary">Save changes</button>
-            <a href="{% url 'qasida_detail' qasida.pk %}" class="btn-ghost">Cancel</a>
+            <a href="{{ qasida.get_absolute_url }}" class="btn-ghost">Cancel</a>
         </div>
     </form>
 </div>

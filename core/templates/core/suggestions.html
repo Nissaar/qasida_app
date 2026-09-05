@@ -19,7 +19,7 @@
 <article class="card p-5 mb-4">
     <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
         <h2 dir="auto" class="font-semibold">
-            <a href="{% url 'qasida_detail' suggestion.qasida.pk %}" class="text-brand-800 dark:text-brand-200 hover:underline">
+            <a href="{{ suggestion.qasida.get_absolute_url }}" class="text-brand-800 dark:text-brand-200 hover:underline">
                 {{ suggestion.qasida.title|default:"Untitled" }}
             </a>
         </h2>
@@ -52,7 +52,7 @@
             <input type="hidden" name="action" value="reject">
             <button type="submit" class="btn-ghost">Reject</button>
         </form>
-        <a href="{% url 'qasida_edit' suggestion.qasida.pk %}" class="btn-ghost">Edit manually</a>
+        <a href="{% url 'qasida_edit' suggestion.qasida.slug %}" class="btn-ghost">Edit manually</a>
     </div>
 </article>
 {% empty %}
@@ -70,7 +70,7 @@
 <div class="card divide-y divide-stone-100 dark:divide-stone-800">
     {% for suggestion in recent %}
     <div class="p-4 flex flex-wrap items-center justify-between gap-2 text-sm">
-        <a dir="auto" href="{% url 'qasida_detail' suggestion.qasida.pk %}" class="text-brand-800 dark:text-brand-200 hover:underline">
+        <a dir="auto" href="{{ suggestion.qasida.get_absolute_url }}" class="text-brand-800 dark:text-brand-200 hover:underline">
             {{ suggestion.qasida.title|default:"Untitled" }}
         </a>
         <span class="{% if suggestion.is_approved %}text-brand-700 dark:text-brand-300{% else %}text-stone-400{% endif %}">

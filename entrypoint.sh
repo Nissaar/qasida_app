@@ -5,9 +5,13 @@ echo "Waiting for PostgreSQL..."
 sleep 5
 
 # apply migrations
+#
+# Only `migrate` runs here. `makemigrations` on a server would invent a
+# migration that exists nowhere in git the moment the code and database
+# disagree, leaving production with history the repository has never seen.
+# Migrations are authored on a developer's machine and committed.
 echo "Applying database migrations..."
-python manage.py makemigrations
-python manage.py migrate
+python manage.py migrate --noinput
 
 # the crawl sources are declared in core/sources.py, so a fresh deployment
 # starts with the full set rather than an empty table

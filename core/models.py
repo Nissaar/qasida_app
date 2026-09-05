@@ -49,6 +49,10 @@ class QasidaQuerySet(models.QuerySet):
 
 class Qasida(models.Model):
     title = models.CharField(max_length=200, blank=True)
+    # Used in the URL in place of the id. Kept ASCII so it survives being
+    # copied around; a title written only in Arabic script has no Latin text
+    # to build from and falls back to the id.
+    slug = models.SlugField(max_length=220, unique=True, blank=True)
     arabic_title = models.CharField(max_length=200, blank=True)
     author = models.CharField(max_length=200, blank=True)
     language = models.CharField(max_length=50, blank=True)
@@ -131,6 +135,36 @@ class Qasida(models.Model):
 
     objects = QasidaQuerySet.as_manager()
 
+    def build_slug(self):
+        """
+        A readable, unique URL fragment for this work.
+
+        Falls back through the transliteration and finally the id, because a
+        title in Arabic or Urdu script slugifies to nothing.
+        """
+        base = slugify(self.title or '')
+        if not base and self.transliteration:
+            first_line = next(
+                (line for line in self.transliteration.splitlines() if line.strip()), '')
+            base = slugify(first_line)
+        if not base:
+            base = f'qasida-{self.pk}' if self.pk else 'qasida'
+        base = base[:200]
+
+        candidate = base
+        suffix = 2
+        siblings = Qasida.objects.exclude(pk=self.pk)
+        while siblings.filter(slug=candidate).exists():
+            candidate = f'{base}-{suffix}'[:220]
+            suffix += 1
+        return candidate
+
+    def get_absolute_url(self):
+        from django.urls import reverse
+        if self.slug:
+            return reverse('qasida_detail', kwargs={'slug': self.slug})
+        return reverse('qasida_by_id', kwargs={'pk': self.pk})
+
     def save(self, *args, **kwargs):
         self.search_text = build_document(
             self.title, self.arabic_title, self.author, self.lyrics,
@@ -139,6 +173,12 @@ class Qasida(models.Model):
         if update_fields:
             kwargs['update_fields'] = list(set(update_fields) | {'search_text'})
         super().save(*args, **kwargs)
+
+        # A row with no title in Latin script needs its id to build a slug, so
+        # this runs after the first save rather than before it.
+        if not self.slug:
+            self.slug = self.build_slug()
+            super().save(update_fields=['slug'])
 
     def __str__(self):
         return self.title or f"Qasida {self.id}"

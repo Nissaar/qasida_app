@@ -2,7 +2,7 @@
 <article class="card-link overflow-hidden flex flex-col">
     {% with scan=qasida.images.first %}
     {% if scan %}
-    <a href="{% url 'qasida_detail' qasida.id %}" class="block bg-stone-100 dark:bg-stone-800" tabindex="-1" aria-hidden="true">
+    <a href="{{ qasida.get_absolute_url }}" class="block bg-stone-100 dark:bg-stone-800" tabindex="-1" aria-hidden="true">
         <img src="{{ scan.image.url }}" alt="" loading="lazy" decoding="async"
              class="w-full h-40 object-cover object-top">
     </a>
@@ -10,8 +10,8 @@
     {% endwith %}
 
     <div class="p-4 flex flex-col flex-grow">
-        <h3 dir="auto" class="font-semibold leading-snug">
-            <a href="{% url 'qasida_detail' qasida.id %}" class="text-brand-800 dark:text-brand-200 hover:underline decoration-brand-400">
+        <h3 dir="auto" class="font-display text-[1.05rem] leading-snug">
+            <a href="{{ qasida.get_absolute_url }}" class="text-brand-800 dark:text-brand-200 hover:underline decoration-brand-400">
                 {{ qasida.title|default:"Untitled qasida" }}
             </a>
         </h3>
