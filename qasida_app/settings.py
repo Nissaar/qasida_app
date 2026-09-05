@@ -226,10 +226,33 @@ MEDIA_ROOT = BASE_DIR / "media"
 EMAIL_BACKEND = os.environ.get(
     "DJANGO_EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
 EMAIL_HOST = os.environ.get("DJANGO_EMAIL_HOST", "")
-EMAIL_PORT = int(os.environ.get("DJANGO_EMAIL_PORT", "587"))
+
+
+def _env_int(name, default):
+    """An unset or empty variable falls back rather than killing the process.
+
+    Compose writes an empty string for a variable declared but left blank in
+    .env, and int("") raises, which would take the whole site down at import
+    over a mail setting.
+    """
+    try:
+        return int(os.environ.get(name, "") or default)
+    except ValueError:
+        return default
+
+
+def _env_flag(name, default=True):
+    """Accept the spellings people actually write, not just "True"."""
+    raw = os.environ.get(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw in ("1", "true", "yes", "on")
+
+
+EMAIL_PORT = _env_int("DJANGO_EMAIL_PORT", 587)
 EMAIL_HOST_USER = os.environ.get("DJANGO_EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("DJANGO_EMAIL_HOST_PASSWORD", "")
-EMAIL_USE_TLS = os.environ.get("DJANGO_EMAIL_USE_TLS", "True") == "True"
+EMAIL_USE_TLS = _env_flag("DJANGO_EMAIL_USE_TLS", True)
 DEFAULT_FROM_EMAIL = os.environ.get("DJANGO_DEFAULT_FROM_EMAIL", "no-reply@localhost")
 SERVER_EMAIL = DEFAULT_FROM_EMAIL
 

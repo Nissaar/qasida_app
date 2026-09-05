@@ -291,7 +291,14 @@ class ReaderProfileInline(admin.StackedInline):
     extra = 0
 
 
-admin.site.unregister(get_user_model())
+# django.contrib.auth registers the user model when its admin module loads,
+# which happens before this one because it is listed earlier in INSTALLED_APPS.
+# Guarded anyway: a code path that imports this module without that autodiscover
+# would otherwise raise on import and take the whole admin with it.
+try:
+    admin.site.unregister(get_user_model())
+except admin.sites.NotRegistered:
+    pass
 
 
 @admin.register(get_user_model())
