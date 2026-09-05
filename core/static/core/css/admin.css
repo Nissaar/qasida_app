@@ -568,8 +568,74 @@ input[name="arabic_title"], #ocr-output {
 
 @media (max-width: 1024px) {
     #changelist-filter { width: auto; }
-    #content { padding: 16px; }
-    #header { padding: 0 16px; }
-    div.breadcrumbs { padding: 14px 16px 0; }
+    #content { padding: 1rem; }
+    #header { padding: 0 1rem; }
+    div.breadcrumbs { padding: .9rem 1rem 0; }
     h1 { font-size: clamp(1.25rem, 3vw, 1.5rem); }
 }
+
+/* ---- phones ----------------------------------------------------------
+ * Django collapses its own sidebar below 767px. The fixed width and full
+ * height set above would stop that working, so they are released here and
+ * the rail lays out in the normal flow instead.
+ */
+@media (max-width: 767px) {
+    #nav-sidebar {
+        width: auto;
+        min-height: 0;
+        padding: 0 .75rem .75rem;
+    }
+    .q-brand { padding: 1rem .5rem .75rem; }
+
+    /* The top bar has to wrap rather than squash its links onto one line. */
+    #header {
+        height: auto;
+        min-height: 0;
+        padding: .6rem 1rem;
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        gap: .5rem;
+    }
+    #user-tools { width: 100%; text-align: left; line-height: 1.7; }
+
+    #content { padding: .85rem; }
+    div.breadcrumbs { padding: .75rem .85rem 0; }
+
+    /* Panels lose their side margins so the content keeps its width. */
+    .module, .inline-group, #changelist, #changelist-filter { border-radius: .75rem; }
+    .module h2, .module caption, .inline-group h2 { padding: .85rem 1rem .7rem; }
+    .form-row { padding: .85rem 1rem; }
+
+    /* A wide table scrolls inside its own panel rather than the page. */
+    #changelist { overflow: hidden; }
+    .results { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    #changelist thead th, #changelist tbody td, #changelist tbody th {
+        padding: .7rem .75rem;
+        white-space: nowrap;
+    }
+    /* The title column is the one worth wrapping. */
+    #changelist tbody th, #changelist tbody td:first-of-type { white-space: normal; min-width: 9rem; }
+
+    /* Stack the label above the field: side-by-side is unreadable at this width. */
+    .aligned label { display: block; width: auto; padding: 0 0 .25rem; float: none; }
+    .aligned .vTextField, .aligned input, .aligned select, .aligned textarea { width: 100%; box-sizing: border-box; }
+
+    /* Action bars wrap instead of overflowing. */
+    .object-tools { display: flex; flex-wrap: wrap; gap: .4rem; float: none; margin: 0 0 .75rem; }
+    .object-tools li { margin: 0; }
+    .submit-row { display: flex; flex-wrap: wrap; gap: .5rem; padding: .85rem 1rem; }
+    .submit-row input, .submit-row a { width: 100%; text-align: center; }
+    #changelist-form .actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+    #toolbar form #searchbar { min-width: 0; width: 100%; }
+    #toolbar { padding: .85rem 1rem; }
+
+    /* Dashboard grids collapse to one column on their own, but the figures
+       should not dominate the screen. */
+    .q-stats { grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr)); gap: .6rem; }
+    .q-stats > div { padding: .85rem 1rem; }
+    .q-manage-row { flex-wrap: wrap; gap: .4rem 1rem; padding: .85rem 1rem; }
+    .q-manage-app { flex-basis: 100%; order: 3; }
+}
+
+/* Nothing should ever make the page itself scroll sideways. */
+html, body { max-width: 100%; overflow-x: hidden; }

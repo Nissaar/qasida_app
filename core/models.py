@@ -165,8 +165,15 @@ class QasidaMedia(models.Model):
 
     @property
     def embed_url(self):
-        # youtube-nocookie avoids setting tracking cookies for readers.
-        return f"https://www.youtube-nocookie.com/embed/{self.video_id}" if self.video_id else ''
+        # The nocookie host refuses more videos than the main one, which shows
+        # up as an in-player error rather than anything we can catch, so the
+        # main embed host is used.
+        return f"https://www.youtube.com/embed/{self.video_id}" if self.video_id else ''
+
+    @property
+    def watch_url(self):
+        """Somewhere to send the reader when the owner disallows embedding."""
+        return f"https://www.youtube.com/watch?v={self.video_id}" if self.video_id else self.url
 
     @property
     def thumbnail_url(self):
