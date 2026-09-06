@@ -1097,6 +1097,59 @@ class LayerPairingTest(TestCase):
         paired = [line for row in rows for line in row['latin'].splitlines()]
         self.assertEqual(paired, [f'L{n}' for n in range(1, 13)])
 
+    def test_two_hemistichs_on_a_line_pair_with_two_lines_of_layer(self):
+        """
+        The classical bayt: one verse, two halves.
+
+        Arabic is very often typed with both halves on one line separated by a
+        wide gap, while the transliteration gives each half its own line. The
+        two then stand in a strict 1:2 ratio and can never match line for
+        line, which is why one work displayed as whole blocks while others
+        interleaved.
+        """
+        from .templatetags.qasida_extras import layers_are_paired, stanza_rows
+        qasida = make_qasida(
+            lyrics='\n\n'.join(f'sadr{n}    ajuz{n}' for n in range(1, 5)),
+            transliteration='\n'.join(f'L{n}a\nL{n}b' for n in range(1, 5)),
+            translation='\n'.join(f'E{n}a\nE{n}b' for n in range(1, 5)))
+
+        self.assertTrue(layers_are_paired(qasida))
+        rows = stanza_rows(qasida)
+        self.assertEqual(len(rows), 4)
+        for index, row in enumerate(rows, start=1):
+            self.assertEqual(row['latin'].splitlines(), [f'L{index}a', f'L{index}b'])
+            self.assertEqual(row['translation'].splitlines(), [f'E{index}a', f'E{index}b'])
+
+    def test_the_ratio_alone_does_not_justify_folding_lines_together(self):
+        """
+        Two is an easy ratio to hit by accident.
+
+        Without the wide gap that marks two halves on a line, a layer with
+        twice as many lines is left unpaired rather than folded together on
+        the arithmetic alone.
+        """
+        from .templatetags.qasida_extras import layers_are_paired
+        qasida = make_qasida(
+            lyrics='alif\n\nbaa\n\njeem\n\ndaal',
+            transliteration='\n'.join(f'L{n}' for n in range(1, 9)))
+        self.assertFalse(layers_are_paired(qasida))
+
+    def test_a_stray_gap_on_one_line_is_not_taken_as_evidence(self):
+        """A clear majority of lines must carry the gap, not just one."""
+        from .templatetags.qasida_extras import layers_are_paired
+        qasida = make_qasida(
+            lyrics='alif    with a gap\n\nbaa\n\njeem\n\ndaal',
+            transliteration='\n'.join(f'L{n}' for n in range(1, 9)))
+        self.assertFalse(layers_are_paired(qasida))
+
+    def test_hemistich_pairing_leaves_one_to_one_works_alone(self):
+        """The common case must not be disturbed by the new one."""
+        from .templatetags.qasida_extras import stanza_rows
+        qasida = make_qasida(lyrics='sadr1    ajuz1\n\nsadr2    ajuz2',
+                             transliteration='L1\n\nL2')
+        rows = stanza_rows(qasida)
+        self.assertEqual([row['latin'] for row in rows], ['L1', 'L2'])
+
     def test_a_work_with_no_transliteration_gains_no_empty_section(self):
         _, body = self.page(lyrics='alif\nbaa', transliteration='')
         self.assertNotIn('Latin script', body)

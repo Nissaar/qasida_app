@@ -61,7 +61,31 @@ def _shape(blocks):
     return [len(_lines(block)) for block in blocks]
 
 
-def _regrouped_like(original_blocks, layer_text):
+# A bayt is classically one verse of two hemistichs, and Arabic is very often
+# typed that way - both halves on one line, separated by a run of spaces -
+# while the transliteration and the translation give each half its own line.
+# The two then stand in a strict 1:2 ratio and can never match line for line.
+HEMISTICH_GAP_RE = re.compile(r'\S[ \t\u00a0]{2,}\S')
+
+
+def _hemistichs_per_line(original_blocks):
+    """
+    Two when the original sets both halves of each verse on one line.
+
+    Read from the text rather than assumed: a clear majority of lines must
+    carry the wide internal gap that separates the halves. Without that
+    evidence this stays at one, and a layer with twice as many lines is left
+    unpaired rather than folded together on the strength of the arithmetic
+    alone - two happens to be a very easy ratio to hit by coincidence.
+    """
+    lines = [line for block in original_blocks for line in _lines(block)]
+    if not lines:
+        return 1
+    gapped = sum(1 for line in lines if HEMISTICH_GAP_RE.search(line))
+    return 2 if gapped * 3 >= len(lines) * 2 else 1
+
+
+def _regrouped_like(original_blocks, layer_text, per_line=1):
     """
     Cut a layer into the original's stanza pattern, or None.
 
@@ -71,11 +95,15 @@ def _regrouped_like(original_blocks, layer_text):
     of lines, they are still the same poem line for line, so the layer is cut
     to the original's shape and lines up after all.
 
-    Only exact line agreement counts. Anything looser would set verse three
-    against verse four, which is worse than not pairing at all.
+    `per_line` is how many of the layer's lines answer to one line of the
+    original - two where the original puts both hemistichs of a verse on one
+    line and the layer gives each its own.
+
+    Only exact agreement counts. Anything looser would set verse three against
+    verse four, which is worse than not pairing at all.
     """
     lines = _lines(layer_text)
-    shape = _shape(original_blocks)
+    shape = [count * per_line for count in _shape(original_blocks)]
     if not lines or sum(shape) != len(lines):
         return None
 
@@ -98,7 +126,17 @@ def _aligned_by_shape(original_blocks, layer_text):
     blocks = _stanzas(layer_text)
     if blocks and _shape(blocks) == _shape(original_blocks):
         return blocks
-    return _regrouped_like(original_blocks, layer_text)
+
+    paired = _regrouped_like(original_blocks, layer_text)
+    if paired is not None:
+        return paired
+
+    # The original may be setting two hemistichs to a line where the layer
+    # gives each its own; both halves then sit under the verse they belong to.
+    per_line = _hemistichs_per_line(original_blocks)
+    if per_line > 1:
+        return _regrouped_like(original_blocks, layer_text, per_line)
+    return None
 
 
 def _aligned_by_count(original_blocks, layer_text):
