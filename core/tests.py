@@ -1061,6 +1061,32 @@ class LayerPairingTest(TestCase):
         for row in stanza_rows(qasida):
             self.assertEqual(row['latin'], '')
 
+    def test_equal_stanza_counts_are_not_enough_on_their_own(self):
+        """
+        Uneven stanzas against one unbroken block.
+
+        Both come out as three stanzas, because a long block is sub-grouped
+        into fours for reading rhythm. Pairing on that count alone put the
+        fifth line of the original against nothing and its transliteration
+        against the next stanza.
+        """
+        from .templatetags.qasida_extras import stanza_rows
+        original = '\n'.join(f'A{n}' for n in range(1, 6)) + '\n\n' \
+                   + '\n'.join(f'B{n}' for n in range(1, 5)) + '\n\n' \
+                   + '\n'.join(f'C{n}' for n in range(1, 4))
+        qasida = make_qasida(
+            lyrics=original,
+            transliteration='\n'.join(f'L{n}' for n in range(1, 13)))
+
+        rows = stanza_rows(qasida)
+        for row in rows:
+            self.assertEqual(len(row['original'].splitlines()),
+                             len(row['latin'].splitlines()),
+                             'a stanza was paired with the wrong number of lines')
+        # Every line accounted for, once, in order.
+        paired = [line for row in rows for line in row['latin'].splitlines()]
+        self.assertEqual(paired, [f'L{n}' for n in range(1, 13)])
+
     def test_a_work_with_no_transliteration_gains_no_empty_section(self):
         _, body = self.page(lyrics='alif\nbaa', transliteration='')
         self.assertNotIn('Latin script', body)

@@ -82,17 +82,31 @@ def _regrouped_like(original_blocks, layer_text):
     return blocks
 
 
+def _shape(blocks):
+    """How many lines each stanza holds."""
+    return [len(_lines(block)) for block in blocks]
+
+
 def _paired_layer(original_blocks, layer_text):
     """
     The layer arranged against `original_blocks`, or None if it cannot be.
 
     Tried in order of confidence: the source's own stanza marks first, then
     line-for-line, then give up and let the page show the layer whole.
+
+    Matching stanza counts is not on its own enough, and assuming it was put
+    the wrong verses together. A twelve-line original written as stanzas of
+    five, four and three, against a transliteration typed as one block, both
+    come out as three stanzas - because a long unbroken block is sub-grouped
+    into fours for reading rhythm. Three equals three, so they paired, and the
+    fifth line of the original sat against nothing while its transliteration
+    sat against the next stanza. The shapes have to agree too; where they do
+    not, cutting the layer to the original's own shape is what gets it right.
     """
     if not layer_text or not layer_text.strip():
         return None
     blocks = _display_stanzas(layer_text)
-    if blocks and len(blocks) == len(original_blocks):
+    if blocks and _shape(blocks) == _shape(original_blocks):
         return blocks
     return _regrouped_like(original_blocks, layer_text)
 
