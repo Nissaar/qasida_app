@@ -51,6 +51,21 @@ CSRF_TRUSTED_ORIGINS = [
     if origin.strip()
 ]
 
+# Referrer policy.
+#
+# Django's SecurityMiddleware defaults this to "same-origin", which sends no
+# Referer header at all on a cross-origin request. YouTube uses that header to
+# work out which site an embed is being played from, and without it refuses to
+# play with error 153 - so every recording on the site failed while the video
+# itself was perfectly fine.
+#
+# "strict-origin-when-cross-origin" is what current browsers use by default. It
+# sends only the origin to another site, never the path, so YouTube learns the
+# domain and not which qasida is being read, and it sends nothing at all if the
+# connection is downgraded to HTTP.
+SECURE_REFERRER_POLICY = os.environ.get(
+    "DJANGO_REFERRER_POLICY", "strict-origin-when-cross-origin")
+
 # Cookies only over HTTPS once a proxy terminates TLS for us.
 SESSION_COOKIE_SECURE = os.environ.get("DJANGO_SECURE_COOKIES", "") == "True"
 CSRF_COOKIE_SECURE = SESSION_COOKIE_SECURE

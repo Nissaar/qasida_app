@@ -1492,3 +1492,47 @@ class SuggestionFieldsTest(TestCase):
         body = self.client.get(reverse('suggestion_inbox')).content.decode()
         self.assertIn('Old Poet', body)
         self.assertIn('Correct Poet', body)
+
+
+class ReferrerPolicyTest(TestCase):
+    """
+    The header that decides whether the recordings play.
+
+    YouTube works out which site an embed is being played from by reading the
+    Referer header. Django's SecurityMiddleware defaults to "same-origin",
+    which sends none at all across origins, and YouTube then refuses to play
+    with error 153 - the video is fine, it simply will not say who is asking.
+
+    This is the sort of setting that gets tightened later in the name of
+    security, so the consequence is written down here rather than rediscovered.
+    """
+
+    # Policies that send nothing whatsoever to another origin.
+    SILENT_ACROSS_ORIGINS = {'same-origin', 'no-referrer'}
+
+    def test_something_reaches_youtube(self):
+        from django.conf import settings
+        self.assertNotIn(settings.SECURE_REFERRER_POLICY,
+                         self.SILENT_ACROSS_ORIGINS,
+                         'this policy sends no Referer to YouTube, and every '
+                         'recording on the site fails with error 153')
+
+    def test_the_header_is_actually_sent(self):
+        response = self.client.get(reverse('browse'))
+        self.assertNotIn(response.headers.get('Referrer-Policy'),
+                         self.SILENT_ACROSS_ORIGINS)
+
+    def test_only_the_origin_is_shared_not_the_page(self):
+        """
+        YouTube may learn the domain; it has no business knowing which qasida
+        someone is reading, and nothing should leak over plain HTTP.
+        """
+        response = self.client.get(reverse('browse'))
+        self.assertEqual(response.headers.get('Referrer-Policy'),
+                         'strict-origin-when-cross-origin')
+
+    def test_the_player_states_the_policy_on_the_frame_itself(self):
+        qasida = make_qasida(title='With A Recording')
+        qasida.media.create(url='https://www.youtube.com/watch?v=dQw4w9WgXcQ')
+        body = self.client.get(qasida.get_absolute_url()).content.decode()
+        self.assertIn('referrerPolicy', body)
