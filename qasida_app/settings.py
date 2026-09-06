@@ -11,8 +11,13 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
 import os
+import warnings
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
+
+from django.core.exceptions import ImproperlyConfigured
+
+from . import mailconf
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -223,36 +228,58 @@ MEDIA_ROOT = BASE_DIR / "media"
 # default so a development container never tries to reach a mail server; set
 # DJANGO_EMAIL_BACKEND to the SMTP backend in production and the reset link is
 # delivered for real.
-EMAIL_BACKEND = os.environ.get(
-    "DJANGO_EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
+EMAIL_BACKEND = os.environ.get("DJANGO_EMAIL_BACKEND", mailconf.CONSOLE_BACKEND)
 EMAIL_HOST = os.environ.get("DJANGO_EMAIL_HOST", "")
-
-
-def _env_int(name, default):
-    """An unset or empty variable falls back rather than killing the process.
-
-    Compose writes an empty string for a variable declared but left blank in
-    .env, and int("") raises, which would take the whole site down at import
-    over a mail setting.
-    """
-    try:
-        return int(os.environ.get(name, "") or default)
-    except ValueError:
-        return default
-
-
-def _env_flag(name, default=True):
-    """Accept the spellings people actually write, not just "True"."""
-    raw = os.environ.get(name, "").strip().lower()
-    if not raw:
-        return default
-    return raw in ("1", "true", "yes", "on")
-
-
-EMAIL_PORT = _env_int("DJANGO_EMAIL_PORT", 587)
+EMAIL_PORT = mailconf.env_int(os.environ.get("DJANGO_EMAIL_PORT"), mailconf.DEFAULT_SMTP_PORT)
 EMAIL_HOST_USER = os.environ.get("DJANGO_EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("DJANGO_EMAIL_HOST_PASSWORD", "")
-EMAIL_USE_TLS = _env_flag("DJANGO_EMAIL_USE_TLS", True)
+EMAIL_USE_TLS = mailconf.env_flag(os.environ.get("DJANGO_EMAIL_USE_TLS"), True)
+EMAIL_USE_SSL = mailconf.env_flag(os.environ.get("DJANGO_EMAIL_USE_SSL"), False)
+
+# Mailgun, set up with nothing but the credentials from its dashboard.
+#
+# Mailgun is an ordinary SMTP relay, so the DJANGO_EMAIL_* variables above can
+# drive it. These exist so that is not something anyone has to work out: set
+# the SMTP login and password Mailgun shows for a sending domain, and the host,
+# port, backend and TLS are filled in. Being the more specific instruction,
+# they win over the generic variables.
+#
+# MAILGUN_SMTP_LOGIN is the "postmaster@mg.yourdomain.com" style user and
+# MAILGUN_SMTP_PASSWORD is that domain's SMTP password. Neither is the account
+# API key: those are different credentials and an API key will not
+# authenticate over SMTP.
+_mailgun = mailconf.mailgun_config(
+    os.environ.get("MAILGUN_SMTP_LOGIN"),
+    os.environ.get("MAILGUN_SMTP_PASSWORD"),
+    os.environ.get("MAILGUN_REGION"),
+    os.environ.get("DJANGO_EMAIL_PORT"),
+)
+if _mailgun:
+    globals().update(_mailgun)
+    if mailconf.looks_like_an_api_key(os.environ.get("MAILGUN_SMTP_PASSWORD")):
+        # Not fatal: it may be a genuine passphrase that happens to look like
+        # one, and refusing to start over a guess would be worse. But this
+        # fails only when mail is sent, so say it now rather than let password
+        # resets vanish silently.
+        warnings.warn(
+            "MAILGUN_SMTP_PASSWORD looks like a Mailgun API key. SMTP needs the "
+            "sending domain's SMTP password, which is a different credential; "
+            "an API key will be rejected at send time.",
+            RuntimeWarning,
+        )
+
+# Django refuses to start with both set, and its message does not say which
+# variable to look at.
+if EMAIL_USE_TLS and EMAIL_USE_SSL:
+    raise ImproperlyConfigured(
+        "Set only one of DJANGO_EMAIL_USE_TLS and DJANGO_EMAIL_USE_SSL: "
+        "TLS on port 587 (the usual choice), or SSL on port 465."
+    )
+
+# A reset is sent while the reader waits, so an unreachable mail server must
+# not hold a gunicorn worker open indefinitely.
+EMAIL_TIMEOUT = mailconf.env_int(os.environ.get("DJANGO_EMAIL_TIMEOUT"), 10)
+
 DEFAULT_FROM_EMAIL = os.environ.get("DJANGO_DEFAULT_FROM_EMAIL", "no-reply@localhost")
 SERVER_EMAIL = DEFAULT_FROM_EMAIL
 

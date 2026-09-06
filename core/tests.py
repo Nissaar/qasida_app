@@ -743,3 +743,91 @@ class RenderedOutputTest(TestCase):
         for path in ('/admin/', '/admin/core/qasida/', '/admin/auth/user/',
                      '/admin/core/collection/', '/admin/core/suggestion/'):
             self.assert_clean(self.client.get(path), path)
+
+
+class MailConfigTest(TestCase):
+    """
+    The rules that turn environment variables into SMTP settings.
+
+    Tested against the functions rather than by re-importing settings, because
+    settings are read once at startup and a wrong answer here is only ever
+    discovered when a password reset fails to arrive.
+    """
+
+    def setUp(self):
+        from qasida_app import mailconf
+        self.mailconf = mailconf
+
+    def test_no_credentials_means_no_mailgun(self):
+        self.assertEqual(self.mailconf.mailgun_config('', ''), {})
+        self.assertEqual(self.mailconf.mailgun_config('user', ''), {})
+        self.assertEqual(self.mailconf.mailgun_config('', 'password'), {})
+        self.assertEqual(self.mailconf.mailgun_config(None, None), {})
+
+    def test_credentials_produce_a_complete_smtp_configuration(self):
+        config = self.mailconf.mailgun_config('postmaster@mg.example.com', 'secret')
+        self.assertEqual(config['EMAIL_BACKEND'], self.mailconf.SMTP_BACKEND)
+        self.assertEqual(config['EMAIL_HOST'], 'smtp.mailgun.org')
+        self.assertEqual(config['EMAIL_PORT'], 587)
+        self.assertEqual(config['EMAIL_HOST_USER'], 'postmaster@mg.example.com')
+        self.assertEqual(config['EMAIL_HOST_PASSWORD'], 'secret')
+        self.assertTrue(config['EMAIL_USE_TLS'])
+        self.assertFalse(config['EMAIL_USE_SSL'])
+
+    def test_the_eu_region_uses_its_own_host(self):
+        """A domain created in one region cannot send through the other."""
+        for region in ('eu', 'EU', ' Eu '):
+            self.assertEqual(
+                self.mailconf.mailgun_config('u', 'p', region)['EMAIL_HOST'],
+                'smtp.eu.mailgun.org')
+
+    def test_an_unknown_region_falls_back_rather_than_failing(self):
+        self.assertEqual(self.mailconf.mailgun_config('u', 'p', 'mars')['EMAIL_HOST'],
+                         'smtp.mailgun.org')
+
+    def test_port_465_switches_to_implicit_tls(self):
+        """465 is implicit TLS; STARTTLS on it hangs rather than erroring."""
+        config = self.mailconf.mailgun_config('u', 'p', port_raw='465')
+        self.assertTrue(config['EMAIL_USE_SSL'])
+        self.assertFalse(config['EMAIL_USE_TLS'])
+
+    def test_tls_and_ssl_are_never_both_set(self):
+        """Django refuses to start if they are."""
+        for port in (None, '587', '465', '2525', 'nonsense'):
+            config = self.mailconf.mailgun_config('u', 'p', port_raw=port)
+            self.assertNotEqual(config['EMAIL_USE_TLS'], config['EMAIL_USE_SSL'],
+                                f'both flags agreed on port {port!r}')
+
+    def test_a_blank_port_does_not_crash(self):
+        """Compose writes an empty string for a variable left blank in .env."""
+        self.assertEqual(self.mailconf.env_int('', 587), 587)
+        self.assertEqual(self.mailconf.env_int(None, 587), 587)
+        self.assertEqual(self.mailconf.env_int('not a number', 587), 587)
+        self.assertEqual(self.mailconf.env_int('2525', 587), 2525)
+
+    def test_flags_accept_the_spellings_people_write(self):
+        for raw in ('1', 'true', 'True', 'YES', 'on', ' On '):
+            self.assertTrue(self.mailconf.env_flag(raw, False), raw)
+        for raw in ('0', 'false', 'no', 'off'):
+            self.assertFalse(self.mailconf.env_flag(raw, True), raw)
+        # Unset falls back to whatever the caller asked for.
+        self.assertTrue(self.mailconf.env_flag('', True))
+        self.assertFalse(self.mailconf.env_flag(None, False))
+
+    def test_an_api_key_pasted_instead_of_an_smtp_password_is_recognised(self):
+        for key in ('key-3ax6xnjp29jd6fds4gc373sgvjxleqe3',
+                    'KEY-3ax6xnjp29jd6fds4gc373sgvjxleqe3',
+                    '0123456789abcdef0123456789abcdef'):
+            self.assertTrue(self.mailconf.looks_like_an_api_key(key), key)
+
+    def test_a_real_password_is_not_mistaken_for_an_api_key(self):
+        for password in ('', None, 'hunter2', 'a long but ordinary passphrase',
+                         'Str0ng-SMTP-Password!'):
+            self.assertFalse(self.mailconf.looks_like_an_api_key(password),
+                             repr(password))
+
+    def test_the_running_configuration_is_consistent(self):
+        """Whatever this deployment is set to, it must be usable."""
+        from django.conf import settings
+        self.assertFalse(settings.EMAIL_USE_TLS and settings.EMAIL_USE_SSL)
+        self.assertGreater(settings.EMAIL_TIMEOUT, 0)

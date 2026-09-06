@@ -84,6 +84,13 @@ services:
       DJANGO_EMAIL_HOST_USER: ${DJANGO_EMAIL_HOST_USER:-}
       DJANGO_EMAIL_HOST_PASSWORD: ${DJANGO_EMAIL_HOST_PASSWORD:-}
       DJANGO_EMAIL_USE_TLS: ${DJANGO_EMAIL_USE_TLS:-True}
+      DJANGO_EMAIL_USE_SSL: ${DJANGO_EMAIL_USE_SSL:-False}
+      DJANGO_EMAIL_TIMEOUT: ${DJANGO_EMAIL_TIMEOUT:-10}
+      # Mailgun, if you use it: these three alone are enough, and they take
+      # precedence over the generic DJANGO_EMAIL_* variables above.
+      MAILGUN_SMTP_LOGIN: ${MAILGUN_SMTP_LOGIN:-}
+      MAILGUN_SMTP_PASSWORD: ${MAILGUN_SMTP_PASSWORD:-}
+      MAILGUN_REGION: ${MAILGUN_REGION:-us}
       DJANGO_DEFAULT_FROM_EMAIL: ${DJANGO_DEFAULT_FROM_EMAIL:-no-reply@${SITE_HOST}}
     labels:
       - "traefik.enable=true"
