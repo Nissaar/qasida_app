@@ -980,3 +980,112 @@ class AdminListingTest(TestCase):
                                    {'category__exact': Tag.CATEGORY_MAQAM})
         self.assertEqual([t.name for t in response.context['cl'].result_list],
                          ['maqam-rast'])
+
+
+class LayerPairingTest(TestCase):
+    """
+    How a transliteration and a translation are set against the verses.
+
+    Sources are inconsistent about blank lines, so the same work can arrive
+    with the original as one block and its transliteration split into verses,
+    or the reverse. Whatever the shape, neither layer may go missing: it is
+    paired if it honestly can be, and shown whole if it cannot.
+    """
+
+    def page(self, **fields):
+        qasida = make_qasida(**fields)
+        return qasida, self.client.get(qasida.get_absolute_url()).content.decode()
+
+    def test_matching_stanza_counts_pair_up(self):
+        qasida, body = self.page(
+            lyrics='alif\n\nbaa',
+            transliteration='ALEF-one\n\nBAA-two',
+            translation='first\n\nsecond')
+        from .templatetags.qasida_extras import (stanza_rows,
+                                                 transliteration_is_aligned,
+                                                 translation_is_aligned)
+        self.assertTrue(transliteration_is_aligned(qasida))
+        self.assertTrue(translation_is_aligned(qasida))
+        rows = stanza_rows(qasida)
+        self.assertEqual(rows[0]['latin'], 'ALEF-one')
+        self.assertEqual(rows[1]['translation'], 'second')
+        self.assertIn('ALEF-one', body)
+
+    def test_differing_stanzas_but_equal_lines_are_paired_line_for_line(self):
+        """One block against three verses is still the same poem, line by line."""
+        from .templatetags.qasida_extras import stanza_rows, transliteration_is_aligned
+        qasida, body = self.page(
+            lyrics='alif\nbaa\njeem',
+            transliteration='ONE-latin\n\nTWO-latin\n\nTHREE-latin')
+        self.assertTrue(transliteration_is_aligned(qasida))
+        self.assertEqual(stanza_rows(qasida)[0]['latin'],
+                         'ONE-latin\nTWO-latin\nTHREE-latin')
+        self.assertIn('ONE-latin', body)
+
+    def test_a_layer_that_cannot_be_paired_is_still_shown(self):
+        """
+        The bug this class exists for.
+
+        An unpairable transliteration used to vanish from the page entirely,
+        while the downloadable file still contained it.
+        """
+        from .templatetags.qasida_extras import transliteration_is_aligned
+        qasida, body = self.page(
+            lyrics='alif\nbaa\njeem',
+            transliteration='ONE-latin\n\nTWO-latin')
+        self.assertFalse(transliteration_is_aligned(qasida))
+        self.assertIn('ONE-latin', body)
+        self.assertIn('TWO-latin', body)
+        self.assertIn('Transliteration', body)
+
+    def test_an_unpairable_translation_is_still_shown(self):
+        # Two stanzas of two lines against a single line: neither the stanza
+        # counts nor the line counts agree, so there is no honest pairing.
+        from .templatetags.qasida_extras import translation_is_aligned
+        qasida, body = self.page(lyrics='alif\n\nbaa',
+                                 translation='only one line of meaning')
+        self.assertFalse(translation_is_aligned(qasida))
+        self.assertIn('only one line of meaning', body)
+
+    def test_a_layer_is_never_shown_twice(self):
+        """Paired above and repeated whole below would read as a duplicate."""
+        _, body = self.page(lyrics='alif\n\nbaa',
+                            transliteration='ALEF-one\n\nBAA-two')
+        self.assertEqual(body.count('ALEF-one'), 1)
+
+    def test_pairing_never_puts_the_wrong_verse_together(self):
+        """Looser matching would misalign, which is worse than not pairing."""
+        from .templatetags.qasida_extras import stanza_rows
+        qasida = make_qasida(lyrics='alif\n\nbaa\n\njeem',
+                             transliteration='ALEF-one\n\nBAA-two')
+        for row in stanza_rows(qasida):
+            self.assertEqual(row['latin'], '')
+
+    def test_a_work_with_no_transliteration_gains_no_empty_section(self):
+        _, body = self.page(lyrics='alif\nbaa', transliteration='')
+        self.assertNotIn('Latin script', body)
+
+    def test_every_layer_a_work_has_reaches_the_page_somehow(self):
+        """Whatever the shape, nothing the record holds is silently lost."""
+        shapes = [
+            ('alif\n\nbaa', 'L-one\n\nL-two', 'T-one\n\nT-two'),
+            ('alif\nbaa', 'L-one\n\nL-two', 'T-one\nT-two'),
+            ('alif\nbaa\njeem', 'L-one\n\nL-two', 'T-one'),
+            ('alif', 'L-one\n\nL-two\n\nL-three', 'T-one\n\nT-two'),
+        ]
+        for lyrics, latin, translation in shapes:
+            _, body = self.page(lyrics=lyrics, transliteration=latin,
+                                translation=translation)
+            self.assertIn('L-one', body, f'transliteration lost for {lyrics!r}')
+            self.assertIn('T-one', body, f'translation lost for {lyrics!r}')
+
+    def test_the_download_and_the_page_agree_on_what_exists(self):
+        """The file used to contain a layer the page had dropped."""
+        qasida = make_qasida(lyrics='alif\nbaa\njeem',
+                             transliteration='ONE-latin\n\nTWO-latin')
+        body = self.client.get(qasida.get_absolute_url()).content.decode()
+        pdf = pdf_text(self.client.get(
+            reverse('qasida_download', args=[qasida.slug]),
+            {'original': '1', 'latin': '1'}).content)
+        self.assertIn('ONE-latin', body)
+        self.assertIn('ONE-latin', pdf)

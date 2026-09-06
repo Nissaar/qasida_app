@@ -51,39 +51,95 @@ def stanzas(text):
     return _display_stanzas(text)
 
 
+def _lines(text):
+    """The non-blank lines of a block, which is what a verse actually is."""
+    return [line for line in text.splitlines() if line.strip()]
+
+
+def _regrouped_like(original_blocks, layer_text):
+    """
+    Reshape a layer into the original's stanza pattern, or None.
+
+    Sources are inconsistent about blank lines: the same work can arrive with
+    the original as one block and its transliteration broken into verses, or
+    the reverse. When the two disagree about stanzas but hold the same number
+    of lines, they are still the same poem line for line, so the layer is cut
+    into the original's shape and pairs up after all.
+
+    Only exact line-count agreement counts. Anything looser would put verse
+    three of the translation against verse four of the original, which is
+    worse than not pairing at all.
+    """
+    lines = _lines(layer_text)
+    shape = [len(_lines(block)) for block in original_blocks]
+    if not lines or sum(shape) != len(lines):
+        return None
+
+    blocks, cut = [], 0
+    for count in shape:
+        blocks.append('\n'.join(lines[cut:cut + count]))
+        cut += count
+    return blocks
+
+
+def _paired_layer(original_blocks, layer_text):
+    """
+    The layer arranged against `original_blocks`, or None if it cannot be.
+
+    Tried in order of confidence: the source's own stanza marks first, then
+    line-for-line, then give up and let the page show the layer whole.
+    """
+    if not layer_text or not layer_text.strip():
+        return None
+    blocks = _display_stanzas(layer_text)
+    if blocks and len(blocks) == len(original_blocks):
+        return blocks
+    return _regrouped_like(original_blocks, layer_text)
+
+
+def _layers(qasida):
+    """The original's stanzas, and each other layer paired against them."""
+    original = _display_stanzas(qasida.lyrics)
+    return {
+        'original': original,
+        'latin': _paired_layer(original, qasida.transliteration),
+        'translation': _paired_layer(original, qasida.translation),
+    }
+
+
 @register.filter
 def stanza_rows(qasida):
     """
     Group the verses into stanzas, each with its Latin and translated form.
 
-    Every layer is aligned independently: a layer is only shown against a
-    stanza when its own stanza count matches the original, so a translation
-    that is laid out differently is left for the page to show as one passage
-    instead of being paired against the wrong verse.
+    Every layer is paired independently, and only where it can be paired
+    honestly. A layer that cannot be is left out of these rows entirely - the
+    page then shows it whole, as its own passage, rather than dropping it.
     """
-    original = _display_stanzas(qasida.lyrics)
-    latin = _display_stanzas(qasida.transliteration)
-    translated = _display_stanzas(qasida.translation)
-
-    latin_aligned = bool(latin) and len(latin) == len(original)
-    translation_aligned = bool(translated) and len(translated) == len(original)
+    layers = _layers(qasida)
+    original = layers['original']
+    latin, translated = layers['latin'], layers['translation']
 
     rows = []
     for index, block in enumerate(original):
         rows.append({
             'original': block,
-            'latin': latin[index] if latin_aligned else '',
-            'translation': translated[index] if translation_aligned else '',
+            'latin': latin[index] if latin else '',
+            'translation': translated[index] if translated else '',
         })
     return rows
 
 
 @register.filter
+def transliteration_is_aligned(qasida):
+    """True when the transliteration was shown stanza by stanza above."""
+    return _layers(qasida)['latin'] is not None
+
+
+@register.filter
 def translation_is_aligned(qasida):
     """True when the translation was shown stanza by stanza above."""
-    original = _display_stanzas(qasida.lyrics)
-    translated = _display_stanzas(qasida.translation)
-    return bool(translated) and len(translated) == len(original)
+    return _layers(qasida)['translation'] is not None
 
 
 @register.simple_tag(takes_context=True)
