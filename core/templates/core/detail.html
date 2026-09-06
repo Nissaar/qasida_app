@@ -125,9 +125,9 @@
             <p class="text-sm text-stone-500 dark:text-stone-400 mt-2">{{ qasida.media.first.title }}</p>
             {% endif %}
 
-            {# Some owners disable embedding; the player then shows its own
+            {% comment %} Some owners disable embedding; the player then shows its own
                error and there is nothing we can catch, so always offer a way
-               out to YouTube itself. #}
+               out to YouTube itself. {% endcomment %}
             <p class="mt-3 text-xs text-stone-500 dark:text-stone-400">
                 Not playing here?
                 {% for item in qasida.media.all %}
@@ -179,8 +179,8 @@
                 </div>
             </div>
 
-            {# One block per stanza: the original, then its Latin script, then
-               its translation - each layer only where it lines up. #}
+            {% comment %} One block per stanza: the original, then its Latin script, then
+               its translation - each layer only where it lines up. {% endcomment %}
             <div class="divide-y divide-stone-100 dark:divide-stone-800">
                 {% for row in qasida|stanza_rows %}
                 <div class="py-5 first:pt-0 last:pb-0">
@@ -213,8 +213,8 @@
                     {% endif %}
                 </span>
             </div>
-            {# Stanza counts do not always match the original, so this is shown
-               as its own passage rather than paired verse by verse. #}
+            {% comment %} Stanza counts do not always match the original, so this is shown
+               as its own passage rather than paired verse by verse. {% endcomment %}
             <div dir="auto" class="max-w-3xl whitespace-pre-line text-base sm:text-lg leading-relaxed text-stone-700 dark:text-stone-200">{{ qasida.translation }}</div>
         </section>
         {% endif %}

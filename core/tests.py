@@ -7,6 +7,10 @@ still hides once someone is signed in, and that nothing a reader saved can be
 reached or changed by anyone else.
 """
 
+import re
+from pathlib import Path
+
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.cache import cache
@@ -620,3 +624,83 @@ class AdminUserManagementTest(TestCase):
         user_admin = django_admin.site._registry[User]
         request = type('R', (), {'user': self.superuser})()
         self.assertNotIn('is_staff', user_admin.get_readonly_fields(request, self.editor))
+
+
+class TemplateCommentTest(TestCase):
+    """
+    Guard against a template comment being printed to the reader.
+
+    Django's {# #} comment is matched by a lexer rule that does not cross a
+    line break, so one wrapped onto a second line is not recognised as a
+    comment at all and is emitted as literal text. It renders perfectly well
+    in review - it simply appears on the page - and it had reached production
+    in six places, including the site header, where it showed on every page.
+    """
+
+    # Opens {#, and does not close #} before the line ends.
+    MULTILINE_COMMENT = re.compile(r'\{#(?:[^#\n]|#(?!\}))*$', re.M)
+
+    def template_files(self):
+        for root in (Path(settings.BASE_DIR) / 'core' / 'templates',
+                     Path(settings.BASE_DIR) / 'templates'):
+            yield from root.rglob('*.html')
+            yield from root.rglob('*.txt')
+            yield from root.rglob('*.js')
+
+    def test_no_comment_spans_a_line_break(self):
+        offenders = []
+        for path in self.template_files():
+            for number, line in enumerate(path.read_text().splitlines(), start=1):
+                if self.MULTILINE_COMMENT.search(line):
+                    offenders.append(f'{path.name}:{number}')
+        self.assertEqual(
+            offenders, [],
+            "A {# #} comment must fit on one line, or the reader sees it. "
+            "Use {% comment %}...{% endcomment %} for anything longer.")
+
+    def test_the_detector_would_actually_catch_one(self):
+        """A guard that cannot fail is not a guard."""
+        self.assertTrue(self.MULTILINE_COMMENT.search('    {# opens here'))
+        self.assertFalse(self.MULTILINE_COMMENT.search('    {# closes here #}'))
+
+
+class RenderedOutputTest(TestCase):
+    """No page may show the reader raw template syntax."""
+
+    def setUp(self):
+        self.user = User.objects.create_user('reader', 'reader@example.com',
+                                             GOOD_PASSWORD)
+        self.qasida = make_qasida(title='Rendered', transliteration='latin one',
+                                  translation='meaning one')
+
+    def assert_clean(self, response, where):
+        body = response.content.decode()
+        for leak in ('{#', '{%', '%}'):
+            self.assertNotIn(leak, body, f'{where} is showing raw template syntax')
+
+    def test_public_pages_are_clean(self):
+        for name in ('home', 'browse', 'search', 'poets', 'categories',
+                     'collections', 'login', 'register', 'password_reset'):
+            self.assert_clean(self.client.get(reverse(name)), name)
+
+    def test_the_qasida_page_is_clean(self):
+        self.assert_clean(self.client.get(self.qasida.get_absolute_url()), 'qasida detail')
+
+    def test_the_qasida_page_is_clean_when_signed_in(self):
+        self.client.force_login(self.user)
+        self.assert_clean(self.client.get(self.qasida.get_absolute_url()),
+                          'qasida detail, signed in')
+
+    def test_account_pages_are_clean(self):
+        self.client.force_login(self.user)
+        for name in ('my_library', 'my_history', 'my_corrections',
+                     'account_settings', 'delete_account'):
+            self.assert_clean(self.client.get(reverse(name)), name)
+
+    def test_admin_pages_are_clean(self):
+        """The admin has its own overridden templates, and one of them leaked."""
+        staff = User.objects.create_superuser('root', 'root@example.com', GOOD_PASSWORD)
+        self.client.force_login(staff)
+        for path in ('/admin/', '/admin/core/qasida/', '/admin/auth/user/',
+                     '/admin/core/collection/', '/admin/core/suggestion/'):
+            self.assert_clean(self.client.get(path), path)

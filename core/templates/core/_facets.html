@@ -1,5 +1,5 @@
-{# Facet rail. Counts are scoped to the current filters, so an option that
-   would return nothing is simply not listed. #}
+{% comment %} Facet rail. Counts are scoped to the current filters, so an option that
+   would return nothing is simply not listed. {% endcomment %}
 <form method="get" action="{% url 'search' %}" class="card p-4">
     <label for="facet-q" class="eyebrow block mb-2">Search</label>
     <input id="facet-q" type="search" name="q" dir="auto" value="{{ query }}" placeholder="Title, line or author" class="input">

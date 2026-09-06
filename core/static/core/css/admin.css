@@ -79,9 +79,15 @@
 html { font-size: clamp(15px, 0.22vw + 14px, 18px); }
 
 /* Scraped text can contain very long unbroken runs; without this they refuse
-   to wrap and push out of the card. */
+   to wrap and push out of the card.
+
+   Table cells are deliberately NOT in this list. A cell that may break inside
+   a word, and may shrink to nothing, is one the browser will happily squeeze
+   to a single character and set vertically when the table is wider than its
+   panel - which is what a list of eleven columns is. Wide tables scroll
+   inside .results instead; see the table rules below. */
 body { overflow-wrap: anywhere; }
-#content, #content-main, .module, .results, td, th, pre, code, textarea {
+#content, #content-main, .module, pre, code, textarea {
     overflow-wrap: anywhere;
     word-break: break-word;
     min-width: 0;
@@ -365,6 +371,20 @@ h2 { font-weight: 700; }
 #changelist .row1, #changelist .row2 { background: transparent; }
 #changelist tbody a { color: var(--q-ink); font-weight: 600; }
 #changelist tbody a:hover { color: var(--q-accent); }
+
+/* A changelist is read one row at a time, so a column must stay wide enough
+   to read. Words break at spaces, never inside a word, and the table takes
+   the width its content needs rather than being compressed into the panel. */
+#changelist td, #changelist th { overflow-wrap: normal; word-break: normal; }
+#changelist #result_list { width: max-content; min-width: 100%; }
+/* The title is the column people scan, and the one most likely to be long. */
+#changelist tbody th, #changelist th.column-title, #changelist td.field-title {
+    min-width: 16rem;
+    max-width: 30rem;
+    white-space: normal;
+}
+/* Everything else stays on one line and lets the table scroll. */
+#changelist tbody td { white-space: nowrap; }
 .results { overflow-x: auto; }
 
 a.addlink, a.changelink, a.deletelink, a.viewlink {
@@ -620,8 +640,13 @@ input[name="arabic_title"], #ocr-output {
         padding: .7rem .75rem;
         white-space: nowrap;
     }
-    /* The title column is the one worth wrapping. */
-    #changelist tbody th, #changelist tbody td:first-of-type { white-space: normal; min-width: 9rem; }
+    /* Narrower measure than the desktop one, so a phone is not scrolled
+       sideways further than it has to be. */
+    #changelist tbody th, #changelist th.column-title, #changelist td.field-title {
+        white-space: normal;
+        min-width: 11rem;
+        max-width: 16rem;
+    }
 
     /* Stack the label above the field: side-by-side is unreadable at this width. */
     .aligned label { display: block; width: auto; padding: 0 0 .25rem; float: none; }
