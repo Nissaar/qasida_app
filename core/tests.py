@@ -1178,3 +1178,101 @@ class LayerPairingTest(TestCase):
             {'original': '1', 'latin': '1'}).content)
         self.assertIn('ONE-latin', body)
         self.assertIn('ONE-latin', pdf)
+
+
+class TagFilterTest(TestCase):
+    """
+    Filtering a search by tag, on more than one axis at once.
+
+    A work carries several tags on different axes, so a reader narrowing to a
+    form and then to a melodic mode is asking for both together. Only the last
+    tag in the query string used to count, which meant the second choice
+    quietly replaced the first.
+    """
+
+    def setUp(self):
+        def tag(name):
+            return Tag.objects.get_or_create(name=name)[0]
+
+        self.works = {}
+        for title, language, names in (
+            ('Alpha', 'Urdu', ['naat', 'urdu', 'maqam-hijaz']),
+            ('Beta', 'Arabic', ['naat', 'arabic', 'maqam-hijaz', 'bahr-kamil']),
+            ('Gamma', 'Arabic', ['qasida-sufi', 'arabic', 'maqam-rast']),
+        ):
+            work = make_qasida(title=title, language=language)
+            work.tags.set([tag(name) for name in names])
+            self.works[title] = work
+
+    def titles(self, **params):
+        response = self.client.get(reverse('search'), params)
+        return sorted(work.title for work in response.context['page_obj'])
+
+    def test_one_tag_filters(self):
+        self.assertEqual(self.titles(tag='naat'), ['Alpha', 'Beta'])
+
+    def test_two_tags_narrow_together(self):
+        self.assertEqual(self.titles(tag=['naat', 'bahr-kamil']), ['Beta'])
+
+    def test_order_in_the_query_string_does_not_matter(self):
+        """Only the last tag used to count, so the reversed order differed."""
+        self.assertEqual(self.titles(tag=['bahr-kamil', 'naat']),
+                         self.titles(tag=['naat', 'bahr-kamil']))
+
+    def test_tags_with_no_overlap_return_nothing(self):
+        self.assertEqual(self.titles(tag=['naat', 'maqam-rast']), [])
+
+    def test_a_tag_combines_with_a_language_and_a_query(self):
+        self.assertEqual(self.titles(q='beta', lang='Arabic', tag=['naat']),
+                         ['Beta'])
+
+    def test_a_repeated_tag_is_only_applied_once(self):
+        self.assertEqual(self.titles(tag=['naat', 'NAAT']), ['Alpha', 'Beta'])
+
+    def test_blank_tags_are_ignored(self):
+        self.assertEqual(self.titles(tag=['naat', '', '  ']), ['Alpha', 'Beta'])
+
+    def test_each_facet_link_adds_its_tag_and_keeps_the_others(self):
+        response = self.client.get(reverse('search'), {'tag': 'naat'})
+        links = {item['name']: item['toggle_qs']
+                 for group in response.context['tag_groups']
+                 for item in group['items']}
+        self.assertIn('tag=naat', links['maqam-hijaz'])
+        self.assertIn('tag=maqam-hijaz', links['maqam-hijaz'])
+
+    def test_a_chosen_tag_links_to_its_own_removal(self):
+        response = self.client.get(reverse('search'), {'tag': 'naat'})
+        chosen = [item for group in response.context['tag_groups']
+                  for item in group['items'] if item['is_active']]
+        self.assertEqual([item['name'] for item in chosen], ['naat'])
+        self.assertNotIn('tag=naat', chosen[0]['toggle_qs'])
+
+    def test_each_chosen_tag_gets_its_own_removable_chip(self):
+        response = self.client.get(reverse('search'),
+                                   {'tag': ['naat', 'bahr-kamil']})
+        chips = response.context['active_tags']
+        self.assertEqual([chip['label'] for chip in chips], ['Naat', 'Kamil'])
+        # Removing one leaves the other in place.
+        self.assertIn('tag=bahr-kamil', chips[0]['remove_qs'])
+        self.assertNotIn('tag=naat', chips[0]['remove_qs'])
+
+    def test_counts_answer_how_many_of_these_also_carry_that(self):
+        """With naat chosen, bahr-kamil should offer the one work that has both."""
+        response = self.client.get(reverse('search'), {'tag': 'naat'})
+        counts = {item['name']: item['n']
+                  for group in response.context['tag_groups']
+                  for item in group['items']}
+        self.assertEqual(counts['bahr-kamil'], 1)
+        self.assertEqual(counts['maqam-hijaz'], 2)
+
+    def test_searching_within_a_narrowed_set_keeps_the_narrowing(self):
+        response = self.client.get(reverse('search'), {'tag': ['naat', 'bahr-kamil']})
+        body = response.content.decode()
+        self.assertIn('name="tag" value="naat"', body)
+        self.assertIn('name="tag" value="bahr-kamil"', body)
+
+    def test_the_facets_are_still_grouped_by_axis(self):
+        response = self.client.get(reverse('search'), {'tag': 'naat'})
+        seen = [group['category'] for group in response.context['tag_groups']]
+        self.assertIn(Tag.CATEGORY_FORM, seen)
+        self.assertIn(Tag.CATEGORY_MAQAM, seen)

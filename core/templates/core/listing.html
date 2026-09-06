@@ -18,9 +18,12 @@
 
 {% if has_filters %}
 <div class="flex flex-wrap items-center gap-2 mb-5">
-    {% if query %}<span class="chip-on">&ldquo;{{ query }}&rdquo;</span>{% endif %}
+    {% if query %}<a href="?{{ qs_without_q }}" class="chip-on" title="Remove this search">&ldquo;{{ query }}&rdquo; &times;</a>{% endif %}
     {% if lang_filter %}<a href="?{{ qs_without_lang }}" class="chip-on" title="Remove">{{ lang_filter }} &times;</a>{% endif %}
-    {% if tag_filter %}<a href="?{{ qs_without_tag }}" class="chip-on" title="Remove">{{ tag_filter }} &times;</a>{% endif %}
+    {% comment %} One chip per chosen tag, each removable on its own. {% endcomment %}
+    {% for tag in active_tags %}
+    <a href="?{{ tag.remove_qs }}" class="chip-on" title="Remove this filter">{{ tag.label }} &times;</a>
+    {% endfor %}
 </div>
 {% endif %}
 

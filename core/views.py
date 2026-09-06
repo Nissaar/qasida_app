@@ -26,21 +26,29 @@ FILTER_KEYS = ('q', 'lang', 'tag')
 CATEGORY_LABELS = dict(Tag.CATEGORY_CHOICES)
 
 
-def _grouped_tag_facets(tags, active_tag):
-    """Bucket the tag facets by axis, flagging which group holds the selection."""
+def _grouped_tag_facets(tags, active_tags, request=None):
+    """
+    Bucket the tag facets by axis, flagging which groups hold a selection.
+
+    Each entry carries the query string that turns it on or off, so the rail
+    builds up a combination rather than replacing one choice with the next.
+    """
+    chosen = {name.lower() for name in (active_tags or [])}
     buckets = {}
     for tag in tags:
         buckets.setdefault(tag.category or Tag.CATEGORY_OTHER, []).append({
             'name': tag.name,
             'label': tag.label,
             'n': tag.n,
-            'is_active': tag.name.lower() == (active_tag or '').lower(),
+            'is_active': tag.name.lower() in chosen,
+            'toggle_qs': _tag_toggle_query(request, tag.name) if request else '',
         })
     groups = []
     for category in Tag.CATEGORY_ORDER:
         items = buckets.get(category)
         if not items:
             continue
+        items.sort(key=lambda item: (not item['is_active'], -item['n'], item['label']))
         groups.append({
             'label': CATEGORY_LABELS[category],
             'category': category,
@@ -52,7 +60,54 @@ def _grouped_tag_facets(tags, active_tag):
 
 
 def _read_filters(request):
-    return {key: request.GET.get(key, '').strip() for key in FILTER_KEYS}
+    """
+    The filters in force.
+
+    Tags are a list: a work carries several, on different axes, so a reader
+    narrowing to a form and then to a melodic mode is asking for both at once.
+    Language stays single, because a work has exactly one.
+    """
+    seen, tags = set(), []
+    for value in request.GET.getlist('tag'):
+        value = value.strip()
+        if value and value.lower() not in seen:
+            seen.add(value.lower())
+            tags.append(value)
+    return {
+        'q': request.GET.get('q', '').strip(),
+        'lang': request.GET.get('lang', '').strip(),
+        'tags': tags,
+    }
+
+
+def _query_params(request, drop=('page',)):
+    """The current query string, minus `drop`, ready to be adjusted."""
+    params = request.GET.copy()
+    for key in drop:
+        params.pop(key, None)
+    # Blank values in a link read as noise and filter nothing.
+    for key in list(params.keys()):
+        values = [v for v in params.getlist(key) if v.strip()]
+        if values:
+            params.setlist(key, values)
+        else:
+            params.pop(key, None)
+    return params
+
+
+def _tag_toggle_query(request, name):
+    """The query string with `name` added, or removed if it is already on."""
+    params = _query_params(request)
+    tags = [t for t in params.getlist('tag') if t.strip()]
+    if name.lower() in {t.lower() for t in tags}:
+        tags = [t for t in tags if t.lower() != name.lower()]
+    else:
+        tags = tags + [name]
+    if tags:
+        params.setlist('tag', tags)
+    else:
+        params.pop('tag', None)
+    return params.urlencode()
 
 
 def _visible(request):
@@ -81,8 +136,11 @@ def _apply_filters(request, filters, skip=()):
     # match on a short tag name matches almost everything.
     if filters['lang'] and 'lang' not in skip:
         qasidas = qasidas.filter(language__iexact=filters['lang'])
-    if filters['tag'] and 'tag' not in skip:
-        qasidas = qasidas.filter(tags__name__iexact=filters['tag'])
+    if filters['tags'] and 'tag' not in skip:
+        # ANDed, and each as its own join: a single join with two conditions
+        # asks for one tag that is both things at once, which nothing is.
+        for name in filters['tags']:
+            qasidas = qasidas.filter(tags__name__iexact=name)
 
     return qasidas.distinct()
 
@@ -104,21 +162,29 @@ def _language_facets(scope):
 def _listing(request, heading):
     """Shared paginated listing with scoped facets, used for browsing and searching."""
     filters = _read_filters(request)
-    active = {key: value for key, value in filters.items() if value}
+    has_filters = bool(filters['q'] or filters['lang'] or filters['tags'])
 
-    results = _apply_filters(request, filters).prefetch_related('tags', 'images').order_by('-created_at')
+    results = (_apply_filters(request, filters)
+               .prefetch_related('tags', 'images').order_by('-created_at'))
     paginator = Paginator(results, PAGE_SIZE)
     page_obj = paginator.get_page(request.GET.get('page'))
 
-    def querystring(drop=(), **overrides):
-        params = {k: v for k, v in active.items() if k not in drop}
-        params.update({k: v for k, v in overrides.items() if v})
-        return urlencode(params)
+    def without(*keys):
+        return _query_params(request, drop=('page',) + keys).urlencode()
 
-    # Each facet is counted with its own dimension lifted, so switching within
-    # a facet is always productive.
-    tag_scope = _apply_filters(request, filters, skip=('tag',))
+    # Tag counts are taken over the current results, because tags combine: the
+    # number against an unchosen tag answers "how many of these also carry
+    # this", which is what someone narrowing down needs to know. Language does
+    # not combine - a work has one - so its counts are taken with the language
+    # filter lifted, and each number answers "how many if I pick this instead".
+    tag_scope = _apply_filters(request, filters)
     language_scope = _apply_filters(request, filters, skip=('lang',))
+
+    active_tags = [{
+        'name': name,
+        'label': Tag.display_name(name),
+        'remove_qs': _tag_toggle_query(request, name),
+    } for name in filters['tags']]
 
     context = {
         'heading': heading,
@@ -126,12 +192,13 @@ def _listing(request, heading):
         'total': paginator.count,
         'query': filters['q'],
         'lang_filter': filters['lang'],
-        'tag_filter': filters['tag'],
-        'has_filters': bool(active),
-        'querystring': querystring(),
-        'qs_without_tag': querystring(drop=('tag', 'page')),
-        'qs_without_lang': querystring(drop=('lang', 'page')),
-        'tag_groups': _grouped_tag_facets(_tag_facets(tag_scope), filters['tag']),
+        'tag_filters': filters['tags'],
+        'active_tags': active_tags,
+        'has_filters': has_filters,
+        'querystring': without(),
+        'qs_without_lang': without('lang'),
+        'qs_without_q': without('q'),
+        'tag_groups': _grouped_tag_facets(_tag_facets(tag_scope), filters['tags'], request),
         'all_languages': _language_facets(language_scope),
     }
     return render(request, 'core/listing.html', context)
