@@ -17,7 +17,7 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from .models import (Favourite, Qasida, QasidaImage, ReaderProfile,
+from .models import (Dedication, Favourite, Qasida, QasidaImage, ReaderProfile,
                      ReadingHistory, Suggestion, Tag)
 
 User = get_user_model()
@@ -1634,31 +1634,91 @@ class VerseMarkerTest(TestCase):
 
 
 class DedicationTest(TestCase):
-    """Who a qasida is written in praise of, which is not who wrote it."""
+    """
+    Who a qasida is written in praise of, which is not who wrote it.
+
+    Chosen from a list rather than typed, because typed by hand the same
+    dedication arrives in half a dozen spellings and "everything in praise of
+    this person" stops being a question anyone can answer.
+    """
+
+    def setUp(self):
+        self.prophet = Dedication.objects.create(name='The Prophet',
+                                                 arabic_name='النبي')
 
     def test_it_shows_on_the_page(self):
         qasida = make_qasida(title='Praise', author='A Poet',
-                             dedicated_to='The Prophet')
+                             dedicated_to=self.prophet)
         body = self.client.get(qasida.get_absolute_url()).content.decode()
         self.assertIn('The Prophet', body)
         self.assertIn('Dedicated to', body)
+
+    def test_the_arabic_name_shows_beside_it(self):
+        qasida = make_qasida(title='Praise', dedicated_to=self.prophet)
+        body = self.client.get(qasida.get_absolute_url()).content.decode()
+        self.assertIn('النبي', body)
 
     def test_it_is_absent_when_not_set(self):
         qasida = make_qasida(title='Plain')
         body = self.client.get(qasida.get_absolute_url()).content.decode()
         self.assertNotIn('Dedicated to', body)
 
-    def test_it_is_searchable(self):
-        make_qasida(title='Praise', dedicated_to='Shaykh Abdul Qadir')
-        response = self.client.get(reverse('search'), {'q': 'abdul qadir'})
-        self.assertEqual([w.title for w in response.context['page_obj']], ['Praise'])
+    def test_it_is_searchable_by_either_name(self):
+        shaykh = Dedication.objects.create(name='Shaykh Abdul Qadir',
+                                           arabic_name='الشيخ عبد القادر')
+        make_qasida(title='Praise', dedicated_to=shaykh)
+        for term in ('abdul qadir', 'عبد القادر'):
+            response = self.client.get(reverse('search'), {'q': term})
+            self.assertEqual([w.title for w in response.context['page_obj']],
+                             ['Praise'], term)
 
-    def test_an_editor_can_set_it(self):
+    def test_removing_a_dedication_does_not_remove_the_qasida(self):
+        qasida = make_qasida(title='Praise', dedicated_to=self.prophet)
+        self.prophet.delete()
+        qasida.refresh_from_db()
+        self.assertIsNone(qasida.dedicated_to)
+
+    def test_two_works_can_share_one(self):
+        for title in ('One', 'Two'):
+            make_qasida(title=title, dedicated_to=self.prophet)
+        self.assertEqual(self.prophet.qasidas.count(), 2)
+
+    def test_the_editor_offers_a_list_and_a_way_to_add_to_it(self):
         staff = User.objects.create_superuser('root', 'r@example.com', GOOD_PASSWORD)
         self.client.force_login(staff)
         qasida = make_qasida(title='Praise')
-        response = self.client.get(reverse('qasida_edit', args=[qasida.slug]))
-        self.assertIn('dedicated_to', response.context['form'].fields)
+        form = self.client.get(reverse('qasida_edit', args=[qasida.slug])).context['form']
+        self.assertIn('dedicated_to', form.fields)
+        self.assertIn('new_dedication', form.fields)
+        # The list is the existing dedications, not free text.
+        self.assertIn(self.prophet, form.fields['dedicated_to'].queryset)
+
+    def test_adding_a_new_one_from_the_editor(self):
+        from .forms import QasidaForm
+        qasida = make_qasida(title='Praise')
+        form = QasidaForm(self.editor_post(new_dedication='Shaykh Someone'),
+                          instance=qasida)
+        self.assertTrue(form.is_valid(), form.errors)
+        form.save()
+        qasida.refresh_from_db()
+        self.assertEqual(qasida.dedicated_to.name, 'Shaykh Someone')
+
+    def test_adding_one_that_exists_reuses_it_whatever_the_case(self):
+        from .forms import QasidaForm
+        qasida = make_qasida(title='Praise')
+        form = QasidaForm(self.editor_post(new_dedication='the prophet'),
+                          instance=qasida)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data['dedicated_to'], self.prophet)
+        self.assertEqual(Dedication.objects.count(), 1)
+
+    def editor_post(self, **overrides):
+        data = {'title': 'Praise', 'arabic_title': '', 'author': '', 'language': '',
+                'text_quality': 'ok', 'lyrics': 'x', 'transliteration': '',
+                'translation': '', 'translation_origin': '', 'tags_text': '',
+                'dedicated_to': '', 'new_dedication': ''}
+        data.update(overrides)
+        return data
 
 
 class ClickableCardTest(TestCase):

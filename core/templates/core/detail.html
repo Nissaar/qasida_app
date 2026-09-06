@@ -35,7 +35,7 @@
                     {% endif %}
                     {% if qasida.dedicated_to %}
                     <p dir="auto" class="text-sm text-brand-700 dark:text-brand-300 mt-1">
-                        In praise of {{ qasida.dedicated_to }}
+                        In praise of {{ qasida.dedicated_to.name }}
                     </p>
                     {% endif %}
                 </div>
@@ -376,7 +376,12 @@
                 {% if qasida.dedicated_to %}
                 <div class="flex justify-between gap-3">
                     <dt class="text-stone-500 dark:text-stone-400">Dedicated to</dt>
-                    <dd dir="auto" class="font-medium text-right">{{ qasida.dedicated_to }}</dd>
+                    <dd class="font-medium text-right">
+                        <span dir="auto">{{ qasida.dedicated_to.name }}</span>
+                        {% if qasida.dedicated_to.arabic_name %}
+                        <span dir="rtl" lang="ar" class="block font-naskh text-brand-700 dark:text-brand-300">{{ qasida.dedicated_to.arabic_name }}</span>
+                        {% endif %}
+                    </dd>
                 </div>
                 {% endif %}
                 <div class="flex justify-between gap-3">

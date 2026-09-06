@@ -4,7 +4,7 @@ from django.contrib.auth.forms import (AuthenticationForm, PasswordChangeForm,
                                        PasswordResetForm, SetPasswordForm,
                                        UserCreationForm)
 
-from .models import Favourite, Qasida, ReaderProfile, Tag
+from .models import Dedication, Favourite, Qasida, ReaderProfile, Tag
 
 # The shell defines .input as a Tailwind component class, so widgets reuse it
 # instead of restating utilities (and inheriting dark mode for free).
@@ -21,6 +21,15 @@ class QasidaForm(forms.ModelForm):
         help_text='Comma separated.',
         widget=forms.TextInput(attrs={'class': INPUT_CLASS}),
     )
+    # The dedication is chosen from a list, which is the point of it being a
+    # list at all - but an editor who meets a name that is not on it yet has
+    # to be able to add it here rather than abandon the record.
+    new_dedication = forms.CharField(
+        required=False,
+        label='…or add a new dedication',
+        help_text='Fill this in only if the name you want is not in the list above.',
+        widget=forms.TextInput(attrs={'class': INPUT_CLASS, 'dir': 'auto'}),
+    )
 
     class Meta:
         model = Qasida
@@ -31,7 +40,7 @@ class QasidaForm(forms.ModelForm):
             'title': forms.TextInput(attrs={'class': INPUT_CLASS, 'dir': 'auto'}),
             'arabic_title': forms.TextInput(attrs={'class': INPUT_CLASS, 'dir': 'rtl', 'lang': 'ar'}),
             'author': forms.TextInput(attrs={'class': INPUT_CLASS, 'dir': 'auto'}),
-            'dedicated_to': forms.TextInput(attrs={'class': INPUT_CLASS, 'dir': 'auto'}),
+            'dedicated_to': forms.Select(attrs={'class': INPUT_CLASS}),
             'language': forms.TextInput(attrs={'class': INPUT_CLASS}),
             'text_quality': forms.Select(attrs={'class': INPUT_CLASS}),
             'lyrics': forms.Textarea(attrs={'class': INPUT_CLASS + ' font-naskh leading-loose',
@@ -48,6 +57,17 @@ class QasidaForm(forms.ModelForm):
         if self.instance.pk:
             self.fields['tags_text'].initial = ', '.join(
                 self.instance.tags.order_by('name').values_list('name', flat=True))
+
+    def clean(self):
+        cleaned = super().clean()
+        name = (cleaned.get('new_dedication') or '').strip()
+        if name:
+            # Matched without regard to case, so adding one that already
+            # exists picks up the existing row instead of being refused by
+            # the unique constraint.
+            existing = Dedication.objects.filter(name__iexact=name).first()
+            cleaned['dedicated_to'] = existing or Dedication.objects.create(name=name)
+        return cleaned
 
     def save(self, commit=True):
         qasida = super().save(commit=commit)

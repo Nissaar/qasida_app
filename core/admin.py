@@ -13,8 +13,9 @@ from .tasks import enrich_qasida
 admin.site.site_header = "Qasida Library"
 admin.site.site_title = "Qasida Library"
 admin.site.index_title = "Library administration"
-from .models import (Collection, Favourite, Tag, Qasida, QasidaImage, QasidaMedia,
-                     ReadingHistory, ReaderProfile, Suggestion, SourceWebsite)
+from .models import (Collection, Dedication, Favourite, Tag, Qasida, QasidaImage,
+                     QasidaMedia, ReadingHistory, ReaderProfile, Suggestion,
+                     SourceWebsite)
 
 class LibraryAdmin(admin.ModelAdmin):
     """
@@ -107,17 +108,20 @@ class QasidaAdmin(LibraryAdmin):
                     'scan_count', 'has_latin', 'has_translation', 'saved_count')
     # The typed filters come first: author and tag have too many distinct
     # values for Django's default link-per-value rendering.
-    list_filter = (TextSearchPanel, 'review_state', 'collection', 'source_site',
-                   'language', 'text_quality', 'translation_origin')
+    list_filter = (TextSearchPanel, 'review_state', 'collection', 'dedicated_to',
+                   'source_site', 'language', 'text_quality', 'translation_origin')
     search_help_text = ('Searches title, Arabic title, poet, dedication, lyrics '
                         'and transliteration. '
                         'Need to read a scan? Use the Extract text tool at ./ocr-tool/')
     actions = ['approve_for_display', 'send_back_for_review', 'reject_qasidas',
                'enrich_selected', 'enrich_selected_overwrite',
                'add_to_collection', 'remove_from_collection']
-    search_fields = ('title', 'arabic_title', 'author', 'dedicated_to',
+    search_fields = ('title', 'arabic_title', 'author', 'dedicated_to__name',
                      'lyrics', 'transliteration')
-    list_select_related = ('source_site', 'collection')
+    list_select_related = ('source_site', 'collection', 'dedicated_to')
+    # A select with a + beside it: pick an existing dedication, or add one
+    # without leaving the page.
+    autocomplete_fields = ('dedicated_to',)
     filter_horizontal = ('tags',)
     inlines = [QasidaMediaInline, QasidaImageInline]
 
@@ -459,3 +463,26 @@ class UserAdmin(DjangoUserAdmin):
             request,
             f"{count} account(s) suspended. Their saved works are untouched and "
             f"come back if the account is activated again.")
+
+
+@admin.register(Dedication)
+class DedicationAdmin(LibraryAdmin):
+    """
+    The people qasidas are written in praise of.
+
+    Registered in its own right because that is what puts the + button beside
+    the dropdown on a qasida: an editor who needs a name that is not yet on
+    the list adds it there and carries on, rather than abandoning the record
+    they were editing.
+    """
+
+    list_display = ('name', 'arabic_name', 'qasida_count')
+    search_fields = ('name', 'arabic_name')
+    ordering = ('name',)
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(_works=Count('qasidas'))
+
+    @admin.display(description='Qasidas', ordering='_works')
+    def qasida_count(self, obj):
+        return obj._works

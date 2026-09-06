@@ -156,6 +156,29 @@ class Collection(models.Model):
         super().save(*args, **kwargs)
 
 
+class Dedication(models.Model):
+    """
+    Who a qasida is addressed to or written in praise of.
+
+    Kept as its own table rather than as free text on the work. Much of this
+    repertoire is grouped by whom it honours, and typed by hand the same
+    dedication arrives half a dozen ways - so a chosen-from-a-list value is
+    what makes "everything in praise of this person" a question that can be
+    answered at all.
+    """
+    name = models.CharField(max_length=200, unique=True)
+    arabic_name = models.CharField(
+        max_length=200, blank=True,
+        help_text="The same name in Arabic script, where there is one.")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('name',)
+
+    def __str__(self):
+        return self.name
+
+
 class QasidaQuerySet(models.QuerySet):
     def approved(self):
         return self.filter(review_state=Qasida.REVIEW_APPROVED)
@@ -179,9 +202,11 @@ class Qasida(models.Model):
     # saint, a teacher. Distinct from the poet, and often the thing a reader
     # is actually looking for: much of this repertoire is grouped by whom it
     # honours rather than by who wrote it.
-    dedicated_to = models.CharField(
-        max_length=200, blank=True,
-        help_text="Who the qasida is addressed to or written in praise of.")
+    dedicated_to = models.ForeignKey(
+        'Dedication', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='qasidas',
+        help_text="Who the qasida is addressed to or written in praise of. "
+                  "Choose one, or add a new one with the + button.")
     language = models.CharField(max_length=50, blank=True)
     lyrics = models.TextField()
     # Latin-script rendering of the same verses, where the source publishes one.
@@ -295,8 +320,13 @@ class Qasida(models.Model):
         return reverse('qasida_by_id', kwargs={'pk': self.pk})
 
     def save(self, *args, **kwargs):
+        # Only touched when one is set, so an ordinary save does not fetch a
+        # related row it has no use for.
+        dedication = ''
+        if self.dedicated_to_id:
+            dedication = f'{self.dedicated_to.name} {self.dedicated_to.arabic_name}'
         self.search_text = build_document(
-            self.title, self.arabic_title, self.author, self.dedicated_to,
+            self.title, self.arabic_title, self.author, dedication,
             self.lyrics, self.transliteration, self.translation)
         update_fields = kwargs.get('update_fields')
         if update_fields:
