@@ -31,6 +31,13 @@ GOOD_PASSWORD = 'Marmalade-7-Kettle'
 LOCAL_CACHE = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}}
 
 
+def pdf_text(content):
+    """The text layer of a generated PDF, for asserting on what it contains."""
+    import pymupdf
+    with pymupdf.open('pdf', content) as doc:
+        return '\n'.join(page.get_text() for page in doc)
+
+
 def make_qasida(**overrides):
     """An approved work, since anything else is invisible to a reader."""
     fields = {
@@ -158,6 +165,14 @@ class QasidaViewsTest(TestCase):
         self.assertEqual(suggestion.email, 'user@test.com')
         self.assertIsNone(suggestion.user)
 
+    def test_download_is_a_pdf(self):
+        qasida = make_qasida(title='Layered')
+        response = self.client.get(reverse('qasida_download', args=[qasida.slug]))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+        self.assertTrue(response.content.startswith(b'%PDF-'))
+        self.assertIn('.pdf', response['Content-Disposition'])
+
     def test_download_offers_only_what_was_asked_for(self):
         qasida = make_qasida(title='Layered', lyrics='asl', language='Arabic',
                              transliteration='latin line',
@@ -165,14 +180,38 @@ class QasidaViewsTest(TestCase):
                              translation_origin=Qasida.TRANSLATION_SOURCE)
         url = reverse('qasida_download', args=[qasida.slug])
 
-        plain = self.client.get(url, {'original': '1'})
-        self.assertEqual(plain.status_code, 200)
-        self.assertNotIn('latin line', plain.content.decode())
+        plain = pdf_text(self.client.get(url, {'original': '1'}).content)
+        self.assertNotIn('latin line', plain)
+        self.assertNotIn('meaning line', plain)
 
-        full = self.client.get(url, {'original': '1', 'latin': '1', 'translation': '1'})
-        body = full.content.decode()
-        self.assertIn('latin line', body)
-        self.assertIn('meaning line', body)
+        full = pdf_text(self.client.get(
+            url, {'original': '1', 'latin': '1', 'translation': '1'}).content)
+        self.assertIn('latin line', full)
+        self.assertIn('meaning line', full)
+
+    def test_the_pdf_embeds_the_arabic_font(self):
+        """
+        Guards the font being present in the image.
+
+        Without it MuPDF silently substitutes: the download still succeeds and
+        the Arabic is still shaped, so nothing fails - the poetry is simply set
+        in the wrong face, which no other test would notice.
+        """
+        import pymupdf
+        qasida = make_qasida(title='Arabic Work', language='Arabic',
+                             lyrics='مكتبة القصائد')
+        content = self.client.get(
+            reverse('qasida_download', args=[qasida.slug])).content
+        names = ' '.join(f[3] for f in pymupdf.open('pdf', content)[0].get_fonts())
+        self.assertIn('Amiri', names, f'expected Amiri, embedded fonts were: {names}')
+
+    def test_a_long_work_runs_to_several_pages(self):
+        import pymupdf
+        qasida = make_qasida(title='Long Work',
+                             lyrics='\n\n'.join(f'stanza number {n}' for n in range(400)))
+        content = self.client.get(
+            reverse('qasida_download', args=[qasida.slug])).content
+        self.assertGreater(pymupdf.open('pdf', content).page_count, 1)
 
 
 # --------------------------------------------------------------------------

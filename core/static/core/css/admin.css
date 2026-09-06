@@ -441,6 +441,11 @@ a.deletelink:hover { color: #dc2626; }
 }
 .object-tools a.addlink:hover { background: var(--q-accent-strong); }
 
+/* The save bar lays itself out rather than inheriting Django's own floats,
+   which put Delete hard against the panel edge, outside the padding. The
+   saves sit together on the left; Delete is pushed to the far right by an
+   auto margin, so it stays inside the padding and well away from the button
+   someone actually meant to press. */
 .submit-row {
     background: var(--q-surface);
     border: 1px solid var(--q-line);
@@ -448,6 +453,20 @@ a.deletelink:hover { color: #dc2626; }
     box-shadow: var(--q-shadow);
     padding: 16px 20px;
     margin-top: 18px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .6rem;
+}
+.submit-row input, .submit-row a, .submit-row p { float: none; margin: 0; }
+.submit-row a.deletelink, .submit-row .deletelink-box { margin-left: auto; }
+/* Every control on the row is set to the same box, so they line up. */
+.submit-row input, .submit-row a.deletelink, .submit-row a.closelink {
+    padding: 0.7rem 1.1rem;
+    line-height: 1.15;
+    height: auto;
+    display: inline-flex;
+    align-items: center;
 }
 
 /* ---- forms: tinted fields, thick light border, emerald focus -------- */
@@ -655,8 +674,15 @@ input[name="arabic_title"], #ocr-output {
     /* Action bars wrap instead of overflowing. */
     .object-tools { display: flex; flex-wrap: wrap; gap: .4rem; float: none; margin: 0 0 .75rem; }
     .object-tools li { margin: 0; }
-    .submit-row { display: flex; flex-wrap: wrap; gap: .5rem; padding: .85rem 1rem; }
-    .submit-row input, .submit-row a { width: 100%; text-align: center; }
+    .submit-row { gap: .5rem; padding: .85rem 1rem; }
+    /* Full width and stacked on a phone; Delete last, and not nudged away by
+       an auto margin that has nowhere to push to. */
+    .submit-row input, .submit-row a {
+        width: 100%;
+        text-align: center;
+        justify-content: center;
+    }
+    .submit-row a.deletelink, .submit-row .deletelink-box { margin-left: 0; }
     #changelist-form .actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
     #toolbar form #searchbar { min-width: 0; width: 100%; }
     #toolbar { padding: .85rem 1rem; }
