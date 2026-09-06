@@ -1276,3 +1276,63 @@ class TagFilterTest(TestCase):
         seen = [group['category'] for group in response.context['tag_groups']]
         self.assertIn(Tag.CATEGORY_FORM, seen)
         self.assertIn(Tag.CATEGORY_MAQAM, seen)
+
+
+class AuthorFilterTest(TestCase):
+    """Narrowing a search to one poet."""
+
+    def setUp(self):
+        for title, author in (('Alpha', 'Poet One'), ('Beta', 'Poet One'),
+                              ('Gamma', 'Poet Two'), ('Delta', '')):
+            make_qasida(title=title, author=author, language='Urdu')
+
+    def titles(self, **params):
+        response = self.client.get(reverse('search'), params)
+        return sorted(work.title for work in response.context['page_obj'])
+
+    def test_filtering_by_poet(self):
+        self.assertEqual(self.titles(author='Poet One'), ['Alpha', 'Beta'])
+
+    def test_the_poet_match_ignores_case(self):
+        self.assertEqual(self.titles(author='poet one'), ['Alpha', 'Beta'])
+
+    def test_a_poet_combines_with_a_language_and_a_tag(self):
+        work = Qasida.objects.get(title='Alpha')
+        work.tags.add(Tag.objects.create(name='naat'))
+        self.assertEqual(self.titles(author='Poet One', lang='Urdu', tag='naat'),
+                         ['Alpha'])
+
+    def test_the_facet_lists_poets_present_in_the_results(self):
+        response = self.client.get(reverse('search'))
+        names = [entry['author'] for entry in response.context['all_authors']]
+        self.assertIn('Poet One', names)
+        self.assertIn('Poet Two', names)
+        # A work with no poet named contributes no entry.
+        self.assertNotIn('', names)
+
+    def test_the_facet_counts_works_per_poet(self):
+        response = self.client.get(reverse('search'))
+        counts = {e['author']: e['n'] for e in response.context['all_authors']}
+        self.assertEqual(counts['Poet One'], 2)
+        self.assertEqual(counts['Poet Two'], 1)
+
+    def test_the_poet_facet_is_capped_and_says_so(self):
+        from .views import AUTHOR_FACET_LIMIT
+        for n in range(AUTHOR_FACET_LIMIT + 5):
+            make_qasida(title=f'Extra {n}', author=f'Prolific {n:02}')
+        response = self.client.get(reverse('search'))
+        self.assertEqual(len(response.context['all_authors']), AUTHOR_FACET_LIMIT)
+        self.assertGreater(response.context['author_total'], AUTHOR_FACET_LIMIT)
+
+    def test_the_chosen_poet_can_be_removed(self):
+        response = self.client.get(reverse('search'), {'author': 'Poet One',
+                                                       'lang': 'Urdu'})
+        self.assertEqual(response.context['author_filter'], 'Poet One')
+        # Removing the poet leaves the language in place.
+        self.assertIn('lang=Urdu', response.context['qs_without_author'])
+        self.assertNotIn('author=', response.context['qs_without_author'])
+
+    def test_searching_within_a_poet_keeps_the_poet(self):
+        body = self.client.get(reverse('search'),
+                               {'author': 'Poet One'}).content.decode()
+        self.assertIn('name="author" value="Poet One"', body)

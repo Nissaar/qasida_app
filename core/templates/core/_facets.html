@@ -4,6 +4,7 @@
     <label for="facet-q" class="eyebrow block mb-2">Search</label>
     <input id="facet-q" type="search" name="q" dir="auto" value="{{ query }}" placeholder="Title, line or author" class="input">
     {% if lang_filter %}<input type="hidden" name="lang" value="{{ lang_filter }}">{% endif %}
+    {% if author_filter %}<input type="hidden" name="author" value="{{ author_filter }}">{% endif %}
     {% comment %} One hidden field per chosen tag, so searching within a
     narrowed set keeps the narrowing. {% endcomment %}
     {% for name in tag_filters %}<input type="hidden" name="tag" value="{{ name }}">{% endfor %}
@@ -21,6 +22,31 @@
         {% endif %}
         {% endfor %}
     </ul>
+</div>
+
+<div class="card p-4">
+    <h2 class="eyebrow mb-2">Poet</h2>
+    {% if all_authors %}
+    <ul class="space-y-0.5 max-h-60 overflow-y-auto thin-scroll">
+        {% for entry in all_authors %}
+        {% if entry.author|lower == author_filter|lower %}
+        <li><a href="?{{ qs_without_author }}" class="facet-on" title="Remove this filter"><span dir="auto">{{ entry.author }}</span><span class="facet-count">{{ entry.n }} &times;</span></a></li>
+        {% else %}
+        <li><a href="?{{ qs_without_author }}{% if qs_without_author %}&amp;{% endif %}author={{ entry.author|urlencode }}" class="facet"><span dir="auto">{{ entry.author }}</span><span class="facet-count">{{ entry.n }}</span></a></li>
+        {% endif %}
+        {% endfor %}
+    </ul>
+    {% comment %} The library holds far more poets than belong in a sidebar, so
+    the rest are reached through the index rather than listed here. {% endcomment %}
+    {% if author_total > author_shown %}
+    <p class="text-[11px] text-stone-400 dark:text-stone-500 mt-2">
+        Showing the {{ author_shown }} most represented of {{ author_total }}.
+        <a href="{% url 'poets' %}" class="text-brand-700 dark:text-brand-300 hover:underline">See every poet</a>.
+    </p>
+    {% endif %}
+    {% else %}
+    <p class="text-sm text-stone-500">No poet is named in these results.</p>
+    {% endif %}
 </div>
 
 <div class="card p-4">

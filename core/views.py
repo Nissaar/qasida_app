@@ -76,6 +76,7 @@ def _read_filters(request):
     return {
         'q': request.GET.get('q', '').strip(),
         'lang': request.GET.get('lang', '').strip(),
+        'author': request.GET.get('author', '').strip(),
         'tags': tags,
     }
 
@@ -136,6 +137,8 @@ def _apply_filters(request, filters, skip=()):
     # match on a short tag name matches almost everything.
     if filters['lang'] and 'lang' not in skip:
         qasidas = qasidas.filter(language__iexact=filters['lang'])
+    if filters['author'] and 'author' not in skip:
+        qasidas = qasidas.filter(author__iexact=filters['author'])
     if filters['tags'] and 'tag' not in skip:
         # ANDed, and each as its own join: a single join with two conditions
         # asks for one tag that is both things at once, which nothing is.
@@ -152,6 +155,20 @@ def _tag_facets(scope):
             .order_by('-n', 'name'))
 
 
+# The library holds 360 named poets, so the rail shows the ones present in the
+# current results and sends the reader to the poets index for the rest. Scoped
+# to the filters, the list is usually far shorter than this cap.
+AUTHOR_FACET_LIMIT = 30
+
+
+def _author_facets(scope, limit=AUTHOR_FACET_LIMIT):
+    """Poets represented in `scope`, most prolific first, with a count."""
+    return (scope.exclude(author='')
+            .values('author')
+            .annotate(n=Count('id', distinct=True))
+            .order_by('-n', 'author')[:limit])
+
+
 def _language_facets(scope):
     return (scope.exclude(language='')
             .values('language')
@@ -162,7 +179,8 @@ def _language_facets(scope):
 def _listing(request, heading):
     """Shared paginated listing with scoped facets, used for browsing and searching."""
     filters = _read_filters(request)
-    has_filters = bool(filters['q'] or filters['lang'] or filters['tags'])
+    has_filters = bool(filters['q'] or filters['lang'] or filters['author']
+                       or filters['tags'])
 
     results = (_apply_filters(request, filters)
                .prefetch_related('tags', 'images').order_by('-created_at'))
@@ -179,6 +197,10 @@ def _listing(request, heading):
     # filter lifted, and each number answers "how many if I pick this instead".
     tag_scope = _apply_filters(request, filters)
     language_scope = _apply_filters(request, filters, skip=('lang',))
+    # An author is single-valued, so picking one replaces rather than narrows;
+    # its counts are taken with the author filter lifted, and each number
+    # answers "how many if I pick this poet instead".
+    author_scope = _apply_filters(request, filters, skip=('author',))
 
     active_tags = [{
         'name': name,
@@ -194,12 +216,18 @@ def _listing(request, heading):
         'lang_filter': filters['lang'],
         'tag_filters': filters['tags'],
         'active_tags': active_tags,
+        'author_filter': filters['author'],
         'has_filters': has_filters,
         'querystring': without(),
         'qs_without_lang': without('lang'),
+        'qs_without_author': without('author'),
         'qs_without_q': without('q'),
         'tag_groups': _grouped_tag_facets(_tag_facets(tag_scope), filters['tags'], request),
         'all_languages': _language_facets(language_scope),
+        'all_authors': _author_facets(author_scope),
+        'author_total': (author_scope.exclude(author='')
+                         .values('author').distinct().count()),
+        'author_shown': AUTHOR_FACET_LIMIT,
     }
     return render(request, 'core/listing.html', context)
 
