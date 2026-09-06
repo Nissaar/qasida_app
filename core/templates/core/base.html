@@ -61,7 +61,7 @@
         @layer components {
             /* One card definition, used by every surface in the app. */
             .card { @apply bg-white dark:bg-stone-900 rounded-2xl border border-stone-200/80 dark:border-stone-800 shadow-soft; }
-            .card-link { @apply card transition duration-200 hover:shadow-lift hover:-translate-y-0.5 hover:border-brand-300 dark:hover:border-brand-700; }
+            .card-link { @apply card relative transition duration-200 hover:shadow-lift hover:-translate-y-0.5 hover:border-brand-300 dark:hover:border-brand-700; }
 
             .btn { @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-stone-900; }
             .btn-primary { @apply btn bg-brand-700 text-white hover:bg-brand-800 active:bg-brand-900; }
@@ -161,6 +161,19 @@
         }
         :root.dark .suggest-foot { background: #0c0a09; color: #6ee7b7; }
         .suggest-empty { padding: .8rem .85rem; font-size: .8125rem; color: #78716c; }
+        /* A whole card is the target, not just the title. One real link is
+           stretched over the card with a pseudo-element, so there is still a
+           single link for a screen reader and for "open in new tab", rather
+           than a click handler that swallows the card. */
+        .stretched::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            z-index: 0;
+        }
+        /* Anything else on the card has to sit above that overlay to stay
+           clickable in its own right. */
+        .card-link .above-stretch { position: relative; z-index: 1; }
         .safe-b { padding-bottom: env(safe-area-inset-bottom); }
         .safe-t { padding-top: env(safe-area-inset-top); }
         @media (display-mode: standalone) { .hide-in-app { display: none; } }

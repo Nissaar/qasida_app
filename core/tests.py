@@ -1536,3 +1536,141 @@ class ReferrerPolicyTest(TestCase):
         qasida.media.create(url='https://www.youtube.com/watch?v=dQw4w9WgXcQ')
         body = self.client.get(qasida.get_absolute_url()).content.decode()
         self.assertIn('referrerPolicy', body)
+
+
+class VerseMarkerTest(TestCase):
+    """
+    Asterisks left behind by sources that publish Markdown.
+
+    Two different things look the same: emphasis wrapping a heading, and a run
+    of asterisks standing in for a line break. The second is the damaging one -
+    a poem separated that way arrives as a single physical line with no stanza
+    structure, so no layer can be paired against it and the page falls back to
+    showing everything as one undivided block.
+    """
+
+    def normalise(self, text):
+        from .verse_markers import normalise
+        return normalise(text)
+
+    def test_emphasis_is_unwrapped(self):
+        self.assertEqual(self.normalise('**a title**'), 'a title')
+        self.assertEqual(self.normalise('*a title*'), 'a title')
+        self.assertEqual(self.normalise('***a title***'), 'a title')
+
+    def test_an_emphasised_opening_earns_its_own_line(self):
+        self.assertEqual(self.normalise('**Heading** the verse follows'),
+                         'Heading\nthe verse follows')
+
+    def test_a_divider_becomes_a_line_break(self):
+        self.assertEqual(self.normalise('first half * second half'),
+                         'first half\nsecond half')
+
+    def test_a_poem_run_together_on_one_line_regains_its_shape(self):
+        """The failure this exists for: no line breaks at all, only asterisks."""
+        self.assertEqual(self.normalise('one ** two ** three ** four'),
+                         'one\ntwo\nthree\nfour')
+
+    def test_text_without_asterisks_is_returned_untouched(self):
+        original = 'line one\nline two\n\nline three'
+        self.assertEqual(self.normalise(original), original)
+
+    def test_normalising_restores_the_verse_by_verse_reading(self):
+        """
+        The point of the whole exercise.
+
+        A poem whose verses were divided by asterisks has no lines, so the
+        best the page can do is set the whole transliteration against the
+        whole original - one row, two walls of text. It is technically paired;
+        it simply reads as nothing. Give the verses back their line breaks and
+        they line up one for one.
+        """
+        from .templatetags.qasida_extras import stanza_rows
+
+        def lines_per_row(qasida):
+            return [(len(row['original'].splitlines()),
+                     len(row['latin'].splitlines()))
+                    for row in stanza_rows(qasida)]
+
+        work = make_qasida(title='Run Together',
+                           lyrics='one ** two ** three',
+                           transliteration='L1\nL2\nL3')
+        # One line of "original" against three of transliteration: the layers
+        # are set side by side but nothing within them corresponds.
+        self.assertEqual(lines_per_row(work), [(1, 3)])
+
+        work.lyrics = self.normalise(work.lyrics)
+        work.save()
+
+        # Three verses against their three transliterated lines.
+        self.assertEqual(lines_per_row(work), [(3, 3)])
+        self.assertEqual(stanza_rows(work)[0]['original'].splitlines(),
+                         ['one', 'two', 'three'])
+
+    def test_the_cleanup_command_changes_nothing_without_apply(self):
+        from io import StringIO
+        from django.core.management import call_command
+
+        work = make_qasida(title='Starred', lyrics='one ** two')
+        call_command('tidy_verse_markers', show=0, stdout=StringIO())
+        work.refresh_from_db()
+        self.assertIn('**', work.lyrics)
+
+    def test_the_cleanup_command_writes_when_told_to(self):
+        from io import StringIO
+        from django.core.management import call_command
+
+        work = make_qasida(title='Starred', lyrics='one ** two')
+        call_command('tidy_verse_markers', apply=True, show=0, stdout=StringIO())
+        work.refresh_from_db()
+        self.assertEqual(work.lyrics, 'one\ntwo')
+
+    def test_the_reported_shape_reproduces_no_text(self):
+        """A dry run must be safe to paste into a ticket."""
+        from .verse_markers import describe
+        shape = describe('some recognisable words here')
+        for word in ('some', 'recognisable', 'words', 'here'):
+            self.assertNotIn(word, shape)
+
+
+class DedicationTest(TestCase):
+    """Who a qasida is written in praise of, which is not who wrote it."""
+
+    def test_it_shows_on_the_page(self):
+        qasida = make_qasida(title='Praise', author='A Poet',
+                             dedicated_to='The Prophet')
+        body = self.client.get(qasida.get_absolute_url()).content.decode()
+        self.assertIn('The Prophet', body)
+        self.assertIn('Dedicated to', body)
+
+    def test_it_is_absent_when_not_set(self):
+        qasida = make_qasida(title='Plain')
+        body = self.client.get(qasida.get_absolute_url()).content.decode()
+        self.assertNotIn('Dedicated to', body)
+
+    def test_it_is_searchable(self):
+        make_qasida(title='Praise', dedicated_to='Shaykh Abdul Qadir')
+        response = self.client.get(reverse('search'), {'q': 'abdul qadir'})
+        self.assertEqual([w.title for w in response.context['page_obj']], ['Praise'])
+
+    def test_an_editor_can_set_it(self):
+        staff = User.objects.create_superuser('root', 'r@example.com', GOOD_PASSWORD)
+        self.client.force_login(staff)
+        qasida = make_qasida(title='Praise')
+        response = self.client.get(reverse('qasida_edit', args=[qasida.slug]))
+        self.assertIn('dedicated_to', response.context['form'].fields)
+
+
+class ClickableCardTest(TestCase):
+    """The whole card is the target, not only the title."""
+
+    def test_the_card_carries_a_stretched_link(self):
+        make_qasida(title='Reachable')
+        body = self.client.get(reverse('browse')).content.decode()
+        self.assertIn('class="stretched', body)
+
+    def test_the_tags_stay_separately_clickable(self):
+        work = make_qasida(title='Reachable')
+        work.tags.add(Tag.objects.create(name='naat'))
+        body = self.client.get(reverse('browse')).content.decode()
+        self.assertIn('above-stretch', body)

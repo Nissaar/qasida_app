@@ -33,6 +33,11 @@
                     {% if qasida.author %}
                     <p dir="auto" class="text-sm text-stone-500 dark:text-stone-400 mt-2">{{ qasida.author }}</p>
                     {% endif %}
+                    {% if qasida.dedicated_to %}
+                    <p dir="auto" class="text-sm text-brand-700 dark:text-brand-300 mt-1">
+                        In praise of {{ qasida.dedicated_to }}
+                    </p>
+                    {% endif %}
                 </div>
                 <div class="flex items-center gap-2 shrink-0">
                     {% if user.is_authenticated %}
@@ -347,6 +352,12 @@
                 <div class="flex justify-between gap-3">
                     <dt class="text-stone-500 dark:text-stone-400">Author</dt>
                     <dd dir="auto" class="font-medium text-right">{{ qasida.author }}</dd>
+                </div>
+                {% endif %}
+                {% if qasida.dedicated_to %}
+                <div class="flex justify-between gap-3">
+                    <dt class="text-stone-500 dark:text-stone-400">Dedicated to</dt>
+                    <dd dir="auto" class="font-medium text-right">{{ qasida.dedicated_to }}</dd>
                 </div>
                 {% endif %}
                 <div class="flex justify-between gap-3">

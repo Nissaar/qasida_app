@@ -175,6 +175,13 @@ class Qasida(models.Model):
     slug = models.SlugField(max_length=220, unique=True, blank=True)
     arabic_title = models.CharField(max_length=200, blank=True)
     author = models.CharField(max_length=200, blank=True)
+    # Who the poem is addressed to or written in praise of - the Prophet, a
+    # saint, a teacher. Distinct from the poet, and often the thing a reader
+    # is actually looking for: much of this repertoire is grouped by whom it
+    # honours rather than by who wrote it.
+    dedicated_to = models.CharField(
+        max_length=200, blank=True,
+        help_text="Who the qasida is addressed to or written in praise of.")
     language = models.CharField(max_length=50, blank=True)
     lyrics = models.TextField()
     # Latin-script rendering of the same verses, where the source publishes one.
@@ -289,8 +296,8 @@ class Qasida(models.Model):
 
     def save(self, *args, **kwargs):
         self.search_text = build_document(
-            self.title, self.arabic_title, self.author, self.lyrics,
-            self.transliteration, self.translation)
+            self.title, self.arabic_title, self.author, self.dedicated_to,
+            self.lyrics, self.transliteration, self.translation)
         update_fields = kwargs.get('update_fields')
         if update_fields:
             kwargs['update_fields'] = list(set(update_fields) | {'search_text'})

@@ -102,19 +102,21 @@ class QasidaMediaInline(admin.TabularInline):
 
 @admin.register(Qasida)
 class QasidaAdmin(LibraryAdmin):
-    list_display = ('title', 'review_state', 'author', 'collection', 'language',
-                    'source_site', 'text_quality', 'scan_count', 'has_latin',
-                    'has_translation', 'saved_count')
+    list_display = ('title', 'review_state', 'author', 'dedicated_to',
+                    'collection', 'language', 'source_site', 'text_quality',
+                    'scan_count', 'has_latin', 'has_translation', 'saved_count')
     # The typed filters come first: author and tag have too many distinct
     # values for Django's default link-per-value rendering.
     list_filter = (TextSearchPanel, 'review_state', 'collection', 'source_site',
                    'language', 'text_quality', 'translation_origin')
-    search_help_text = ('Searches title, Arabic title, author, lyrics and transliteration. '
+    search_help_text = ('Searches title, Arabic title, poet, dedication, lyrics '
+                        'and transliteration. '
                         'Need to read a scan? Use the Extract text tool at ./ocr-tool/')
     actions = ['approve_for_display', 'send_back_for_review', 'reject_qasidas',
                'enrich_selected', 'enrich_selected_overwrite',
                'add_to_collection', 'remove_from_collection']
-    search_fields = ('title', 'arabic_title', 'author', 'lyrics', 'transliteration')
+    search_fields = ('title', 'arabic_title', 'author', 'dedicated_to',
+                     'lyrics', 'transliteration')
     list_select_related = ('source_site', 'collection')
     filter_horizontal = ('tags',)
     inlines = [QasidaMediaInline, QasidaImageInline]

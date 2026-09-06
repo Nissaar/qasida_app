@@ -17,6 +17,7 @@ import json
 import re
 
 from bs4 import BeautifulSoup
+from .verse_markers import normalise as normalise_markers
 
 ARABIC_RE = re.compile(r'[؀-ۿ]')
 
@@ -138,6 +139,10 @@ def html_to_verse(element):
     else:
         rendered = '\n'.join(_lines_from_breaks(element))
 
+    # Several sources publish Markdown. Asterisks that wrapped a heading, or
+    # stood in for a line break between verses, are cleared here rather than
+    # stored and shown to the reader as punctuation.
+    rendered = normalise_markers(rendered)
     return re.sub(r'\n{3,}', '\n\n', rendered).strip()
 
 
