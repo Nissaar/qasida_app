@@ -92,6 +92,14 @@ body { overflow-wrap: anywhere; }
     word-break: break-word;
     min-width: 0;
 }
+/* Django lays the changelist out as a flex row: the table on one side, the
+   filter rail on the other. A flex child will not shrink below its own content
+   unless it is told it may, so without this the wide results table pushes the
+   whole row past the viewport - and because the page itself is set never to
+   scroll sideways, the overflow is simply clipped and the filter rail and the
+   Add button disappear off the right edge. The table scrolls inside .results
+   instead, which is what it is there for. */
+#changelist, #changelist-form, .changelist-form-container, .results { min-width: 0; }
 img, svg, video, iframe { max-width: 100%; }
 
 body {
@@ -419,6 +427,19 @@ a.deletelink:hover { color: #dc2626; }
 .button.default:hover, input[type=submit].default:hover { background: var(--q-accent-strong); }
 .submit-row a.deletelink { background: #fee2e2; color: #b91c1c; border-radius: var(--q-radius-sm); padding: 0.7rem 1.1rem; }
 
+/* Django floats this row right, which overflows the moment a label is as long
+   as "Extract text from a PDF or image". A wrapping flex row keeps the buttons
+   inside the page and drops them onto a second line rather than off the edge. */
+.object-tools {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: .45rem;
+    float: none;
+    margin: 0 0 .75rem;
+    padding: 0;
+}
+.object-tools li { margin: 0; list-style: none; }
 .object-tools a {
     background: var(--q-surface);
     border: 1px solid var(--q-line);
@@ -672,8 +693,11 @@ input[name="arabic_title"], #ocr-output {
     .aligned .vTextField, .aligned input, .aligned select, .aligned textarea { width: 100%; box-sizing: border-box; }
 
     /* Action bars wrap instead of overflowing. */
-    .object-tools { display: flex; flex-wrap: wrap; gap: .4rem; float: none; margin: 0 0 .75rem; }
-    .object-tools li { margin: 0; }
+    /* Left-aligned and full width on a phone, where a right-aligned row of
+       buttons reads as stray. */
+    .object-tools { justify-content: stretch; gap: .4rem; }
+    .object-tools li { flex: 1 1 auto; }
+    .object-tools a { display: block; text-align: center; }
     .submit-row { gap: .5rem; padding: .85rem 1rem; }
     /* Full width and stacked on a phone; Delete last, and not nudged away by
        an auto margin that has nowhere to push to. */
@@ -697,3 +721,21 @@ input[name="arabic_title"], #ocr-output {
 
 /* Nothing should ever make the page itself scroll sideways. */
 html, body { max-width: 100%; overflow-x: hidden; }
+
+
+/* The second set of pagination controls, above the grid. Django's own sit
+   under the table; these are the same markup, so they are given a little air
+   and a rule to sit against instead of new styling of their own. */
+.q-paginator-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .5rem;
+    padding: 0 1.25rem .85rem;
+    border-bottom: 1px solid var(--q-line);
+    margin-bottom: .25rem;
+}
+.q-paginator-top .paginator { border: none; padding: 0; margin: 0; background: none; }
+@media (max-width: 767px) {
+    .q-paginator-top { padding: 0 1rem .7rem; }
+}

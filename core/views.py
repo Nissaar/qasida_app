@@ -5,7 +5,7 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.core.paginator import Paginator
 from django.db.models import Count, Q
 from django.db.models.functions import Length
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from .forms import QasidaForm
@@ -18,66 +18,32 @@ from .search import normalize
 PAGE_SIZE = 24
 FILTER_KEYS = ('q', 'lang', 'tag')
 
-# The tag vocabulary is harvested from the source sites, so it arrives as
-# prefixed slugs (maqam-hijaz, bahr-kamil). Group them and show readable names
-# instead of one flat list of jargon.
-LANGUAGE_TAGS = frozenset({
-    'arabic', 'english', 'urdu', 'spanish', 'swedish', 'german', 'french', 'turkish',
-})
-FORM_TAGS = frozenset({
-    'naat', 'qasida', 'manzhuma', 'mawlid-hadra', 'tawassul', 'around-the-year',
-})
-STATUS_LABELS = {
-    'lyrics-in-images': 'Lyrics only as scans',
-    'text-needs-review': 'Text needs review',
-}
-
-
-def _tag_group(name):
-    if name.startswith('maqam-'):
-        return 'Maqam (melodic mode)'
-    if name.startswith('bahr-'):
-        return 'Bahr (metre)'
-    if name in STATUS_LABELS:
-        return 'Condition'
-    if name in LANGUAGE_TAGS:
-        return 'Language'
-    if name in FORM_TAGS or name.startswith('qasida-'):
-        return 'Type'
-    return 'Other'
-
-
-def _tag_label(name):
-    """Drop the taxonomy prefix; the group heading already carries it."""
-    if name in STATUS_LABELS:
-        return STATUS_LABELS[name]
-    for prefix in ('maqam-', 'bahr-', 'qasida-'):
-        if name.startswith(prefix):
-            name = name[len(prefix):]
-            break
-    return name.replace('-', ' ').title()
-
-
-GROUP_ORDER = ('Type', 'Language', 'Maqam (melodic mode)', 'Bahr (metre)', 'Condition', 'Other')
+# The tag vocabulary arrives from the source sites as one flat list mixing four
+# unrelated things - what kind of poem it is, its language, the melodic mode it
+# is sung in, the metre it is written in. Which axis a tag sits on is now stored
+# on the tag itself (see Tag.category), so these read it rather than guessing it
+# from the name on every page view, and an editor's correction survives.
+CATEGORY_LABELS = dict(Tag.CATEGORY_CHOICES)
 
 
 def _grouped_tag_facets(tags, active_tag):
-    """Bucket the tag facets for display, flagging which group holds the selection."""
+    """Bucket the tag facets by axis, flagging which group holds the selection."""
     buckets = {}
     for tag in tags:
-        buckets.setdefault(_tag_group(tag.name), []).append({
+        buckets.setdefault(tag.category or Tag.CATEGORY_OTHER, []).append({
             'name': tag.name,
-            'label': _tag_label(tag.name),
+            'label': tag.label,
             'n': tag.n,
             'is_active': tag.name.lower() == (active_tag or '').lower(),
         })
     groups = []
-    for label in GROUP_ORDER:
-        items = buckets.get(label)
+    for category in Tag.CATEGORY_ORDER:
+        items = buckets.get(category)
         if not items:
             continue
         groups.append({
-            'label': label,
+            'label': CATEGORY_LABELS[category],
+            'category': category,
             'items': items,
             'total': sum(i['n'] for i in items),
             'has_active': any(i['is_active'] for i in items),
@@ -188,10 +154,10 @@ def _top_poets(scope, limit):
             .order_by('-n', 'author')[:limit])
 
 
-def _tags_in_group(scope, group_label, limit):
-    """Facet-style tag list restricted to one of the display groups."""
-    tags = [t for t in _tag_facets(scope) if _tag_group(t.name) == group_label]
-    return [{'name': t.name, 'label': _tag_label(t.name), 'n': t.n} for t in tags[:limit]]
+def _tags_in_group(scope, category, limit):
+    """Facet-style tag list restricted to one axis."""
+    tags = _tag_facets(scope).filter(category=category)[:limit]
+    return [{'name': t.name, 'label': t.label, 'n': t.n} for t in tags]
 
 
 def _featured(scope, language, limit):
@@ -238,8 +204,8 @@ def home(request):
         'languages': languages,
         'collections': featured_collections,
         'poets': _top_poets(scope, HOME_POET_COUNT),
-        'forms': _tags_in_group(scope, 'Type', HOME_FORM_COUNT),
-        'maqamat': _tags_in_group(scope, 'Maqam (melodic mode)', HOME_MAQAM_COUNT),
+        'forms': _tags_in_group(scope, Tag.CATEGORY_FORM, HOME_FORM_COUNT),
+        'maqamat': _tags_in_group(scope, Tag.CATEGORY_MAQAM, HOME_MAQAM_COUNT),
         'featured_groups': featured,
         'transliterated_count': scope.exclude(transliteration='').count(),
         **personal,
@@ -252,6 +218,41 @@ def browse(request):
 
 def search(request):
     return _listing(request, 'Search')
+
+
+# Enough of a word to be worth a query. One letter matches most of the
+# library and answers nothing.
+SUGGEST_MIN_LENGTH = 2
+SUGGEST_LIMIT = 8
+
+
+def search_suggest(request):
+    """
+    Matches for the search box, as the reader types.
+
+    Answers the same queryset the full search page would, so what appears
+    under the box and what appears on the results page cannot disagree - and
+    it goes through visible_to, so the review gate holds here too.
+    """
+    query = request.GET.get('q', '').strip()
+    results, total = [], 0
+
+    if len(query) >= SUGGEST_MIN_LENGTH:
+        matches = _visible(request)
+        for term in normalize(query).split():
+            matches = matches.filter(search_text__contains=term)
+        matches = matches.distinct()
+        total = matches.count()
+        for qasida in matches.order_by('title')[:SUGGEST_LIMIT]:
+            results.append({
+                'title': qasida.title or 'Untitled qasida',
+                'arabic_title': qasida.arabic_title,
+                'author': qasida.author,
+                'language': qasida.language,
+                'url': qasida.get_absolute_url(),
+            })
+
+    return JsonResponse({'query': query, 'total': total, 'results': results})
 
 
 def qasida_by_id(request, pk):

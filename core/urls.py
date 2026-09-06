@@ -23,6 +23,8 @@ urlpatterns = [
     path('collections/', views.collections, name='collections'),
     path('collection/<slug:slug>/', views.collection, name='collection'),
     path('search/', views.search, name='search'),
+    # Answers the search box while the reader is still typing.
+    path('search/suggest/', views.search_suggest, name='search_suggest'),
     path('random/', views.random_qasida, name='random_qasida'),
     # `path` rather than `str`: some author fields hold two names joined with
     # a slash, which `str` refuses to match or reverse.

@@ -134,6 +134,33 @@
         /* Verse size, set on the account and applied to the whole page. */
         .lyrics-sm .prose-lyrics { font-size: 1rem; line-height: 2; }
         .lyrics-lg .prose-lyrics { font-size: 1.55rem; line-height: 2.35; }
+        /* Live search results, drawn under whichever box is being typed in. */
+        .suggest-panel {
+            position: absolute; z-index: 50; left: 0; right: 0; top: calc(100% + .4rem);
+            background: #fff; border: 1px solid rgba(214,211,209,.9); border-radius: .9rem;
+            box-shadow: 0 2px 4px rgba(28,25,23,.06), 0 16px 32px -16px rgba(28,25,23,.18);
+            overflow: hidden; max-height: min(26rem, 60vh); overflow-y: auto;
+        }
+        :root.dark .suggest-panel { background: #1c1917; border-color: #292524; }
+        .suggest-item {
+            display: block; padding: .55rem .85rem; text-decoration: none;
+            color: inherit; border-bottom: 1px solid rgba(231,229,228,.7);
+        }
+        :root.dark .suggest-item { border-bottom-color: #292524; }
+        .suggest-item:last-child { border-bottom: none; }
+        .suggest-item:hover, .suggest-item.is-active { background: rgba(236,253,245,.85); }
+        :root.dark .suggest-item:hover, :root.dark .suggest-item.is-active { background: rgba(6,78,59,.35); }
+        .suggest-title { display: block; font-weight: 600; font-size: .875rem; color: #065f46; }
+        :root.dark .suggest-title { color: #a7f3d0; }
+        .suggest-meta { display: block; font-size: .75rem; color: #78716c; margin-top: .1rem; }
+        .suggest-arabic { font-family: "Noto Naskh Arabic", serif; font-size: .95rem; }
+        .suggest-foot {
+            display: block; padding: .55rem .85rem; font-size: .75rem; font-weight: 600;
+            text-align: center; color: #047857; text-decoration: none;
+            background: rgba(245,245,244,.8);
+        }
+        :root.dark .suggest-foot { background: #0c0a09; color: #6ee7b7; }
+        .suggest-empty { padding: .8rem .85rem; font-size: .8125rem; color: #78716c; }
         .safe-b { padding-bottom: env(safe-area-inset-bottom); }
         .safe-t { padding-top: env(safe-area-inset-top); }
         @media (display-mode: standalone) { .hide-in-app { display: none; } }
@@ -157,7 +184,7 @@
             <label for="hdr-q" class="sr-only">Search</label>
             <div class="relative w-full">
                 <svg class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-stone-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-                <input id="hdr-q" type="search" name="q" dir="auto" value="{{ query|default:'' }}"
+                <input id="hdr-q" type="search" name="q" dir="auto" data-suggest value="{{ query|default:'' }}"
                        placeholder="Search a line, title or author&hellip;" class="input pl-9">
             </div>
         </form>
@@ -312,6 +339,147 @@
 </div>
 
 <script>
+/* Search as you type.
+ *
+ * Progressive enhancement: the form still submits normally without this, and
+ * still submits if a request fails. The panel only ever adds a shortcut to a
+ * result the reader can already reach by pressing enter. */
+(function () {
+    var MIN = 2, DELAY = 180;
+
+    document.querySelectorAll('input[data-suggest]').forEach(function (input) {
+        var host = input.closest('.relative') || input.parentElement;
+        if (!host) return;
+
+        var panel = document.createElement('div');
+        panel.className = 'suggest-panel';
+        panel.hidden = true;
+        panel.setAttribute('role', 'listbox');
+        host.appendChild(panel);
+
+        var timer = null, controller = null, items = [], active = -1;
+
+        input.setAttribute('autocomplete', 'off');
+        input.setAttribute('aria-autocomplete', 'list');
+        input.setAttribute('aria-expanded', 'false');
+
+        function close() {
+            panel.hidden = true;
+            input.setAttribute('aria-expanded', 'false');
+            active = -1;
+        }
+
+        function highlight(index) {
+            items.forEach(function (el, i) { el.classList.toggle('is-active', i === index); });
+            if (index >= 0 && items[index]) items[index].scrollIntoView({block: 'nearest'});
+            active = index;
+        }
+
+        function render(data) {
+            panel.textContent = '';
+            items = [];
+            if (!data.results.length) {
+                var none = document.createElement('p');
+                none.className = 'suggest-empty';
+                none.textContent = 'Nothing matches \u201c' + data.query + '\u201d yet.';
+                panel.appendChild(none);
+            } else {
+                data.results.forEach(function (row) {
+                    var link = document.createElement('a');
+                    link.className = 'suggest-item';
+                    link.href = row.url;
+                    link.setAttribute('role', 'option');
+
+                    var title = document.createElement('span');
+                    title.className = 'suggest-title';
+                    title.setAttribute('dir', 'auto');
+                    title.textContent = row.title;
+                    link.appendChild(title);
+
+                    if (row.arabic_title) {
+                        var arabic = document.createElement('span');
+                        arabic.className = 'suggest-meta suggest-arabic';
+                        arabic.setAttribute('dir', 'rtl');
+                        arabic.setAttribute('lang', 'ar');
+                        arabic.textContent = row.arabic_title;
+                        link.appendChild(arabic);
+                    }
+
+                    var bits = [row.author, row.language].filter(Boolean);
+                    if (bits.length) {
+                        var meta = document.createElement('span');
+                        meta.className = 'suggest-meta';
+                        meta.setAttribute('dir', 'auto');
+                        meta.textContent = bits.join(' \u00b7 ');
+                        link.appendChild(meta);
+                    }
+
+                    panel.appendChild(link);
+                    items.push(link);
+                });
+
+                if (data.total > data.results.length) {
+                    var all = document.createElement('a');
+                    all.className = 'suggest-foot';
+                    all.href = '{% url "search" %}?q=' + encodeURIComponent(data.query);
+                    all.textContent = 'See all ' + data.total + ' results';
+                    panel.appendChild(all);
+                    items.push(all);
+                }
+            }
+            panel.hidden = false;
+            input.setAttribute('aria-expanded', 'true');
+            highlight(-1);
+        }
+
+        function ask() {
+            var query = input.value.trim();
+            if (query.length < MIN) { close(); return; }
+            if (controller) controller.abort();
+            controller = ('AbortController' in window) ? new AbortController() : null;
+            fetch('{% url "search_suggest" %}?q=' + encodeURIComponent(query),
+                  {signal: controller && controller.signal,
+                   headers: {'X-Requested-With': 'fetch'}})
+                .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+                .then(function (data) {
+                    /* The reader may have typed on while this was in flight. */
+                    if (input.value.trim() === data.query) render(data);
+                })
+                .catch(function () { /* the form still works; say nothing */ });
+        }
+
+        input.addEventListener('input', function () {
+            clearTimeout(timer);
+            timer = setTimeout(ask, DELAY);
+        });
+
+        input.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape') { close(); return; }
+            if (panel.hidden || !items.length) return;
+            if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                highlight((active + 1) % items.length);
+            } else if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                highlight(active <= 0 ? items.length - 1 : active - 1);
+            } else if (event.key === 'Enter' && active >= 0) {
+                /* Only intercept enter when something is actually chosen;
+                   otherwise the form submits to the full results page. */
+                event.preventDefault();
+                items[active].click();
+            }
+        });
+
+        input.addEventListener('focus', function () {
+            if (input.value.trim().length >= MIN) ask();
+        });
+
+        document.addEventListener('click', function (event) {
+            if (!host.contains(event.target)) close();
+        });
+    });
+})();
+
 /* A details menu stays open until it is told otherwise; closing it on an
    outside click is what people expect of a dropdown. */
 document.addEventListener('click', function (event) {

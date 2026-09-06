@@ -16,10 +16,70 @@ admin.site.index_title = "Library administration"
 from .models import (Collection, Favourite, Tag, Qasida, QasidaImage, QasidaMedia,
                      ReadingHistory, ReaderProfile, Suggestion, SourceWebsite)
 
+class LibraryAdmin(admin.ModelAdmin):
+    """
+    House style for every list in this admin.
+
+    Twenty rows to a page: enough to judge a batch at a glance, few enough to
+    reach the controls without scrolling far. The template adds a second set
+    of pagination controls above the grid, so moving through a long list does
+    not mean scrolling to the bottom and back to the top for every page.
+    """
+
+    list_per_page = 20
+    change_list_template = 'admin/qasida_change_list.html'
+
+
 @admin.register(Tag)
-class TagAdmin(admin.ModelAdmin):
-    list_display = ('name',)
+class TagAdmin(LibraryAdmin):
+    """
+    The tag vocabulary, arranged by which axis each tag belongs to.
+
+    Category is editable straight from the list, because filing tags is done
+    in batches after a crawl rather than one at a time.
+    """
+
+    list_display = ('name', 'category', 'reader_sees', 'use_count')
+    list_editable = ('category',)
+    list_filter = ('category',)
+    list_display_links = ('name',)
     search_fields = ('name',)
+    ordering = ('category', 'name')
+    actions = ['refile_by_name']
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(_uses=Count('qasidas'))
+
+    @admin.display(description='Shown to readers as')
+    def reader_sees(self, obj):
+        """The label the site prints, once the taxonomy prefix is dropped."""
+        return obj.label
+
+    @admin.display(description='Qasidas', ordering='_uses')
+    def use_count(self, obj):
+        return obj._uses
+
+    @admin.action(description="Re-file by name (overwrites the current group)")
+    def refile_by_name(self, request, queryset):
+        """
+        Run the naming rules over the selected tags again.
+
+        Filing normally happens once, when a tag is first created, and is left
+        alone afterwards so an editor's choice is not undone. This is the way
+        back: useful after a crawl brings in a batch of new tags, or when the
+        rules themselves have been extended.
+        """
+        changed = 0
+        for tag in queryset:
+            filed = Tag.classify(tag.name)
+            if filed != tag.category:
+                tag.category = filed
+                tag.save(update_fields=['category'])
+                changed += 1
+        self.message_user(
+            request,
+            f"Re-filed {changed} of {queryset.count()} tag(s). The rest were "
+            f"already where the rules put them.")
 
 class QasidaImageInline(admin.TabularInline):
     model = QasidaImage
@@ -41,7 +101,7 @@ class QasidaMediaInline(admin.TabularInline):
         return obj.video_id or '—'
 
 @admin.register(Qasida)
-class QasidaAdmin(admin.ModelAdmin):
+class QasidaAdmin(LibraryAdmin):
     list_display = ('title', 'review_state', 'author', 'collection', 'language',
                     'source_site', 'text_quality', 'scan_count', 'has_latin',
                     'has_translation', 'saved_count')
@@ -209,7 +269,7 @@ class QasidaAdmin(admin.ModelAdmin):
         self.message_user(request, f"{count} qasida(s) rejected.")
 
 @admin.register(Suggestion)
-class SuggestionAdmin(admin.ModelAdmin):
+class SuggestionAdmin(LibraryAdmin):
     list_display = ('qasida', 'submitted_by', 'is_reviewed', 'is_approved', 'created_at')
     list_filter = ('is_reviewed', 'is_approved')
     search_fields = ('email', 'user__username', 'suggested_lyrics', 'suggested_tags')
@@ -237,7 +297,7 @@ class SuggestionAdmin(admin.ModelAdmin):
     reject_suggestions.short_description = "Reject selected suggestions"
 
 @admin.register(SourceWebsite)
-class SourceWebsiteAdmin(admin.ModelAdmin):
+class SourceWebsiteAdmin(LibraryAdmin):
     list_display = ('name', 'url', 'parser_type', 'is_active', 'qasida_count')
     list_filter = ('is_active', 'parser_type')
     search_fields = ('name', 'url')
@@ -269,7 +329,7 @@ class CollectionPartInline(admin.TabularInline):
 
 
 @admin.register(Collection)
-class CollectionAdmin(admin.ModelAdmin):
+class CollectionAdmin(LibraryAdmin):
     list_display = ('name', 'arabic_name', 'part_count')
     search_fields = ('name', 'arabic_name')
     prepopulated_fields = {'slug': ('name',)}
@@ -322,7 +382,8 @@ class UserAdmin(DjangoUserAdmin):
     list_filter = ('is_active', 'is_staff', 'is_superuser', 'date_joined', 'groups')
     search_fields = ('username', 'email', 'first_name', 'last_name')
     ordering = ('-date_joined',)
-    list_per_page = 50
+    list_per_page = LibraryAdmin.list_per_page
+    change_list_template = LibraryAdmin.change_list_template
     inlines = [ReaderProfileInline]
     actions = ['activate_accounts', 'deactivate_accounts']
 

@@ -1,0 +1,14 @@
+{% extends "admin/change_list.html" %}
+{% load admin_list %}
+{% comment %}
+Adds a second set of pagination controls above the grid.
+
+Django puts them only underneath, which on a page of results means scrolling
+to the bottom to move on and back to the top to read the next page. The same
+{% pagination %} tag renders both, so the two cannot drift apart.
+{% endcomment %}
+
+{% block result_list %}
+{% if cl.result_count %}<div class="q-paginator-top">{% pagination cl %}</div>{% endif %}
+{{ block.super }}
+{% endblock %}

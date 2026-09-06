@@ -100,9 +100,76 @@
         });
     }
 
+    /*
+     * Search as you type on a changelist.
+     *
+     * The admin's search needs the button pressed. This submits the form for
+     * you a short pause after you stop typing, so the list narrows while you
+     * work. Submitting rather than swapping the table in place is deliberate:
+     * the results carry Django's own action checkboxes and pagination, and
+     * replacing that markup by hand would break the wiring behind them.
+     *
+     * Submitting reloads the page, which would take the cursor with it, so
+     * where the cursor was is carried across and restored.
+     */
+    var SEARCH_DELAY = 450;
+    var FOCUS_FLAG = 'qadmin:refocus-search';
+
+    function setUpLiveSearch() {
+        var input = document.getElementById('searchbar');
+        if (!input) return;
+        var form = input.form;
+        if (!form) return;
+
+        // What the page was already searched for, so an unchanged query - a
+        // stray keypress, or arriving back here - never reloads for nothing.
+        var applied = input.value;
+        var timer = null;
+
+        input.addEventListener('input', function () {
+            clearTimeout(timer);
+            timer = setTimeout(function () {
+                var query = input.value.trim();
+                if (query === applied.trim()) return;
+                // A single letter matches most of the library and is almost
+                // never what someone means to stop on.
+                if (query.length === 1) return;
+                try {
+                    sessionStorage.setItem(FOCUS_FLAG, String(input.selectionStart));
+                } catch (e) { /* private mode: the cursor simply moves to the end */ }
+                form.submit();
+            }, SEARCH_DELAY);
+        });
+
+        // Enter should search now rather than wait out the timer.
+        input.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') clearTimeout(timer);
+        });
+
+        restoreFocus(input);
+    }
+
+    function restoreFocus(input) {
+        var at;
+        try {
+            at = sessionStorage.getItem(FOCUS_FLAG);
+            sessionStorage.removeItem(FOCUS_FLAG);
+        } catch (e) {
+            return;
+        }
+        if (at === null) return;
+        input.focus();
+        var position = parseInt(at, 10);
+        if (isNaN(position) || position > input.value.length) position = input.value.length;
+        try {
+            input.setSelectionRange(position, position);
+        } catch (e) { /* some input types refuse; focus alone is enough */ }
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
         setUpNavSidebar();
         setUpFilterSidebar();
         setUpFieldsets();
+        setUpLiveSearch();
     });
 })();

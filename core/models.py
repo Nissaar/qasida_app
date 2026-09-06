@@ -8,7 +8,125 @@ from .search import build_document
 from .youtube import extract_youtube_id
 
 class Tag(models.Model):
+    """
+    One label from the harvested vocabulary.
+
+    The tags arrive from the source sites as a single flat list mixing four
+    unrelated things: what kind of poem it is, what language it is in, the
+    melodic mode it is sung in, and the metre it is written in - plus a few
+    that describe the state of our own record rather than the poem at all.
+    Reading them as one list is what made the filters hard to use, so each
+    tag carries which axis it belongs to.
+
+    The axis was previously guessed from the tag's name every time it was
+    displayed, which left anything the guesser did not recognise - manqbat,
+    hamd, durood-o-salam - in a bucket called Other. Storing it means an
+    editor can correct a tag once and have it stay corrected.
+    """
+
+    CATEGORY_FORM = 'form'
+    CATEGORY_LANGUAGE = 'language'
+    CATEGORY_MAQAM = 'maqam'
+    CATEGORY_BAHR = 'bahr'
+    CATEGORY_CONDITION = 'condition'
+    CATEGORY_OTHER = 'other'
+    CATEGORY_CHOICES = [
+        (CATEGORY_FORM, 'Form and theme'),
+        (CATEGORY_LANGUAGE, 'Language'),
+        (CATEGORY_MAQAM, 'Maqam (melodic mode)'),
+        (CATEGORY_BAHR, 'Bahr (metre)'),
+        (CATEGORY_CONDITION, 'Condition of the text'),
+        (CATEGORY_OTHER, 'Not yet filed'),
+    ]
+    # The order the groups are shown in: what the poem is, before how it is
+    # performed, before notes about our copy of it.
+    CATEGORY_ORDER = [CATEGORY_FORM, CATEGORY_LANGUAGE, CATEGORY_MAQAM,
+                      CATEGORY_BAHR, CATEGORY_CONDITION, CATEGORY_OTHER]
+
+    # Languages the sources tag in. Held as a set rather than guessed, because
+    # a language name is not distinguishable from a theme by shape alone.
+    LANGUAGE_NAMES = frozenset({
+        'arabic', 'urdu', 'english', 'spanish', 'turkish', 'swedish',
+        'french', 'german', 'persian', 'farsi', 'punjabi', 'sindhi',
+    })
+    # These say something about our record, not about the poem, so they are
+    # kept off the axes a reader browses by.
+    CONDITION_NAMES = frozenset({
+        'transliterated', 'from-archive', 'lyrics-in-images', 'text-needs-review',
+    })
+    # Kinds of devotional poem and the occasions they belong to.
+    FORM_NAMES = frozenset({
+        'naat', 'qasida', 'hamd', 'manqbat', 'manqabat', 'manzhuma',
+        'durood-o-salam', 'sufiyana-kalam', 'mawlid-hadra', 'tawassul',
+        'around-the-year', 'madih', 'nasheed', 'ghazal',
+    })
+    # Prefixes the sources use to namespace a taxonomy.
+    CATEGORY_PREFIXES = (
+        ('maqam-', CATEGORY_MAQAM),
+        ('bahr-', CATEGORY_BAHR),
+        ('qasida-', CATEGORY_FORM),
+    )
+
+    # A few tags read badly when their slug is simply title-cased.
+    DISPLAY_NAMES = {
+        'lyrics-in-images': 'Lyrics only as scans',
+        'text-needs-review': 'Text needs review',
+        'from-archive': 'From the Internet Archive',
+        'transliterated': 'Has a transliteration',
+        'manqbat': 'Manqabat',
+        'durood-o-salam': 'Durood o Salam',
+    }
+
     name = models.CharField(max_length=50, unique=True)
+    category = models.CharField(
+        max_length=12, choices=CATEGORY_CHOICES, blank=True, db_index=True,
+        help_text="Which axis this tag belongs to. Left blank, it is worked "
+                  "out from the name when the tag is saved.")
+
+    class Meta:
+        ordering = ('name',)
+
+    @classmethod
+    def classify(cls, name):
+        """
+        Which axis a tag name belongs to.
+
+        Only used to file a tag that has not been filed by hand: an editor's
+        choice is never overwritten. Anything unrecognised is left unfiled
+        rather than guessed into a group, so it shows up in the admin as
+        something to look at instead of quietly sitting in the wrong place.
+        """
+        key = (name or '').strip().lower()
+        for prefix, category in cls.CATEGORY_PREFIXES:
+            if key.startswith(prefix):
+                return category
+        if key in cls.LANGUAGE_NAMES:
+            return cls.CATEGORY_LANGUAGE
+        if key in cls.CONDITION_NAMES:
+            return cls.CATEGORY_CONDITION
+        if key in cls.FORM_NAMES:
+            return cls.CATEGORY_FORM
+        return cls.CATEGORY_OTHER
+
+    @classmethod
+    def display_name(cls, name):
+        """The tag as a reader should see it, without its taxonomy prefix."""
+        if name in cls.DISPLAY_NAMES:
+            return cls.DISPLAY_NAMES[name]
+        for prefix, _ in cls.CATEGORY_PREFIXES:
+            if name.startswith(prefix):
+                name = name[len(prefix):]
+                break
+        return name.replace('-', ' ').title()
+
+    @property
+    def label(self):
+        return self.display_name(self.name)
+
+    def save(self, *args, **kwargs):
+        if not self.category:
+            self.category = self.classify(self.name)
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.name

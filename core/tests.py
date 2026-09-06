@@ -831,3 +831,152 @@ class MailConfigTest(TestCase):
         from django.conf import settings
         self.assertFalse(settings.EMAIL_USE_TLS and settings.EMAIL_USE_SSL)
         self.assertGreater(settings.EMAIL_TIMEOUT, 0)
+
+
+class TagCategoryTest(TestCase):
+    """Tags sit on one of four axes, and the axis is stored, not re-guessed."""
+
+    def test_the_axes_are_told_apart(self):
+        cases = {
+            'naat': Tag.CATEGORY_FORM,
+            'qasida': Tag.CATEGORY_FORM,
+            'hamd': Tag.CATEGORY_FORM,
+            'manqbat': Tag.CATEGORY_FORM,
+            'qasida-sufi': Tag.CATEGORY_FORM,
+            'qasida-hadra': Tag.CATEGORY_FORM,
+            'durood-o-salam': Tag.CATEGORY_FORM,
+            'urdu': Tag.CATEGORY_LANGUAGE,
+            'arabic': Tag.CATEGORY_LANGUAGE,
+            'maqam-hijaz': Tag.CATEGORY_MAQAM,
+            'bahr-kamil': Tag.CATEGORY_BAHR,
+            'lyrics-in-images': Tag.CATEGORY_CONDITION,
+            'transliterated': Tag.CATEGORY_CONDITION,
+        }
+        for name, expected in cases.items():
+            self.assertEqual(Tag.classify(name), expected, name)
+
+    def test_sufi_hadra_and_manqabat_are_not_filed_with_maqams_or_languages(self):
+        """The separation that was asked for, stated as a test."""
+        for name in ('qasida-sufi', 'qasida-hadra', 'manqbat'):
+            category = Tag.classify(name)
+            self.assertEqual(category, Tag.CATEGORY_FORM, name)
+            self.assertNotIn(category, (Tag.CATEGORY_MAQAM, Tag.CATEGORY_LANGUAGE))
+
+    def test_an_unknown_tag_is_left_unfiled_rather_than_guessed(self):
+        self.assertEqual(Tag.classify('something-nobody-anticipated'),
+                         Tag.CATEGORY_OTHER)
+
+    def test_a_new_tag_files_itself(self):
+        self.assertEqual(Tag.objects.create(name='maqam-nahawand').category,
+                         Tag.CATEGORY_MAQAM)
+
+    def test_an_editors_choice_is_never_overwritten(self):
+        """Filing happens once; a correction has to survive later saves."""
+        tag = Tag.objects.create(name='maqam-hijaz', category=Tag.CATEGORY_FORM)
+        tag.save()
+        tag.refresh_from_db()
+        self.assertEqual(tag.category, Tag.CATEGORY_FORM)
+
+    def test_the_label_drops_the_taxonomy_prefix(self):
+        self.assertEqual(Tag(name='maqam-hijaz').label, 'Hijaz')
+        self.assertEqual(Tag(name='bahr-kamil').label, 'Kamil')
+        self.assertEqual(Tag(name='qasida-sufi').label, 'Sufi')
+
+    def test_awkward_slugs_get_a_readable_name(self):
+        self.assertEqual(Tag(name='lyrics-in-images').label, 'Lyrics only as scans')
+        self.assertEqual(Tag(name='manqbat').label, 'Manqabat')
+
+    def test_the_categories_page_separates_the_axes(self):
+        work = make_qasida(title='Tagged', language='Arabic')
+        for name in ('qasida-sufi', 'urdu', 'maqam-hijaz', 'bahr-kamil'):
+            work.tags.add(Tag.objects.create(name=name))
+        response = self.client.get(reverse('categories'))
+        self.assertEqual(response.status_code, 200)
+        seen = [g['category'] for g in response.context['groups']]
+        for expected in (Tag.CATEGORY_FORM, Tag.CATEGORY_LANGUAGE,
+                         Tag.CATEGORY_MAQAM, Tag.CATEGORY_BAHR):
+            self.assertIn(expected, seen)
+
+    def test_each_tag_appears_under_exactly_one_axis(self):
+        work = make_qasida(title='Tagged')
+        for name in ('naat', 'urdu', 'maqam-rast'):
+            work.tags.add(Tag.objects.create(name=name))
+        groups = self.client.get(reverse('categories')).context['groups']
+        placements = [item['name'] for group in groups for item in group['items']]
+        self.assertEqual(sorted(placements), sorted(set(placements)))
+
+
+class LiveSearchTest(TestCase):
+    """The suggestions shown while the reader is still typing."""
+
+    def setUp(self):
+        self.url = reverse('search_suggest')
+        self.qasida = make_qasida(title='Findable Work', author='Some Poet',
+                                  language='Arabic', arabic_title='مكتبة القصائد')
+
+    def test_it_answers_json(self):
+        response = self.client.get(self.url, {'q': 'findable'})
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body['total'], 1)
+        self.assertEqual(body['results'][0]['title'], 'Findable Work')
+        self.assertEqual(body['results'][0]['url'], self.qasida.get_absolute_url())
+
+    def test_a_single_letter_runs_no_query(self):
+        """One letter matches most of the library and answers nothing."""
+        body = self.client.get(self.url, {'q': 'f'}).json()
+        self.assertEqual(body['results'], [])
+        self.assertEqual(body['total'], 0)
+
+    def test_an_empty_query_is_harmless(self):
+        self.assertEqual(self.client.get(self.url).json()['results'], [])
+
+    def test_it_never_suggests_an_unapproved_work(self):
+        Qasida.objects.create(title='Findable Secret', lyrics='hidden',
+                              language='Arabic')
+        titles = [r['title'] for r in
+                  self.client.get(self.url, {'q': 'findable'}).json()['results']]
+        self.assertEqual(titles, ['Findable Work'])
+
+    def test_results_are_capped_but_the_true_total_is_reported(self):
+        from .views import SUGGEST_LIMIT
+        for n in range(SUGGEST_LIMIT + 4):
+            make_qasida(title=f'Findable Extra {n}')
+        body = self.client.get(self.url, {'q': 'findable'}).json()
+        self.assertEqual(len(body['results']), SUGGEST_LIMIT)
+        self.assertGreater(body['total'], SUGGEST_LIMIT)
+
+    def test_arabic_typed_without_vowel_marks_still_matches(self):
+        body = self.client.get(self.url, {'q': 'مكتبة'}).json()
+        self.assertEqual(body['total'], 1)
+
+
+class AdminListingTest(TestCase):
+    """How the admin lists things, which is where editors spend their time."""
+
+    def setUp(self):
+        self.staff = User.objects.create_superuser('root', 'root@example.com',
+                                                   GOOD_PASSWORD)
+        self.client.force_login(self.staff)
+
+    def test_lists_are_twenty_to_a_page(self):
+        for n in range(25):
+            make_qasida(title=f'Work {n:02}')
+        response = self.client.get('/admin/core/qasida/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context['cl'].result_list), 20)
+
+    def test_pagination_is_rendered_above_the_grid_as_well_as_below(self):
+        for n in range(25):
+            make_qasida(title=f'Work {n:02}')
+        body = self.client.get('/admin/core/qasida/').content.decode()
+        self.assertIn('q-paginator-top', body)
+        self.assertEqual(body.count('class="paginator"'), 2)
+
+    def test_the_tag_list_can_be_filtered_by_axis(self):
+        Tag.objects.create(name='maqam-rast')
+        Tag.objects.create(name='naat')
+        response = self.client.get('/admin/core/tag/',
+                                   {'category__exact': Tag.CATEGORY_MAQAM})
+        self.assertEqual([t.name for t in response.context['cl'].result_list],
+                         ['maqam-rast'])
