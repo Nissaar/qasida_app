@@ -7,6 +7,10 @@ still hides once someone is signed in, and that nothing a reader saved can be
 reached or changed by anyone else.
 """
 
+import re
+from pathlib import Path
+
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.cache import cache
@@ -25,6 +29,13 @@ GOOD_PASSWORD = 'Marmalade-7-Kettle'
 # Counting sign-in failures in a local cache keeps the tests independent of
 # whatever a shared Redis happens to be holding.
 LOCAL_CACHE = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}}
+
+
+def pdf_text(content):
+    """The text layer of a generated PDF, for asserting on what it contains."""
+    import pymupdf
+    with pymupdf.open('pdf', content) as doc:
+        return '\n'.join(page.get_text() for page in doc)
 
 
 def make_qasida(**overrides):
@@ -154,6 +165,14 @@ class QasidaViewsTest(TestCase):
         self.assertEqual(suggestion.email, 'user@test.com')
         self.assertIsNone(suggestion.user)
 
+    def test_download_is_a_pdf(self):
+        qasida = make_qasida(title='Layered')
+        response = self.client.get(reverse('qasida_download', args=[qasida.slug]))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+        self.assertTrue(response.content.startswith(b'%PDF-'))
+        self.assertIn('.pdf', response['Content-Disposition'])
+
     def test_download_offers_only_what_was_asked_for(self):
         qasida = make_qasida(title='Layered', lyrics='asl', language='Arabic',
                              transliteration='latin line',
@@ -161,14 +180,38 @@ class QasidaViewsTest(TestCase):
                              translation_origin=Qasida.TRANSLATION_SOURCE)
         url = reverse('qasida_download', args=[qasida.slug])
 
-        plain = self.client.get(url, {'original': '1'})
-        self.assertEqual(plain.status_code, 200)
-        self.assertNotIn('latin line', plain.content.decode())
+        plain = pdf_text(self.client.get(url, {'original': '1'}).content)
+        self.assertNotIn('latin line', plain)
+        self.assertNotIn('meaning line', plain)
 
-        full = self.client.get(url, {'original': '1', 'latin': '1', 'translation': '1'})
-        body = full.content.decode()
-        self.assertIn('latin line', body)
-        self.assertIn('meaning line', body)
+        full = pdf_text(self.client.get(
+            url, {'original': '1', 'latin': '1', 'translation': '1'}).content)
+        self.assertIn('latin line', full)
+        self.assertIn('meaning line', full)
+
+    def test_the_pdf_embeds_the_arabic_font(self):
+        """
+        Guards the font being present in the image.
+
+        Without it MuPDF silently substitutes: the download still succeeds and
+        the Arabic is still shaped, so nothing fails - the poetry is simply set
+        in the wrong face, which no other test would notice.
+        """
+        import pymupdf
+        qasida = make_qasida(title='Arabic Work', language='Arabic',
+                             lyrics='مكتبة القصائد')
+        content = self.client.get(
+            reverse('qasida_download', args=[qasida.slug])).content
+        names = ' '.join(f[3] for f in pymupdf.open('pdf', content)[0].get_fonts())
+        self.assertIn('Amiri', names, f'expected Amiri, embedded fonts were: {names}')
+
+    def test_a_long_work_runs_to_several_pages(self):
+        import pymupdf
+        qasida = make_qasida(title='Long Work',
+                             lyrics='\n\n'.join(f'stanza number {n}' for n in range(400)))
+        content = self.client.get(
+            reverse('qasida_download', args=[qasida.slug])).content
+        self.assertGreater(pymupdf.open('pdf', content).page_count, 1)
 
 
 # --------------------------------------------------------------------------
@@ -620,3 +663,83 @@ class AdminUserManagementTest(TestCase):
         user_admin = django_admin.site._registry[User]
         request = type('R', (), {'user': self.superuser})()
         self.assertNotIn('is_staff', user_admin.get_readonly_fields(request, self.editor))
+
+
+class TemplateCommentTest(TestCase):
+    """
+    Guard against a template comment being printed to the reader.
+
+    Django's {# #} comment is matched by a lexer rule that does not cross a
+    line break, so one wrapped onto a second line is not recognised as a
+    comment at all and is emitted as literal text. It renders perfectly well
+    in review - it simply appears on the page - and it had reached production
+    in six places, including the site header, where it showed on every page.
+    """
+
+    # Opens {#, and does not close #} before the line ends.
+    MULTILINE_COMMENT = re.compile(r'\{#(?:[^#\n]|#(?!\}))*$', re.M)
+
+    def template_files(self):
+        for root in (Path(settings.BASE_DIR) / 'core' / 'templates',
+                     Path(settings.BASE_DIR) / 'templates'):
+            yield from root.rglob('*.html')
+            yield from root.rglob('*.txt')
+            yield from root.rglob('*.js')
+
+    def test_no_comment_spans_a_line_break(self):
+        offenders = []
+        for path in self.template_files():
+            for number, line in enumerate(path.read_text().splitlines(), start=1):
+                if self.MULTILINE_COMMENT.search(line):
+                    offenders.append(f'{path.name}:{number}')
+        self.assertEqual(
+            offenders, [],
+            "A {# #} comment must fit on one line, or the reader sees it. "
+            "Use {% comment %}...{% endcomment %} for anything longer.")
+
+    def test_the_detector_would_actually_catch_one(self):
+        """A guard that cannot fail is not a guard."""
+        self.assertTrue(self.MULTILINE_COMMENT.search('    {# opens here'))
+        self.assertFalse(self.MULTILINE_COMMENT.search('    {# closes here #}'))
+
+
+class RenderedOutputTest(TestCase):
+    """No page may show the reader raw template syntax."""
+
+    def setUp(self):
+        self.user = User.objects.create_user('reader', 'reader@example.com',
+                                             GOOD_PASSWORD)
+        self.qasida = make_qasida(title='Rendered', transliteration='latin one',
+                                  translation='meaning one')
+
+    def assert_clean(self, response, where):
+        body = response.content.decode()
+        for leak in ('{#', '{%', '%}'):
+            self.assertNotIn(leak, body, f'{where} is showing raw template syntax')
+
+    def test_public_pages_are_clean(self):
+        for name in ('home', 'browse', 'search', 'poets', 'categories',
+                     'collections', 'login', 'register', 'password_reset'):
+            self.assert_clean(self.client.get(reverse(name)), name)
+
+    def test_the_qasida_page_is_clean(self):
+        self.assert_clean(self.client.get(self.qasida.get_absolute_url()), 'qasida detail')
+
+    def test_the_qasida_page_is_clean_when_signed_in(self):
+        self.client.force_login(self.user)
+        self.assert_clean(self.client.get(self.qasida.get_absolute_url()),
+                          'qasida detail, signed in')
+
+    def test_account_pages_are_clean(self):
+        self.client.force_login(self.user)
+        for name in ('my_library', 'my_history', 'my_corrections',
+                     'account_settings', 'delete_account'):
+            self.assert_clean(self.client.get(reverse(name)), name)
+
+    def test_admin_pages_are_clean(self):
+        """The admin has its own overridden templates, and one of them leaked."""
+        staff = User.objects.create_superuser('root', 'root@example.com', GOOD_PASSWORD)
+        self.client.force_login(staff)
+        for path in ('/admin/', '/admin/core/qasida/', '/admin/auth/user/',
+                     '/admin/core/collection/', '/admin/core/suggestion/'):
+            self.assert_clean(self.client.get(path), path)

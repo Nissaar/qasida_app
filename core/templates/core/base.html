@@ -179,8 +179,8 @@
             {% endif %}
 
             {% if user.is_authenticated %}
-            {# A details element rather than scripted state: the menu opens
-               with the keyboard and works before any JavaScript runs. #}
+            {% comment %} A details element rather than scripted state: the menu opens
+               with the keyboard and works before any JavaScript runs. {% endcomment %}
             <details id="account-menu" class="relative hidden sm:block">
                 <summary class="navlink list-none cursor-pointer flex items-center gap-1.5" aria-haspopup="menu">
                     <span class="h-6 w-6 rounded-full bg-brand-100 dark:bg-brand-900 text-brand-800 dark:text-brand-200 grid place-items-center text-[11px] font-semibold">

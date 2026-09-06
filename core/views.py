@@ -11,7 +11,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from .forms import QasidaForm
 from .models import (Collection, Favourite, Qasida, ReadingHistory,
                      Suggestion, Tag)
-from .export import LAYERS, available_layers, build_text, filename_for
+from .export import LAYERS, available_layers
+from .pdf import build_pdf, filename_for
 from .search import normalize
 
 PAGE_SIZE = 24
@@ -413,7 +414,7 @@ def collection(request, slug):
 
 def qasida_download(request, slug):
     """
-    Hand back the chosen layers of a work as a text file.
+    Hand back the chosen layers of a work as a PDF.
 
     Which layers to include comes from the query string, so the same link can
     be shared for just the original, or the original beside its translation.
@@ -424,7 +425,6 @@ def qasida_download(request, slug):
     asked = [name for name in LAYERS if request.GET.get(name) == '1']
     layers = [name for name in asked if name in present] or ['original']
 
-    response = HttpResponse(build_text(qasida, layers),
-                            content_type='text/plain; charset=utf-8')
+    response = HttpResponse(build_pdf(qasida, layers), content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="{filename_for(qasida, layers)}"'
     return response

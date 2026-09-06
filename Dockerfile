@@ -32,5 +32,17 @@ wanted = [('ar','en'), ('ur','en'), ('fa','en')]; \
  if (p.from_code, p.to_code) in wanted]; \
 print('argos models installed')"
 
+# The font the downloadable PDFs are set in: Amiri, a naskh face drawn for
+# classical Arabic, and one of the few that also carries the Urdu letters
+# (ٹ ڈ ڑ ں ے). Without it MuPDF falls back to its own font, which still shapes
+# and joins the text correctly but does not look like a book of poetry.
+#
+# Its own layer, and last, deliberately: putting it with the tesseract packages
+# above would invalidate the pip install and the 300MB of translation models
+# behind it every time this line is touched.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        fonts-hosny-amiri \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy project
 COPY . /app/
