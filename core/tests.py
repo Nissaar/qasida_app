@@ -1047,10 +1047,17 @@ class LayerPairingTest(TestCase):
         self.assertIn('only one line of meaning', body)
 
     def test_a_layer_is_never_shown_twice(self):
-        """Paired above and repeated whole below would read as a duplicate."""
+        """
+        Paired above and repeated whole below would read as a duplicate.
+
+        Counted only over the reading part of the page: the correction form
+        below it prefills every field with the record, so the text legitimately
+        appears there a second time as something to edit.
+        """
         _, body = self.page(lyrics='alif\n\nbaa',
                             transliteration='ALEF-one\n\nBAA-two')
-        self.assertEqual(body.count('ALEF-one'), 1)
+        reading = body[:body.index('Suggest a correction')]
+        self.assertEqual(reading.count('ALEF-one'), 1)
 
     def test_pairing_never_puts_the_wrong_verse_together(self):
         """
@@ -1150,9 +1157,15 @@ class LayerPairingTest(TestCase):
         rows = stanza_rows(qasida)
         self.assertEqual([row['latin'] for row in rows], ['L1', 'L2'])
 
-    def test_a_work_with_no_transliteration_gains_no_empty_section(self):
+    def test_a_work_with_no_transliteration_renders_no_latin_block(self):
+        # Matched on the rendered element rather than on wording: the
+        # correction form names the Latin script too, on every page.
         _, body = self.page(lyrics='alif\nbaa', transliteration='')
-        self.assertNotIn('Latin script', body)
+        self.assertNotIn('class="latin-block', body)
+
+    def test_a_work_with_a_transliteration_does_render_one(self):
+        _, body = self.page(lyrics='alif\nbaa', transliteration='L1\nL2')
+        self.assertIn('class="latin-block', body)
 
     def test_every_layer_a_work_has_reaches_the_page_somehow(self):
         """Whatever the shape, nothing the record holds is silently lost."""
@@ -1336,3 +1349,146 @@ class AuthorFilterTest(TestCase):
         body = self.client.get(reverse('search'),
                                {'author': 'Poet One'}).content.decode()
         self.assertIn('name="author" value="Poet One"', body)
+
+
+class SuggestionFieldsTest(TestCase):
+    """
+    Corrections to any part of a record, not just the verses.
+
+    The form prefills the work so a reader edits in place, which means the
+    view has to keep only what actually differs - otherwise every correction
+    carries a copy of the whole record and an editor cannot see the change.
+    """
+
+    def setUp(self):
+        self.qasida = make_qasida(
+            title='Old Title', arabic_title='عنوان', author='Old Poet',
+            language='Urdu', lyrics='line one\nline two',
+            transliteration='latin one', translation='meaning one',
+            translation_origin=Qasida.TRANSLATION_MACHINE)
+        self.url = self.qasida.get_absolute_url()
+
+    def form(self, **overrides):
+        """The form as the browser sends it: every field, prefilled."""
+        data = {
+            'email': 'reader@example.com',
+            'suggested_title': self.qasida.title,
+            'suggested_arabic_title': self.qasida.arabic_title,
+            'suggested_author': self.qasida.author,
+            'suggested_language': self.qasida.language,
+            'suggested_lyrics': self.qasida.lyrics,
+            'suggested_transliteration': self.qasida.transliteration,
+            'suggested_translation': self.qasida.translation,
+            'suggested_tags': '',
+            'note': '',
+        }
+        data.update(overrides)
+        return data
+
+    def test_an_untouched_form_is_refused(self):
+        response = self.client.post(self.url, self.form())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Suggestion.objects.count(), 0)
+
+    def test_only_the_edited_field_is_stored(self):
+        self.client.post(self.url, self.form(suggested_author='Correct Poet'))
+        suggestion = Suggestion.objects.get()
+        self.assertEqual(suggestion.suggested_author, 'Correct Poet')
+        # Everything else was sent unchanged and must not have been recorded.
+        self.assertEqual(suggestion.suggested_title, '')
+        self.assertEqual(suggestion.suggested_lyrics, '')
+        self.assertEqual(suggestion.suggested_translation, '')
+
+    def test_windows_line_endings_are_not_mistaken_for_an_edit(self):
+        """A browser sends CRLF where the database holds LF."""
+        self.client.post(self.url, self.form(
+            suggested_lyrics='line one\r\nline two',
+            suggested_author='Correct Poet'))
+        self.assertEqual(Suggestion.objects.get().suggested_lyrics, '')
+
+    def test_every_part_of_a_record_can_be_corrected(self):
+        self.client.post(self.url, self.form(
+            suggested_title='New Title',
+            suggested_arabic_title='عنوان جديد',
+            suggested_author='New Poet',
+            suggested_language='Arabic',
+            suggested_lyrics='fixed one\nfixed two',
+            suggested_transliteration='latin fixed',
+            suggested_translation='meaning fixed',
+            suggested_tags='naat'))
+
+        suggestion = Suggestion.objects.get()
+        self.assertEqual(len(suggestion.changes()), 7)
+        suggestion.apply()
+
+        self.qasida.refresh_from_db()
+        self.assertEqual(self.qasida.title, 'New Title')
+        self.assertEqual(self.qasida.author, 'New Poet')
+        self.assertEqual(self.qasida.language, 'Arabic')
+        self.assertEqual(self.qasida.lyrics, 'fixed one\nfixed two')
+        self.assertEqual(self.qasida.transliteration, 'latin fixed')
+        self.assertEqual(self.qasida.translation, 'meaning fixed')
+        self.assertTrue(self.qasida.tags.filter(name='naat').exists())
+
+    def test_a_corrected_translation_stops_being_called_machine_made(self):
+        """The page warns that a machine translation may be wrong; once a
+        person has fixed it, that warning would be a lie."""
+        self.client.post(self.url, self.form(suggested_translation='a human rendering'))
+        Suggestion.objects.get().apply()
+        self.qasida.refresh_from_db()
+        self.assertEqual(self.qasida.translation_origin, Qasida.TRANSLATION_READER)
+
+    def test_correcting_something_else_leaves_the_translation_origin_alone(self):
+        self.client.post(self.url, self.form(suggested_author='Correct Poet'))
+        Suggestion.objects.get().apply()
+        self.qasida.refresh_from_db()
+        self.assertEqual(self.qasida.translation_origin, Qasida.TRANSLATION_MACHINE)
+
+    def test_a_report_with_no_fix_is_accepted(self):
+        """Saying what is wrong is useful even without knowing the answer."""
+        self.client.post(self.url, self.form(note='The third line is missing.'))
+        suggestion = Suggestion.objects.get()
+        self.assertEqual(suggestion.note, 'The third line is missing.')
+        self.assertEqual(suggestion.changes(), [])
+
+    def test_tags_alone_are_enough(self):
+        self.client.post(self.url, self.form(suggested_tags='naat, urdu'))
+        self.assertEqual(Suggestion.objects.get().suggested_tags, 'naat, urdu')
+
+    def test_tags_are_added_not_substituted(self):
+        self.qasida.tags.add(Tag.objects.create(name='existing'))
+        self.client.post(self.url, self.form(suggested_tags='naat'))
+        Suggestion.objects.get().apply()
+        self.assertEqual(
+            sorted(self.qasida.tags.values_list('name', flat=True)),
+            ['existing', 'naat'])
+
+    def test_the_changes_list_shows_what_is_there_now(self):
+        self.client.post(self.url, self.form(suggested_author='Correct Poet'))
+        change = Suggestion.objects.get().changes()[0]
+        self.assertEqual(change['label'], 'Poet')
+        self.assertEqual(change['current'], 'Old Poet')
+        self.assertEqual(change['proposed'], 'Correct Poet')
+
+    def test_an_anonymous_correction_still_needs_an_email(self):
+        data = self.form(suggested_author='Correct Poet')
+        del data['email']
+        self.client.post(self.url, data)
+        self.assertEqual(Suggestion.objects.count(), 0)
+
+    def test_a_signed_in_reader_needs_no_email(self):
+        user = User.objects.create_user('reader', 'reader@example.com', GOOD_PASSWORD)
+        self.client.force_login(user)
+        data = self.form(suggested_author='Correct Poet')
+        del data['email']
+        self.client.post(self.url, data)
+        self.assertEqual(Suggestion.objects.get().user, user)
+
+    def test_the_inbox_shows_the_proposed_change_beside_the_current_value(self):
+        staff = User.objects.create_user('editor', 'e@example.com',
+                                         GOOD_PASSWORD, is_staff=True)
+        self.client.post(self.url, self.form(suggested_author='Correct Poet'))
+        self.client.force_login(staff)
+        body = self.client.get(reverse('suggestion_inbox')).content.decode()
+        self.assertIn('Old Poet', body)
+        self.assertIn('Correct Poet', body)

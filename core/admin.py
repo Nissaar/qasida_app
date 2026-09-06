@@ -270,9 +270,19 @@ class QasidaAdmin(LibraryAdmin):
 
 @admin.register(Suggestion)
 class SuggestionAdmin(LibraryAdmin):
-    list_display = ('qasida', 'submitted_by', 'is_reviewed', 'is_approved', 'created_at')
+    list_display = ('qasida', 'submitted_by', 'proposes', 'is_reviewed',
+                    'is_approved', 'created_at')
     list_filter = ('is_reviewed', 'is_approved')
-    search_fields = ('email', 'user__username', 'suggested_lyrics', 'suggested_tags')
+    search_fields = ('email', 'user__username', 'note', 'suggested_title',
+                     'suggested_author', 'suggested_lyrics', 'suggested_tags')
+
+    @admin.display(description='Proposes')
+    def proposes(self, obj):
+        """Which parts of the record this correction would change."""
+        parts = [change['label'] for change in obj.changes()]
+        if obj.suggested_tags:
+            parts.append('Tags')
+        return ', '.join(parts) or ('Report only' if obj.note else '—')
     list_select_related = ('qasida', 'user')
     autocomplete_fields = ('user',)
 

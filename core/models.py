@@ -188,10 +188,12 @@ class Qasida(models.Model):
     TRANSLATION_NONE = ''
     TRANSLATION_SOURCE = 'source'
     TRANSLATION_MACHINE = 'machine'
+    TRANSLATION_READER = 'reader'
     TRANSLATION_ORIGIN_CHOICES = [
         (TRANSLATION_NONE, 'No translation'),
         (TRANSLATION_SOURCE, 'Published by the source'),
         (TRANSLATION_MACHINE, 'Machine translated'),
+        (TRANSLATION_READER, 'Corrected by a reader'),
     ]
     translation_origin = models.CharField(max_length=8, blank=True,
                                          choices=TRANSLATION_ORIGIN_CHOICES,
@@ -384,8 +386,21 @@ class Suggestion(models.Model):
     # correction, it only detaches it.
     user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
                              on_delete=models.SET_NULL, related_name='suggestions')
+    # Every part of a record a reader can put right. Only what actually
+    # differs from the record is stored, so an editor reviewing one of these
+    # sees the change rather than a copy of the whole work.
+    suggested_title = models.CharField(max_length=200, blank=True)
+    suggested_arabic_title = models.CharField(max_length=200, blank=True)
+    suggested_author = models.CharField(max_length=200, blank=True)
+    suggested_language = models.CharField(max_length=50, blank=True)
     suggested_lyrics = models.TextField(blank=True)
+    suggested_transliteration = models.TextField(blank=True)
+    suggested_translation = models.TextField(blank=True)
     suggested_tags = models.CharField(max_length=200, blank=True, help_text="Comma-separated suggested tags")
+    # Why, in the sender's own words. Often the most useful part of a
+    # correction: an editor who cannot read the script still learns what is
+    # wrong with it.
+    note = models.TextField(blank=True, help_text="What is wrong, and how you know")
     # Compulsory for an anonymous correction, which has no other way to be
     # followed up; taken from the account otherwise.
     email = models.EmailField(blank=True, help_text="Email for contact regarding this suggestion")
@@ -393,15 +408,55 @@ class Suggestion(models.Model):
     is_reviewed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    # Which field of the record each suggested field answers to, and what to
+    # call it when showing an editor what would change.
+    FIELDS = (
+        ('suggested_title', 'title', 'Title'),
+        ('suggested_arabic_title', 'arabic_title', 'Title in Arabic script'),
+        ('suggested_author', 'author', 'Poet'),
+        ('suggested_language', 'language', 'Language'),
+        ('suggested_lyrics', 'lyrics', 'Lyrics'),
+        ('suggested_transliteration', 'transliteration', 'Transliteration'),
+        ('suggested_translation', 'translation', 'Translation'),
+    )
+
+    def changes(self):
+        """
+        What this suggestion would alter, for an editor to read before deciding.
+
+        Only fields that were actually filled in appear, because the form
+        prefills the record and the view keeps only what differs.
+        """
+        listed = []
+        for field, target, label in self.FIELDS:
+            proposed = getattr(self, field)
+            if proposed.strip():
+                listed.append({
+                    'label': label,
+                    'field': target,
+                    'current': getattr(self.qasida, target),
+                    'proposed': proposed,
+                })
+        return listed
+
     def apply(self):
         """Fold this suggestion into its qasida and mark it approved."""
-        if self.suggested_lyrics:
-            self.qasida.lyrics = self.suggested_lyrics
+        for field, target, _ in self.FIELDS:
+            proposed = getattr(self, field)
+            if proposed.strip():
+                setattr(self.qasida, target, proposed)
+
+        # A translation a reader has corrected is no longer the machine's, and
+        # the page must stop warning that it might be. Nor is it the source's.
+        if self.suggested_translation.strip():
+            self.qasida.translation_origin = Qasida.TRANSLATION_READER
+
         if self.suggested_tags:
             for name in (t.strip() for t in self.suggested_tags.split(',')):
                 if name:
                     tag, _ = Tag.objects.get_or_create(name=name)
                     self.qasida.tags.add(tag)
+
         self.qasida.save()
         self.is_approved = True
         self.is_reviewed = True

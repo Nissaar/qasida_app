@@ -28,16 +28,44 @@
         </p>
     </div>
 
+    {% if suggestion.note %}
+    <div class="rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-900 p-3 mb-3">
+        <p class="eyebrow mb-1">In their words</p>
+        <p dir="auto" class="text-sm text-amber-900 dark:text-amber-100 whitespace-pre-line">{{ suggestion.note }}</p>
+    </div>
+    {% endif %}
+
     {% if suggestion.suggested_tags %}
     <p class="text-sm mb-3"><span class="text-stone-500 dark:text-stone-400">Tags to add:</span> <span class="font-medium">{{ suggestion.suggested_tags }}</span></p>
     {% endif %}
 
-    {% if suggestion.suggested_lyrics %}
-    <details class="mb-4">
-        <summary class="cursor-pointer text-sm font-medium text-stone-600 dark:text-stone-300">Proposed lyrics</summary>
-        <div dir="auto" class="prose-lyrics text-base mt-2 p-4 rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 max-h-72 overflow-y-auto thin-scroll">{{ suggestion.suggested_lyrics }}</div>
+    {% comment %} Only the fields that differ are stored, so this is the whole
+    of what approving would change - shown beside what is there now, because a
+    correction cannot be judged without the thing it corrects. {% endcomment %}
+    {% for change in suggestion.changes %}
+    <details class="mb-2 rounded-xl border border-stone-200 dark:border-stone-800" {% if forloop.first %}open{% endif %}>
+        <summary class="cursor-pointer text-sm font-medium text-stone-600 dark:text-stone-300 px-3 py-2">
+            {{ change.label }}
+        </summary>
+        <div class="grid gap-3 sm:grid-cols-2 p-3 pt-0">
+            <div>
+                <p class="eyebrow mb-1">Now</p>
+                <div dir="auto" class="text-sm whitespace-pre-line p-3 rounded-lg bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 max-h-60 overflow-y-auto thin-scroll {% if change.field == 'lyrics' %}font-naskh leading-loose{% endif %}">{{ change.current|default:"— empty —" }}</div>
+            </div>
+            <div>
+                <p class="eyebrow mb-1">Proposed</p>
+                <div dir="auto" class="text-sm whitespace-pre-line p-3 rounded-lg bg-brand-50/60 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 max-h-60 overflow-y-auto thin-scroll {% if change.field == 'lyrics' %}font-naskh leading-loose{% endif %}">{{ change.proposed }}</div>
+            </div>
+        </div>
     </details>
+    {% endfor %}
+
+    {% if not suggestion.changes and not suggestion.suggested_tags %}
+    <p class="text-sm text-stone-500 dark:text-stone-400 mb-3">
+        No field was edited &mdash; this is a report rather than a fix.
+    </p>
     {% endif %}
+    <div class="mb-4"></div>
 
     <div class="flex flex-wrap gap-2">
         <form method="post">

@@ -361,6 +361,27 @@ def qasida_by_id(request, pk):
     return redirect('qasida_detail', slug=qasida.slug, permanent=True)
 
 
+def _submitted(text):
+    """
+    A posted field, ready to compare against what is stored.
+
+    Browsers send textarea content with CRLF line endings while the database
+    holds LF, so without this every prefilled field would read as changed and
+    each correction would carry a copy of the whole record.
+    """
+    return (text or '').replace('\r\n', '\n').replace('\r', '\n').strip()
+
+
+def _suggested_changes(request, qasida):
+    """Only the fields the sender actually altered."""
+    changed = {}
+    for field, target, _label in Suggestion.FIELDS:
+        proposed = _submitted(request.POST.get(field))
+        if proposed and proposed != _submitted(getattr(qasida, target)):
+            changed[field] = proposed
+    return changed
+
+
 def qasida_detail(request, slug):
     qasida = get_object_or_404(_visible(request), slug=slug)
 
@@ -371,23 +392,30 @@ def qasida_detail(request, slug):
         email = (request.POST.get('email') or '').strip()
         if not email and request.user.is_authenticated:
             email = request.user.email
-        # Both default to empty rather than None: neither column accepts NULL,
-        # so a form posted without one of them used to raise IntegrityError.
-        suggested_lyrics = request.POST.get('suggested_lyrics') or ''
-        suggested_tags = request.POST.get('suggested_tags') or ''
+        changes = _suggested_changes(request, qasida)
+        # Tags are additive rather than a replacement, so they are taken as
+        # sent rather than compared against what the work already carries.
+        suggested_tags = _submitted(request.POST.get('suggested_tags'))
+        note = _submitted(request.POST.get('note'))
 
-        if email or request.user.is_authenticated:
+        if not (email or request.user.is_authenticated):
+            messages.error(request, 'Email is required to submit a suggestion.')
+        elif not (changes or suggested_tags or note):
+            messages.error(
+                request,
+                'Nothing was changed, so there is nothing to review. Edit a '
+                'field, add a tag, or describe what is wrong.')
+        else:
             Suggestion.objects.create(
                 qasida=qasida,
                 user=request.user if request.user.is_authenticated else None,
                 email=email,
-                suggested_lyrics=suggested_lyrics,
-                suggested_tags=suggested_tags
+                suggested_tags=suggested_tags,
+                note=note,
+                **changes,
             )
-            messages.success(request, 'Your suggestion has been submitted for review.')
+            messages.success(request, 'Thank you. Your correction has been sent for review.')
             return redirect('qasida_detail', slug=qasida.slug)
-        else:
-            messages.error(request, 'Email is required to submit a suggestion.')
     elif request.user.is_authenticated:
         # Only on a plain read, so a correction does not count as a visit.
         ReadingHistory.record(request.user, qasida)

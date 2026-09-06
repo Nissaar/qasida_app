@@ -253,8 +253,12 @@
                 <span>Suggest a correction</span>
                 <svg class="h-4 w-4 text-stone-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
             </summary>
-            <p class="text-sm text-stone-500 dark:text-stone-400 mt-2 mb-4">
-                Corrections are reviewed before they are published. Your email is only used to follow up.
+            <p class="text-sm text-stone-500 dark:text-stone-400 mt-2 mb-4 leading-relaxed">
+                Much of this library was read off scanned pages by machine, so mistakes
+                are expected anywhere &mdash; the title, the poet, the verses, the Latin
+                script or the translation. Edit whatever is wrong and leave the rest
+                alone; only what you change is sent. Corrections are reviewed before
+                they are published.
             </p>
             <form method="post" class="space-y-4">
                 {% csrf_token %}
@@ -269,20 +273,64 @@
                     <label for="s-email" class="block text-sm font-medium mb-1">Your email <span class="text-stone-400">(required)</span></label>
                     <input id="s-email" type="email" name="email" required class="input">
                     <p class="text-xs text-stone-400 dark:text-stone-500 mt-1">
+                        Only used to follow up.
                         <a href="{% url 'login' %}?next={{ request.get_full_path|urlencode }}" class="text-brand-700 dark:text-brand-300 hover:underline">Sign in</a>
                         instead and you can follow what happens to your correction.
                     </p>
                 </div>
                 {% endif %}
+
                 <div>
-                    <label for="s-lyrics" class="block text-sm font-medium mb-1">Corrected lyrics</label>
+                    <label for="s-note" class="block text-sm font-medium mb-1">What is wrong?</label>
+                    <textarea id="s-note" name="note" rows="2" dir="auto" class="input"
+                              placeholder="A line is missing, the poet is misattributed, the translation reverses the meaning&hellip;"></textarea>
+                    <p class="text-xs text-stone-400 dark:text-stone-500 mt-1">
+                        Useful on its own &mdash; you do not have to fix it yourself.
+                    </p>
+                </div>
+
+                <div class="grid gap-4 sm:grid-cols-2">
+                    <div>
+                        <label for="s-title" class="block text-sm font-medium mb-1">Title</label>
+                        <input id="s-title" type="text" name="suggested_title" dir="auto" value="{{ qasida.title }}" class="input">
+                    </div>
+                    <div>
+                        <label for="s-arabic-title" class="block text-sm font-medium mb-1">Title in Arabic script</label>
+                        <input id="s-arabic-title" type="text" name="suggested_arabic_title" dir="rtl" lang="ar" value="{{ qasida.arabic_title }}" class="input font-naskh">
+                    </div>
+                    <div>
+                        <label for="s-author" class="block text-sm font-medium mb-1">Poet</label>
+                        <input id="s-author" type="text" name="suggested_author" dir="auto" value="{{ qasida.author }}" class="input">
+                    </div>
+                    <div>
+                        <label for="s-language" class="block text-sm font-medium mb-1">Language</label>
+                        <input id="s-language" type="text" name="suggested_language" value="{{ qasida.language }}" class="input">
+                    </div>
+                </div>
+
+                <div>
+                    <label for="s-lyrics" class="block text-sm font-medium mb-1">Lyrics</label>
                     <textarea id="s-lyrics" name="suggested_lyrics" rows="10" dir="auto" class="input font-naskh leading-loose">{{ qasida.lyrics }}</textarea>
+                </div>
+                <div>
+                    <label for="s-latin" class="block text-sm font-medium mb-1">
+                        Transliteration <span class="text-stone-400">(Latin script)</span>
+                    </label>
+                    <textarea id="s-latin" name="suggested_transliteration" rows="8" dir="ltr" class="input leading-loose">{{ qasida.transliteration }}</textarea>
+                </div>
+                <div>
+                    <label for="s-translation" class="block text-sm font-medium mb-1">Translation</label>
+                    <textarea id="s-translation" name="suggested_translation" rows="8" dir="auto" class="input leading-loose">{{ qasida.translation }}</textarea>
                 </div>
                 <div>
                     <label for="s-tags" class="block text-sm font-medium mb-1">Tags to add</label>
                     <input id="s-tags" type="text" name="suggested_tags" placeholder="comma separated" class="input">
+                    <p class="text-xs text-stone-400 dark:text-stone-500 mt-1">
+                        Added to the work; existing tags are not removed.
+                    </p>
                 </div>
-                <button type="submit" class="btn-primary">Submit suggestion</button>
+
+                <button type="submit" class="btn-primary">Send correction</button>
             </form>
         </details>
     </div>
