@@ -549,6 +549,12 @@ def qasida_download(request, slug):
     asked = [name for name in LAYERS if request.GET.get(name) == '1']
     layers = [name for name in asked if name in present] or ['original']
 
-    response = HttpResponse(build_pdf(qasida, layers), content_type='application/pdf')
+    # Where a work is held as scanned pages, the scan is not decoration for the
+    # text - it is what the text was read off, and the only reliable record
+    # where the reading is doubtful. Included unless the reader opts out.
+    include_scans = request.GET.get('scans', '1') == '1'
+
+    response = HttpResponse(build_pdf(qasida, layers, include_scans),
+                            content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="{filename_for(qasida, layers)}"'
     return response

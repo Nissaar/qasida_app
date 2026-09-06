@@ -17,8 +17,8 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from .models import (Favourite, Qasida, ReaderProfile, ReadingHistory,
-                     Suggestion, Tag)
+from .models import (Favourite, Qasida, QasidaImage, ReaderProfile,
+                     ReadingHistory, Suggestion, Tag)
 
 User = get_user_model()
 
@@ -1033,9 +1033,9 @@ class LayerPairingTest(TestCase):
         self.assertFalse(layers_are_paired(qasida))
         self.assertIn('ONE-latin', body)
         self.assertIn('TWO-latin', body)
-        # Shown in the same layout as everything else, with a note saying the
-        # layers do not correspond verse by verse.
-        self.assertIn('do not correspond', body)
+        # Shown in full, in its own block, named as the layer that does not
+        # line up rather than tarring the others with it.
+        self.assertIn('latin-whole', body)
 
     def test_an_unpairable_translation_is_still_shown(self):
         # Two stanzas of two lines against a single line: neither the stanza
@@ -1674,3 +1674,157 @@ class ClickableCardTest(TestCase):
         work.tags.add(Tag.objects.create(name='naat'))
         body = self.client.get(reverse('browse')).content.decode()
         self.assertIn('above-stretch', body)
+
+
+class IndependentLayerAlignmentTest(TestCase):
+    """
+    Each layer is judged on its own.
+
+    Pairing them all or not at all meant one layer that could not be matched
+    dragged down every layer that could. A work whose transliteration answered
+    its original line for line, but whose translation was a single line short,
+    showed all three as undivided blocks - because of that one line.
+    """
+
+    def rows(self, qasida):
+        from .templatetags.qasida_extras import stanza_rows
+        return stanza_rows(qasida)
+
+    def test_a_short_translation_no_longer_spoils_the_transliteration(self):
+        from .templatetags.qasida_extras import unpaired_layers
+        qasida = make_qasida(
+            lyrics='\n'.join(f'v{n}' for n in range(12)),
+            transliteration='\n'.join(f'L{n}' for n in range(12)),
+            translation='\n'.join(f'T{n}' for n in range(11)))
+
+        rows = self.rows(qasida)
+        self.assertTrue(all(row['latin'] for row in rows),
+                        'the transliteration matched and must be set against the verses')
+        self.assertFalse(any(row['translation'] for row in rows),
+                         'the translation does not match and must not be forced')
+        self.assertEqual([layer['label'] for layer in unpaired_layers(qasida)],
+                         ['Translation'])
+
+    def test_the_layer_that_cannot_be_paired_is_still_shown_in_full(self):
+        qasida = make_qasida(
+            lyrics='\n'.join(f'v{n}' for n in range(12)),
+            transliteration='\n'.join(f'LATIN{n}' for n in range(12)),
+            translation='\n'.join(f'TRANS{n}' for n in range(11)))
+        body = self.client.get(qasida.get_absolute_url()).content.decode()
+        reading = body[:body.index('Suggest a correction')]
+        self.assertIn('LATIN0', reading)
+        self.assertIn('TRANS0', reading)
+        self.assertIn('TRANS10', reading)
+
+    def test_the_page_names_only_the_layer_that_does_not_correspond(self):
+        qasida = make_qasida(
+            lyrics='\n'.join(f'v{n}' for n in range(12)),
+            transliteration='\n'.join(f'L{n}' for n in range(12)),
+            translation='\n'.join(f'T{n}' for n in range(11)))
+        body = self.client.get(qasida.get_absolute_url()).content.decode()
+        self.assertIn('translation-whole', body)
+        self.assertNotIn('latin-whole', body)
+
+    def test_when_both_match_neither_is_shown_separately(self):
+        from .templatetags.qasida_extras import layers_are_paired, unpaired_layers
+        qasida = make_qasida(
+            lyrics='\n'.join(f'v{n}' for n in range(12)),
+            transliteration='\n'.join(f'L{n}' for n in range(12)),
+            translation='\n'.join(f'T{n}' for n in range(12)))
+        self.assertTrue(layers_are_paired(qasida))
+        self.assertEqual(unpaired_layers(qasida), [])
+        self.assertTrue(all(row['latin'] and row['translation']
+                            for row in self.rows(qasida)))
+
+    def test_when_neither_matches_both_are_shown_whole(self):
+        from .templatetags.qasida_extras import unpaired_layers
+        qasida = make_qasida(lyrics='v1\n\nv2\n\nv3',
+                             transliteration='L1\n\nL2',
+                             translation='T1')
+        self.assertEqual([layer['label'] for layer in unpaired_layers(qasida)],
+                         ['Latin script', 'Translation'])
+
+    def test_a_work_with_no_layers_still_reads_verse_by_verse(self):
+        qasida = make_qasida(lyrics='\n'.join(f'v{n}' for n in range(12)))
+        self.assertGreater(len(self.rows(qasida)), 1)
+
+
+class ScansInThePdfTest(TestCase):
+    """
+    The scanned pages travel with the download.
+
+    For a good many works here the scan is not decoration for the text - it is
+    what the text was read off, and where the reading is doubtful it is the
+    only reliable record. A file that leaves it behind is missing the part
+    worth keeping.
+    """
+
+    def setUp(self):
+        self.qasida = make_qasida(title='Scanned', lyrics='verse one\nverse two')
+
+    def add_scan(self, number=1):
+        import io
+        from django.core.files.base import ContentFile
+        from PIL import Image
+
+        buffer = io.BytesIO()
+        Image.new('RGB', (600, 800), (250, 248, 246)).save(buffer, 'PNG')
+        scan = QasidaImage(qasida=self.qasida,
+                           source_url=f'https://example.invalid/{number}.png',
+                           caption=f'Page {number}', position=number)
+        scan.image.save(f'test-scan-{number}.png',
+                        ContentFile(buffer.getvalue()), save=True)
+        return scan
+
+    def pdf(self, **params):
+        import pymupdf
+        query = {'original': '1'}
+        query.update(params)
+        content = self.client.get(
+            reverse('qasida_download', args=[self.qasida.slug]), query).content
+        return pymupdf.open('pdf', content)
+
+    def test_a_work_with_no_scans_is_unaffected(self):
+        doc = self.pdf()
+        self.assertEqual(sum(len(page.get_images()) for page in doc), 0)
+
+    def test_each_scan_becomes_a_page(self):
+        self.add_scan(1)
+        self.add_scan(2)
+        doc = self.pdf()
+        self.assertEqual(sum(len(page.get_images()) for page in doc), 2)
+        # The text still leads; the scans follow it.
+        self.assertEqual(len(doc[0].get_images()), 0)
+
+    def test_the_reader_can_leave_them_out(self):
+        self.add_scan(1)
+        with_scans = self.pdf()
+        without = self.pdf(scans='0')
+        self.assertEqual(sum(len(p.get_images()) for p in with_scans), 1)
+        self.assertEqual(sum(len(p.get_images()) for p in without), 0)
+        self.assertLess(without.page_count, with_scans.page_count)
+
+    def test_they_are_included_unless_asked_otherwise(self):
+        self.add_scan(1)
+        self.assertEqual(sum(len(p.get_images()) for p in self.pdf()), 1)
+
+    def test_a_scan_whose_file_has_gone_does_not_break_the_download(self):
+        """
+        Media can go missing - it is not in the repository, and a restored
+        database can outlive its files. The text is still worth having.
+        """
+        import os
+        scan = self.add_scan(1)
+        os.remove(scan.image.path)
+
+        response = self.client.get(
+            reverse('qasida_download', args=[self.qasida.slug]), {'original': '1'})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.content.startswith(b'%PDF-'))
+
+    def test_the_download_form_offers_them_only_when_there_are_some(self):
+        body = self.client.get(self.qasida.get_absolute_url()).content.decode()
+        self.assertNotIn('name="scans"', body)
+        self.add_scan(1)
+        body = self.client.get(self.qasida.get_absolute_url()).content.decode()
+        self.assertIn('name="scans"', body)

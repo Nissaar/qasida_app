@@ -206,13 +206,23 @@
         </div>
         {% endif %}
 
-        {% if not qasida|layers_are_paired %}
-        <p class="text-xs text-stone-500 dark:text-stone-400 -mt-2 mb-5">
-            The Latin script and the translation of this work do not correspond
-            to the verses line by line, so they are shown as whole passages
-            rather than set against each verse.
-        </p>
-        {% endif %}
+        {% comment %}
+        A layer that could not be set against the verses is shown here in full.
+        Each is judged on its own: a translation that does not correspond must
+        not stop a transliteration that does from being read beside the verses,
+        and neither may simply go missing.
+        {% endcomment %}
+        {% for layer in qasida|unpaired_layers %}
+        <section class="card p-6 mb-5" id="{{ layer.key }}-whole">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <h2 class="eyebrow">{{ layer.label }}</h2>
+                <span class="text-xs text-stone-400 dark:text-stone-500">
+                    does not line up with the verses &mdash; shown in full
+                </span>
+            </div>
+            <div dir="auto" class="{% if layer.key == 'latin' %}latin-block{% else %}translation-block{% endif %} max-w-3xl whitespace-pre-line text-base sm:text-lg leading-relaxed text-stone-600 dark:text-stone-300">{{ layer.text }}</div>
+        </section>
+        {% endfor %}
 
         {# Only the layers this work actually has are offered. #}
         <details class="card p-5 mb-5">
@@ -222,7 +232,7 @@
             </summary>
             <p class="text-sm text-stone-500 dark:text-stone-400 mt-2 mb-4">
                 A PDF, typeset for reading and printing, with the Arabic properly
-                joined. Choose what to include.
+                joined and any scanned pages included. Choose what to include.
             </p>
             <form method="get" action="{% url 'qasida_download' qasida.slug %}" class="space-y-3">
                 <label class="flex items-center gap-2.5 text-sm">
@@ -243,6 +253,15 @@
                            class="rounded border-stone-300 dark:border-stone-600 text-brand-700 focus:ring-brand-500">
                     <span>Translation
                         <span class="text-stone-400">({% if qasida.translation_origin == 'machine' %}machine, may be inaccurate{% else %}from the source{% endif %})</span>
+                    </span>
+                </label>
+                {% endif %}
+                {% if qasida.images.exists %}
+                <label class="flex items-center gap-2.5 text-sm">
+                    <input type="checkbox" name="scans" value="1" checked
+                           class="rounded border-stone-300 dark:border-stone-600 text-brand-700 focus:ring-brand-500">
+                    <span>Scanned pages
+                        <span class="text-stone-400">({{ qasida.images.count }}, one per page)</span>
                     </span>
                 </label>
                 {% endif %}

@@ -153,8 +153,8 @@ def _stylesheet(family):
     """
 
 
-def build_pdf(qasida, layers):
-    """Render the requested layers of `qasida` as PDF bytes."""
+def build_pdf(qasida, layers, include_scans=True):
+    """Render the requested layers of `qasida` as PDF bytes, with its scans."""
     import pymupdf
 
     path = font_path()
@@ -188,19 +188,70 @@ def build_pdf(qasida, layers):
         writer.end_page()
     writer.close()
 
-    return _add_footers(buffer.getvalue(), qasida)
+    doc = pymupdf.open("pdf", buffer.getvalue())
+    if include_scans:
+        _append_scans(doc, qasida, css, archive)
+    _add_footers(doc)
+    out = doc.tobytes(deflate=True)
+    doc.close()
+    return out
 
 
-def _add_footers(pdf_bytes, qasida):
+def _append_scans(doc, qasida, css, archive):
     """
-    Stamp a page number and the library's name along the bottom.
+    Add the scanned pages after the text, one to a page.
 
-    Done as a second pass because the Story engine lays out one flow and knows
-    nothing about page furniture. Latin only, so a built-in font will do.
+    For a good many works here the scan is not an illustration of the text -
+    it is the source the text was read off, and where the reading is doubtful
+    it is the only reliable record. A file that leaves it behind is missing
+    the part worth keeping.
+
+    A scan whose file has gone missing is skipped rather than failing the
+    download: the text is still worth having.
     """
     import pymupdf
 
-    doc = pymupdf.open("pdf", pdf_bytes)
+    scans = list(qasida.images.all())
+    total = len(scans)
+    for number, scan in enumerate(scans, start=1):
+        try:
+            path = Path(scan.image.path)
+            if not path.is_file():
+                continue
+        except (ValueError, NotImplementedError):
+            # Storage that is not on a local filesystem has no path.
+            continue
+
+        page = doc.new_page(width=pymupdf.paper_rect(PAGE).width,
+                            height=pymupdf.paper_rect(PAGE).height)
+        caption_height = 26
+        frame = page.rect + (MARGIN, MARGIN + caption_height,
+                             -MARGIN, -(MARGIN + FOOTER_SPACE))
+        try:
+            page.insert_image(frame, filename=str(path), keep_proportion=True)
+        except Exception:
+            # An unreadable or truncated file should not take the PDF with it.
+            doc.delete_page(page.number)
+            continue
+
+        label = escape(scan.caption) or f'Scanned page {number} of {total}'
+        page.insert_htmlbox(
+            pymupdf.Rect(MARGIN, MARGIN, page.rect.width - MARGIN,
+                         MARGIN + caption_height),
+            f'<div style="font-size:9px;color:#78716c">{label}</div>',
+            css=css, archive=archive)
+
+
+def _add_footers(doc):
+    """
+    Stamp a page number and the library's name along the bottom.
+
+    Done as a last pass because the Story engine lays out one flow and knows
+    nothing about page furniture, and because the scans are added after it.
+    Latin only, so a built-in font will do.
+    """
+    import pymupdf
+
     total = doc.page_count
     for number, page in enumerate(doc, start=1):
         y = page.rect.height - MARGIN + 12
@@ -210,9 +261,6 @@ def _add_footers(pdf_bytes, qasida):
         width = pymupdf.get_text_length(label, fontname="helv", fontsize=7)
         page.insert_text((page.rect.width - MARGIN - width, y), label,
                          fontname="helv", fontsize=7, color=(0.47, 0.44, 0.42))
-    out = doc.tobytes(deflate=True)
-    doc.close()
-    return out
 
 
 def filename_for(qasida, layers):

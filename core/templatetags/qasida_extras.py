@@ -157,14 +157,17 @@ def _aligned_by_count(original_blocks, layer_text):
 
 
 def _interleave(original_blocks, layers, matcher):
-    """Every layer set against `original_blocks` by `matcher`, or None."""
-    aligned = {}
-    for key, text in layers.items():
-        blocks = matcher(original_blocks, text)
-        if blocks is None:
-            return None
-        aligned[key] = blocks
-    return aligned
+    """
+    Each layer set against `original_blocks` by `matcher`, independently.
+
+    Independently is the whole point. Pairing them all or not at all means one
+    layer that cannot be matched drags down every layer that can: a work whose
+    transliteration answers the original line for line, but whose translation
+    is a single line short, showed all three as undivided blocks because of
+    that one line. A layer that will not align is left out and shown whole;
+    the ones that align are still read against the verses.
+    """
+    return {key: matcher(original_blocks, text) for key, text in layers.items()}
 
 
 @register.filter
@@ -193,15 +196,16 @@ def stanza_rows(qasida):
         if not original:
             continue
         aligned = _interleave(original, layers, matcher)
-        if aligned is None:
-            continue
-        return [{
-            'original': block,
-            'latin': aligned.get('latin', [''] * len(original))[index],
-            'translation': aligned.get('translation', [''] * len(original))[index],
-        } for index, block in enumerate(original)]
+        # Use this granularity as soon as anything at all lines up at it; a
+        # work with no layers to place simply reads at the finest one.
+        if not layers or any(blocks is not None for blocks in aligned.values()):
+            return [{
+                'original': block,
+                'latin': (aligned.get('latin') or [''] * len(original))[index],
+                'translation': (aligned.get('translation') or [''] * len(original))[index],
+            } for index, block in enumerate(original)]
 
-    # Nothing corresponds. Still the same three layers in the same order.
+    # Not one layer corresponds. Still the same layers in the same order.
     return [{
         'original': lyrics.strip(),
         'latin': layers.get('latin', '').strip(),
@@ -216,23 +220,48 @@ def _present_layers(qasida):
     ) if text.strip()}
 
 
-@register.filter
-def layers_are_paired(qasida):
-    """
-    Whether the layers were set verse by verse rather than as whole blocks.
+LAYER_LABELS = {'latin': 'Latin script', 'translation': 'Translation'}
 
-    The page uses this only to say so, quietly, when they were not, so a
-    reader is never left to assume a correspondence that is not there.
-    """
+
+def _alignment(qasida):
+    """Which layers were set against the verses, and which could not be."""
     layers = _present_layers(qasida)
     if not layers:
-        return True
+        return set(), set()
+
     lyrics = qasida.lyrics or ''
     for original, matcher in ((_display_stanzas(lyrics), _aligned_by_shape),
                               (_stanzas(lyrics), _aligned_by_count)):
-        if original and _interleave(original, layers, matcher) is not None:
-            return True
-    return False
+        if not original:
+            continue
+        aligned = _interleave(original, layers, matcher)
+        if any(blocks is not None for blocks in aligned.values()):
+            return ({key for key, blocks in aligned.items() if blocks is not None},
+                    {key for key, blocks in aligned.items() if blocks is None})
+    return set(), set(layers)
+
+
+@register.filter
+def layers_are_paired(qasida):
+    """True when every layer this work has was set verse by verse."""
+    _paired, loose = _alignment(qasida)
+    return not loose
+
+
+@register.filter
+def unpaired_layers(qasida):
+    """
+    The layers that had to be shown whole, with the text to show.
+
+    Named, so the page can say which one does not correspond instead of
+    implying that none of them do.
+    """
+    _paired, loose = _alignment(qasida)
+    return [{
+        'key': key,
+        'label': LAYER_LABELS[key],
+        'text': (qasida.transliteration if key == 'latin' else qasida.translation),
+    } for key in ('latin', 'translation') if key in loose]
 
 
 @register.simple_tag(takes_context=True)
