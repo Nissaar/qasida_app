@@ -1001,11 +1001,8 @@ class LayerPairingTest(TestCase):
             lyrics='alif\n\nbaa',
             transliteration='ALEF-one\n\nBAA-two',
             translation='first\n\nsecond')
-        from .templatetags.qasida_extras import (stanza_rows,
-                                                 transliteration_is_aligned,
-                                                 translation_is_aligned)
-        self.assertTrue(transliteration_is_aligned(qasida))
-        self.assertTrue(translation_is_aligned(qasida))
+        from .templatetags.qasida_extras import layers_are_paired, stanza_rows
+        self.assertTrue(layers_are_paired(qasida))
         rows = stanza_rows(qasida)
         self.assertEqual(rows[0]['latin'], 'ALEF-one')
         self.assertEqual(rows[1]['translation'], 'second')
@@ -1013,11 +1010,11 @@ class LayerPairingTest(TestCase):
 
     def test_differing_stanzas_but_equal_lines_are_paired_line_for_line(self):
         """One block against three verses is still the same poem, line by line."""
-        from .templatetags.qasida_extras import stanza_rows, transliteration_is_aligned
+        from .templatetags.qasida_extras import layers_are_paired, stanza_rows
         qasida, body = self.page(
             lyrics='alif\nbaa\njeem',
             transliteration='ONE-latin\n\nTWO-latin\n\nTHREE-latin')
-        self.assertTrue(transliteration_is_aligned(qasida))
+        self.assertTrue(layers_are_paired(qasida))
         self.assertEqual(stanza_rows(qasida)[0]['latin'],
                          'ONE-latin\nTWO-latin\nTHREE-latin')
         self.assertIn('ONE-latin', body)
@@ -1029,22 +1026,24 @@ class LayerPairingTest(TestCase):
         An unpairable transliteration used to vanish from the page entirely,
         while the downloadable file still contained it.
         """
-        from .templatetags.qasida_extras import transliteration_is_aligned
+        from .templatetags.qasida_extras import layers_are_paired
         qasida, body = self.page(
             lyrics='alif\nbaa\njeem',
             transliteration='ONE-latin\n\nTWO-latin')
-        self.assertFalse(transliteration_is_aligned(qasida))
+        self.assertFalse(layers_are_paired(qasida))
         self.assertIn('ONE-latin', body)
         self.assertIn('TWO-latin', body)
-        self.assertIn('Transliteration', body)
+        # Shown in the same layout as everything else, with a note saying the
+        # layers do not correspond verse by verse.
+        self.assertIn('do not correspond', body)
 
     def test_an_unpairable_translation_is_still_shown(self):
         # Two stanzas of two lines against a single line: neither the stanza
         # counts nor the line counts agree, so there is no honest pairing.
-        from .templatetags.qasida_extras import translation_is_aligned
+        from .templatetags.qasida_extras import layers_are_paired
         qasida, body = self.page(lyrics='alif\n\nbaa',
                                  translation='only one line of meaning')
-        self.assertFalse(translation_is_aligned(qasida))
+        self.assertFalse(layers_are_paired(qasida))
         self.assertIn('only one line of meaning', body)
 
     def test_a_layer_is_never_shown_twice(self):
@@ -1054,12 +1053,23 @@ class LayerPairingTest(TestCase):
         self.assertEqual(body.count('ALEF-one'), 1)
 
     def test_pairing_never_puts_the_wrong_verse_together(self):
-        """Looser matching would misalign, which is worse than not pairing."""
-        from .templatetags.qasida_extras import stanza_rows
+        """
+        Three verses against two: no correspondence exists.
+
+        Rather than set the second transliterated verse against the third of
+        the original, the whole layer is kept in one block. The reader still
+        gets original, then Latin, then translation - just not verse by verse,
+        and the page says so.
+        """
+        from .templatetags.qasida_extras import layers_are_paired, stanza_rows
         qasida = make_qasida(lyrics='alif\n\nbaa\n\njeem',
                              transliteration='ALEF-one\n\nBAA-two')
-        for row in stanza_rows(qasida):
-            self.assertEqual(row['latin'], '')
+        self.assertFalse(layers_are_paired(qasida))
+
+        rows = stanza_rows(qasida)
+        self.assertEqual(len(rows), 1, 'a false correspondence was invented')
+        self.assertIn('ALEF-one', rows[0]['latin'])
+        self.assertIn('BAA-two', rows[0]['latin'])
 
     def test_equal_stanza_counts_are_not_enough_on_their_own(self):
         """

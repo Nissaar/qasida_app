@@ -172,7 +172,7 @@
                     <button type="button" id="latin-toggle" class="btn-ghost py-1 px-2.5 text-xs"
                             aria-pressed="true" aria-controls="lyrics">Hide Latin</button>
                     {% endif %}
-                    {% if qasida|translation_is_aligned %}
+                    {% if qasida.translation %}
                     <button type="button" id="translation-toggle" class="btn-ghost py-1 px-2.5 text-xs"
                             aria-pressed="true" aria-controls="lyrics">Hide translation</button>
                     {% endif %}
@@ -201,39 +201,12 @@
         </div>
         {% endif %}
 
-        {% comment %}
-        A layer the verses could not be paired with is shown whole here rather
-        than dropped. Without this a transliteration whose stanza breaks differ
-        from the original's disappeared from the page altogether, while the
-        downloadable file still contained it.
-        {% endcomment %}
-        {% if qasida.transliteration and not qasida|transliteration_is_aligned %}
-        <section class="card p-6 mb-5" id="transliteration">
-            <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-                <h2 class="eyebrow">Transliteration</h2>
-                <span class="text-xs text-stone-400 dark:text-stone-500">Latin script</span>
-            </div>
-            {# Laid out differently to the verses, so shown as its own passage. #}
-            <div dir="ltr" class="latin-block max-w-3xl whitespace-pre-line text-base sm:text-lg leading-relaxed text-stone-600 dark:text-stone-300">{{ qasida.transliteration }}</div>
-        </section>
-        {% endif %}
-
-        {% if qasida.translation and not qasida|translation_is_aligned %}
-        <section class="card p-6 mb-5" id="translation">
-            <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-                <h2 class="eyebrow">Translation</h2>
-                <span class="text-xs {% if qasida.translation_origin == 'machine' %}text-amber-700 dark:text-amber-300{% else %}text-stone-400 dark:text-stone-500{% endif %}">
-                    {% if qasida.translation_origin == 'machine' %}
-                        machine translated &mdash; may be inaccurate
-                    {% else %}
-                        as published by the source
-                    {% endif %}
-                </span>
-            </div>
-            {% comment %} Stanza counts do not always match the original, so this is shown
-               as its own passage rather than paired verse by verse. {% endcomment %}
-            <div dir="auto" class="max-w-3xl whitespace-pre-line text-base sm:text-lg leading-relaxed text-stone-700 dark:text-stone-200">{{ qasida.translation }}</div>
-        </section>
+        {% if not qasida|layers_are_paired %}
+        <p class="text-xs text-stone-500 dark:text-stone-400 -mt-2 mb-5">
+            The Latin script and the translation of this work do not correspond
+            to the verses line by line, so they are shown as whole passages
+            rather than set against each verse.
+        </p>
         {% endif %}
 
         {# Only the layers this work actually has are offered. #}

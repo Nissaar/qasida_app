@@ -56,22 +56,26 @@ def _lines(text):
     return [line for line in text.splitlines() if line.strip()]
 
 
+def _shape(blocks):
+    """How many lines each stanza holds."""
+    return [len(_lines(block)) for block in blocks]
+
+
 def _regrouped_like(original_blocks, layer_text):
     """
-    Reshape a layer into the original's stanza pattern, or None.
+    Cut a layer into the original's stanza pattern, or None.
 
     Sources are inconsistent about blank lines: the same work can arrive with
     the original as one block and its transliteration broken into verses, or
     the reverse. When the two disagree about stanzas but hold the same number
     of lines, they are still the same poem line for line, so the layer is cut
-    into the original's shape and pairs up after all.
+    to the original's shape and lines up after all.
 
-    Only exact line-count agreement counts. Anything looser would put verse
-    three of the translation against verse four of the original, which is
-    worse than not pairing at all.
+    Only exact line agreement counts. Anything looser would set verse three
+    against verse four, which is worse than not pairing at all.
     """
     lines = _lines(layer_text)
-    shape = [len(_lines(block)) for block in original_blocks]
+    shape = _shape(original_blocks)
     if not lines or sum(shape) != len(lines):
         return None
 
@@ -82,78 +86,115 @@ def _regrouped_like(original_blocks, layer_text):
     return blocks
 
 
-def _shape(blocks):
-    """How many lines each stanza holds."""
-    return [len(_lines(block)) for block in blocks]
-
-
-def _paired_layer(original_blocks, layer_text):
+def _aligned_by_shape(original_blocks, layer_text):
     """
-    The layer arranged against `original_blocks`, or None if it cannot be.
+    Line-for-line agreement with `original_blocks`, or None.
 
-    Tried in order of confidence: the source's own stanza marks first, then
-    line-for-line, then give up and let the page show the layer whole.
-
-    Matching stanza counts is not on its own enough, and assuming it was put
-    the wrong verses together. A twelve-line original written as stanzas of
-    five, four and three, against a transliteration typed as one block, both
-    come out as three stanzas - because a long unbroken block is sub-grouped
-    into fours for reading rhythm. Three equals three, so they paired, and the
-    fifth line of the original sat against nothing while its transliteration
-    sat against the next stanza. The shapes have to agree too; where they do
-    not, cutting the layer to the original's own shape is what gets it right.
+    Used against the display stanzas, which are partly our own doing: a long
+    unbroken block is sub-grouped into fours for reading rhythm, so its
+    "stanzas" are not the source's and matching their count alone means
+    nothing. The line counts have to agree too.
     """
-    if not layer_text or not layer_text.strip():
-        return None
-    blocks = _display_stanzas(layer_text)
+    blocks = _stanzas(layer_text)
     if blocks and _shape(blocks) == _shape(original_blocks):
         return blocks
     return _regrouped_like(original_blocks, layer_text)
 
 
-def _layers(qasida):
-    """The original's stanzas, and each other layer paired against them."""
-    original = _display_stanzas(qasida.lyrics)
-    return {
-        'original': original,
-        'latin': _paired_layer(original, qasida.transliteration),
-        'translation': _paired_layer(original, qasida.translation),
-    }
+def _aligned_by_count(original_blocks, layer_text):
+    """
+    Stanza-for-stanza agreement with `original_blocks`, or None.
+
+    Used against the source's own stanza marks, where equal counts do mean
+    something: the fourth stanza of a transliteration belongs against the
+    fourth stanza of the original, whether or not the two hold the same
+    number of lines. Arabic often sets two hemistichs on one line where the
+    transliteration gives each its own, so insisting on equal lines here
+    would refuse a pairing that is plainly right.
+    """
+    blocks = _stanzas(layer_text)
+    if blocks and len(blocks) == len(original_blocks):
+        return blocks
+    return None
+
+
+def _interleave(original_blocks, layers, matcher):
+    """Every layer set against `original_blocks` by `matcher`, or None."""
+    aligned = {}
+    for key, text in layers.items():
+        blocks = matcher(original_blocks, text)
+        if blocks is None:
+            return None
+        aligned[key] = blocks
+    return aligned
 
 
 @register.filter
 def stanza_rows(qasida):
     """
-    Group the verses into stanzas, each with its Latin and translated form.
+    The verses, each followed by its Latin script and its translation.
 
-    Every layer is paired independently, and only where it can be paired
-    honestly. A layer that cannot be is left out of these rows entirely - the
-    page then shows it whole, as its own passage, rather than dropping it.
+    Every work is laid out this way; the only question is how finely the
+    layers can be set against each other, which is settled at the coarsest
+    granularity all of them can honestly support:
+
+      * by display stanza, so a long poem is broken up for reading rhythm -
+        this needs the lines to correspond;
+      * failing that, by the stanza marks the source itself published;
+      * failing that, one block each.
+
+    A layer is never dropped and never set against the wrong verse. Where the
+    layers cannot be paired at all, the page still reads original, then Latin,
+    then translation - just in whole blocks rather than verse by verse.
     """
-    layers = _layers(qasida)
-    original = layers['original']
-    latin, translated = layers['latin'], layers['translation']
+    lyrics = qasida.lyrics or ''
+    layers = _present_layers(qasida)
 
-    rows = []
-    for index, block in enumerate(original):
-        rows.append({
+    for original, matcher in ((_display_stanzas(lyrics), _aligned_by_shape),
+                              (_stanzas(lyrics), _aligned_by_count)):
+        if not original:
+            continue
+        aligned = _interleave(original, layers, matcher)
+        if aligned is None:
+            continue
+        return [{
             'original': block,
-            'latin': latin[index] if latin else '',
-            'translation': translated[index] if translated else '',
-        })
-    return rows
+            'latin': aligned.get('latin', [''] * len(original))[index],
+            'translation': aligned.get('translation', [''] * len(original))[index],
+        } for index, block in enumerate(original)]
+
+    # Nothing corresponds. Still the same three layers in the same order.
+    return [{
+        'original': lyrics.strip(),
+        'latin': layers.get('latin', '').strip(),
+        'translation': layers.get('translation', '').strip(),
+    }]
+
+
+def _present_layers(qasida):
+    return {key: text for key, text in (
+        ('latin', qasida.transliteration or ''),
+        ('translation', qasida.translation or ''),
+    ) if text.strip()}
 
 
 @register.filter
-def transliteration_is_aligned(qasida):
-    """True when the transliteration was shown stanza by stanza above."""
-    return _layers(qasida)['latin'] is not None
+def layers_are_paired(qasida):
+    """
+    Whether the layers were set verse by verse rather than as whole blocks.
 
-
-@register.filter
-def translation_is_aligned(qasida):
-    """True when the translation was shown stanza by stanza above."""
-    return _layers(qasida)['translation'] is not None
+    The page uses this only to say so, quietly, when they were not, so a
+    reader is never left to assume a correspondence that is not there.
+    """
+    layers = _present_layers(qasida)
+    if not layers:
+        return True
+    lyrics = qasida.lyrics or ''
+    for original, matcher in ((_display_stanzas(lyrics), _aligned_by_shape),
+                              (_stanzas(lyrics), _aligned_by_count)):
+        if original and _interleave(original, layers, matcher) is not None:
+            return True
+    return False
 
 
 @register.simple_tag(takes_context=True)
