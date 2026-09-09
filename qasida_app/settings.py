@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
 import os
+import sys
 import warnings
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
@@ -323,6 +324,86 @@ CACHES = {
         "LOCATION": _cache_location(),
     },
 }
+
+# Logging
+#
+# Django ships a default configuration that sends application logs to the
+# console only when DEBUG is true, and otherwise mails them to ADMINS. With
+# DEBUG off and no ADMINS set - which is any sensible production - that means
+# every 500 traceback is formatted and then thrown away. The site appears to
+# have no errors because nothing is anywhere.
+#
+# Everything goes to stdout instead, unbuffered, which is what `docker logs`
+# reads. No files: a log inside a container is lost when the container is
+# replaced, and there is nowhere for it to rotate to.
+
+LOG_LEVEL = os.environ.get("DJANGO_LOG_LEVEL", "INFO").upper()
+
+LOGGING = {
+    "version": 1,
+    # Leave loggers that libraries have already configured alone.
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {
+            "format": "{asctime} {levelname:8} {name} {message}",
+            "style": "{",
+        },
+        "request": {
+            # The status code and path matter more than anything else when
+            # reading back through a wall of these.
+            "format": "{asctime} {levelname:8} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "stream": sys.stdout,
+            "formatter": "standard",
+        },
+        "console_request": {
+            "class": "logging.StreamHandler",
+            "stream": sys.stdout,
+            "formatter": "request",
+        },
+    },
+    # A catch-all, so a library nobody thought to name still reaches the log.
+    "root": {"handlers": ["console"], "level": LOG_LEVEL},
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+        # The one that carries 500 tracebacks. propagate is off so each is
+        # printed once rather than again by the root logger.
+        "django.request": {
+            "handlers": ["console_request"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        # Every query, when explicitly asked for. Far too loud to leave on:
+        # only reachable by setting DJANGO_SQL_LOG=True.
+        "django.db.backends": {
+            "handlers": ["console"],
+            "level": "DEBUG" if os.environ.get("DJANGO_SQL_LOG") == "True" else "INFO",
+            "propagate": False,
+        },
+        # This project's own code. Modules log through logging.getLogger(__name__),
+        # so everything under core lands here.
+        "core": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+        "celery": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+    },
+}
+
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/6.1/ref/settings/#default-auto-field

@@ -55,7 +55,18 @@ services:
       - backend
     expose:
       - 8000
-    command: gunicorn qasida_app.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120
+    # --access-logfile and --error-logfile pointed at stdout, so requests,
+    # worker restarts and timeouts all land in `docker compose logs web`
+    # alongside the application's own log. Without them gunicorn logs no
+    # requests at all, and a worker being killed leaves no trace.
+    command: >
+      gunicorn qasida_app.wsgi:application
+      --bind 0.0.0.0:8000
+      --workers 3
+      --timeout 120
+      --access-logfile -
+      --error-logfile -
+      --capture-output
     entrypoint: /app/entrypoint.sh
     volumes:
       # Scanned pages live here and must outlive the container.
