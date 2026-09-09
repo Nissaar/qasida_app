@@ -1,14 +1,23 @@
 # Production stack, fronted by Traefik.
 #
-# Same principle as the Ghost deployment: two external networks, with only the
-# web container joined to `frontend` so Traefik can reach it. Postgres, Redis
-# and the Celery containers stay on `backend`, unreachable from outside.
+# Only the containers Traefik must reach - web and media - join the shared
+# `frontend` network. Postgres and Redis sit on a network private to this
+# project and are reachable from nowhere else.
+#
+# That division is not tidiness, it is the fix for a real outage. An earlier
+# version of this file put Postgres on a second *shared* network alongside
+# other stacks. A shared network is a shared DNS namespace, and `db` is the
+# most collision-prone name there is: another project's `db` service claimed
+# the same alias, Docker's resolver returned both addresses, and Django
+# connected to whichever it happened to pick. Roughly half of all requests
+# failed with "password authentication failed for user qasida_user", because
+# they had reached somebody else's database. A project-private network cannot
+# collide, because Compose namespaces it per project.
 #
 # Nothing here publishes a host port. Traefik routes to the container port over
 # the frontend network, which is what `expose` declares.
 #
-#   docker network create frontend   # once, if they do not exist yet
-#   docker network create backend
+#   docker network create frontend   # once, if it does not exist yet
 #   cp .env.prod.example .env && edit it
 #   docker compose -f docker-compose.prod.yml up -d --build
 #
@@ -16,10 +25,10 @@
 # networking, which suits a WSL setup but cannot work behind Traefik.
 
 networks:
-  default:
+  # Private to this project. Compose prefixes it with the project name, so the
+  # names `db` and `redis` here belong to this stack and nothing else.
+  internal:
   frontend:
-    external: true
-  backend:
     external: true
 
 services:
@@ -27,19 +36,28 @@ services:
     image: postgres:15
     restart: always
     networks:
-      - backend
+      - internal
     environment:
       POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - ./db:/var/lib/postgresql/data
+    # "Started" is not "ready to accept connections": Postgres runs its own
+    # start-up, and on a cold volume that takes seconds. Everything that talks
+    # to it waits for this to pass rather than for the container to exist.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
   redis:
     image: redis:7-alpine
     restart: always
     networks:
-      - backend
+      - internal
     volumes:
       - ./redis:/data
 
@@ -48,11 +66,13 @@ services:
       context: .
     restart: always
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - frontend
-      - backend
+      - internal
     expose:
       - 8000
     # --access-logfile and --error-logfile pointed at stdout, so requests,
@@ -141,10 +161,12 @@ services:
       context: .
     restart: always
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
     networks:
-      - backend
+      - internal
     command: celery -A qasida_app worker -l info --concurrency 2
     volumes:
       # The crawlers write scans, so the worker needs the same directory.
@@ -158,10 +180,12 @@ services:
       context: .
     restart: always
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
     networks:
-      - backend
+      - internal
     # The schedule file is kept on a volume; in the container filesystem it
     # would be lost on every recreate and the schedule would drift.
     command: celery -A qasida_app beat -l info --schedule /app/beat/celerybeat-schedule
