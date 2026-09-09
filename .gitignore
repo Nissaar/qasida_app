@@ -7,3 +7,8 @@ celerybeat-schedule
 db/
 redis/
 beat/
+
+# Production compose lives only on the server: it carries host-specific
+# paths, and tracking it means every deploy pull fights the local copy.
+docker-compose.prod.yml
+docker-compose.override.yml
