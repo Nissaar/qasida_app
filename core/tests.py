@@ -2279,3 +2279,67 @@ class NativeScriptTest(TestCase):
         Suggestion.objects.get().apply()
         qasida.refresh_from_db()
         self.assertEqual(qasida.native_title, 'نیا عنوان')
+
+
+class MissingDetailFilterTest(TestCase):
+    """
+    Listing the works that share a gap.
+
+    Much of this library was assembled by crawler and what arrived is uneven;
+    reviewing means working through one gap at a time, and 1,814 of the 3,800
+    works name no poet at all.
+    """
+
+    def setUp(self):
+        self.staff = User.objects.create_superuser('root', 'r@example.com',
+                                                   GOOD_PASSWORD)
+        self.client.force_login(self.staff)
+
+        self.complete = make_qasida(title='Complete', author='A Poet',
+                                    language='Urdu', native_title='عنوان',
+                                    transliteration='latin', translation='meaning')
+        self.complete.tags.add(Tag.objects.create(name='naat'))
+        self.bare = make_qasida(title='Bare', author='', language='',
+                                native_title='', transliteration='',
+                                translation='')
+
+    def listed(self, gap):
+        response = self.client.get('/admin/core/qasida/', {'missing': gap})
+        return sorted(w.title for w in response.context['cl'].result_list)
+
+    def test_works_with_no_poet(self):
+        self.assertEqual(self.listed('poet'), ['Bare'])
+
+    def test_works_with_no_translation(self):
+        self.assertEqual(self.listed('translation'), ['Bare'])
+
+    def test_works_with_no_transliteration(self):
+        self.assertEqual(self.listed('transliteration'), ['Bare'])
+
+    def test_works_with_no_native_title(self):
+        self.assertEqual(self.listed('native_title'), ['Bare'])
+
+    def test_works_with_no_tags(self):
+        self.assertEqual(self.listed('tags'), ['Bare'])
+
+    def test_works_with_no_language(self):
+        self.assertEqual(self.listed('language'), ['Bare'])
+
+    def test_an_unknown_gap_narrows_nothing(self):
+        self.assertEqual(self.listed('nonsense'), ['Bare', 'Complete'])
+
+    def test_a_work_is_never_listed_twice(self):
+        """The tag lookup crosses a relation and can match a row repeatedly."""
+        # No poet either, so both appear under that gap; the helper credits
+        # one by default.
+        extra = make_qasida(title='Bare', author='')
+        extra.tags.add(Tag.objects.create(name='urdu'),
+                       Tag.objects.create(name='maqam-rast'))
+        self.assertEqual(self.listed('poet').count('Bare'), 2)
+        self.assertEqual(len(self.listed('tags')), 1)
+
+    def test_every_gap_is_offered_in_the_sidebar(self):
+        from .admin_filters import MissingDetailFilter
+        labels = [label for label, _ in MissingDetailFilter.GAPS.values()]
+        self.assertIn('No poet named', labels)
+        self.assertNotIn('No any tag', labels)

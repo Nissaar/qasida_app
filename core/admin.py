@@ -6,7 +6,7 @@ from django.urls import path
 from django.db.models import Count, Max
 from django.utils import timezone
 
-from .admin_filters import TextSearchPanel
+from .admin_filters import MissingDetailFilter, TextSearchPanel
 from .forms import QasidaAdminForm
 from .ocr_tool import OcrUploadForm, run_ocr
 from .tasks import enrich_qasida
@@ -109,8 +109,9 @@ class QasidaAdmin(LibraryAdmin):
                     'scan_count', 'has_latin', 'has_translation', 'saved_count')
     # The typed filters come first: author and tag have too many distinct
     # values for Django's default link-per-value rendering.
-    list_filter = (TextSearchPanel, 'review_state', 'collection', 'dedicated_to',
-                   'source_site', 'language', 'text_quality', 'translation_origin')
+    list_filter = (TextSearchPanel, MissingDetailFilter, 'review_state',
+                   'collection', 'dedicated_to', 'source_site', 'language',
+                   'text_quality', 'translation_origin')
     search_help_text = ('Searches title, Arabic title, poet, dedication, lyrics '
                         'and transliteration. '
                         'Need to read a scan? Use the Extract text tool at ./ocr-tool/')

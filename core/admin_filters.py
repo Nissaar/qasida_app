@@ -84,3 +84,42 @@ class TextSearchPanel(admin.SimpleListFilter):
 
     def has_output(self):
         return True
+
+
+class MissingDetailFilter(admin.SimpleListFilter):
+    """
+    What a record is still missing.
+
+    Much of this library was assembled by crawler, and what arrived is uneven:
+    1,814 of the 3,800 works name no poet at all, most carry no translation,
+    and some never had a language recorded. Reviewing is a matter of working
+    through one gap at a time, and until now there was no way to list the
+    works that share one.
+    """
+
+    title = 'still missing'
+    parameter_name = 'missing'
+
+    # key -> (what to show in the sidebar, the filter that finds the gap)
+    GAPS = {
+        'poet': ('No poet named', {'author__isnull': True}),
+        'dedication': ('No dedication', {'dedicated_to__isnull': True}),
+        'translation': ('No translation', {'translation': ''}),
+        'transliteration': ('No transliteration', {'transliteration': ''}),
+        'language': ('No language', {'language': ''}),
+        'native_title': ('No title in its own script', {'native_title': ''}),
+        'tags': ('No tags at all', {'tags__isnull': True}),
+    }
+
+    def lookups(self, request, model_admin):
+        return [(key, label) for key, (label, _) in self.GAPS.items()]
+
+    def queryset(self, request, queryset):
+        chosen = self.GAPS.get(self.value())
+        if chosen is None:
+            return queryset
+        _label, gap = chosen
+        # tags is a relation that can match a row more than once; the others
+        # cannot, so only that one needs collapsing.
+        narrowed = queryset.filter(**gap)
+        return narrowed.distinct() if 'tags__isnull' in gap else narrowed
