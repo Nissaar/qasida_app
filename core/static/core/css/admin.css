@@ -778,27 +778,52 @@ html, body { max-width: 100%; overflow-x: hidden; }
 }
 
 
-/* ---- per-axis tag pickers --------------------------------------------
- * One control per axis rather than all 65 tags in a single box. Before
- * select2 upgrades them they are ordinary multi-selects, so they are given a
- * sane size either way.
+/* ---- per-axis tag choices --------------------------------------------
+ * One group per axis, laid out in as many columns as the width allows. A
+ * checkbox is one tap on any device; a multi-select needs ctrl-click, which
+ * a phone cannot do at all.
  */
-select.q-tag-select {
-    width: 100%;
-    min-height: 6.5rem;
-    padding: .4rem;
+ul.q-tag-choices {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    columns: 4 11rem;
+    column-gap: 1.25rem;
 }
-/* Once upgraded, the chosen tags read as pills rather than highlighted rows. */
-.q-tag-select + .select2-container .select2-selection--multiple {
-    min-height: 2.6rem;
-    padding: .15rem .3rem;
-    border-radius: var(--q-radius-sm);
-    border-color: var(--q-line);
+ul.q-tag-choices li {
+    break-inside: avoid;
+    margin: 0 0 .1rem;
 }
-.q-tag-select + .select2-container .select2-selection__choice {
-    background: var(--q-accent-tint);
-    border-color: var(--q-accent);
+ul.q-tag-choices label {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    /* A comfortable target to tap, not a 13px line of text. */
+    min-height: 2rem;
+    padding: .2rem .4rem;
+    border-radius: .4rem;
+    font-size: .8125rem;
+    line-height: 1.3;
+    cursor: pointer;
+}
+ul.q-tag-choices label:hover { background: var(--q-stone-50); }
+ul.q-tag-choices input[type="checkbox"] {
+    width: 1.05rem;
+    height: 1.05rem;
+    flex: 0 0 auto;
+    margin: 0;
+    accent-color: var(--q-accent);
+}
+/* A chosen tag should be findable at a glance in a column of twenty. */
+ul.q-tag-choices input[type="checkbox"]:checked + span,
+ul.q-tag-choices label:has(input:checked) {
     color: var(--q-accent-strong);
-    border-radius: 999px;
-    padding: .1rem .5rem;
+    font-weight: 700;
+}
+
+@media (max-width: 767px) {
+    /* Two columns on a phone; one would scroll for ever, four would be
+       unreadable. */
+    ul.q-tag-choices { columns: 2 8rem; column-gap: .75rem; }
+    ul.q-tag-choices label { min-height: 2.35rem; font-size: .8438rem; }
 }

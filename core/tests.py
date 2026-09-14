@@ -2207,11 +2207,36 @@ class TagAxisWidgetTest(TestCase):
     def test_the_change_form_renders_the_controls(self):
         body = self.client.get(
             f'/admin/core/qasida/{self.qasida.pk}/change/').content.decode()
-        self.assertIn('q-tag-select', body)
+        self.assertIn('q-tag-choices', body)
         self.assertIn('name="tags_maqam"', body)
         self.assertIn('name="tags_bahr"', body)
         # And no longer the two-pane box.
         self.assertNotIn('SelectFilter2', body)
+
+    def test_each_tag_is_a_checkbox_reachable_by_one_tap(self):
+        """
+        A multi-select needs ctrl-click to choose more than one, which cannot
+        be done on a phone at all - so the control an editor meets on every
+        record has to be something a thumb can operate.
+        """
+        body = self.client.get(
+            f'/admin/core/qasida/{self.qasida.pk}/change/').content.decode()
+        self.assertIn('type="checkbox" name="tags_maqam"', body)
+        self.assertNotIn('<select name="tags_maqam"', body)
+        self.assertNotIn('multiple', body.split('tags_maqam')[1][:200])
+
+    def test_a_chosen_tag_comes_back_checked_and_the_others_do_not(self):
+        import re
+        self.qasida.tags.set([self.maqam_tag])
+        body = self.client.get(
+            f'/admin/core/qasida/{self.qasida.pk}/change/').content.decode()
+
+        boxes = re.findall(r'<input[^>]*name="tags_maqam"[^>]*>', body)
+        chosen = [b for b in boxes if f'value="{self.maqam_tag.pk}"' in b]
+        self.assertEqual(len(chosen), 1)
+        self.assertIn('checked', chosen[0])
+        # Exactly one, so nothing is checked that was never chosen.
+        self.assertEqual(len([b for b in boxes if 'checked' in b]), 1)
 
 
 class NativeScriptTest(TestCase):

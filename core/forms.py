@@ -250,18 +250,20 @@ class FavouriteNoteForm(StyledFormMixin, forms.ModelForm):
 
 
 def _axis_field(category, label):
-    """One multi-select offering a single axis of the tag vocabulary."""
+    """
+    One control offering a single axis of the tag vocabulary.
+
+    Checkboxes rather than a multi-select list. A multi-select needs
+    ctrl-click to choose more than one, which cannot be done on a phone at
+    all, and a searchable dropdown would put a JavaScript dependency between
+    an editor and their work for the sake of lists that are 4 to 22 items
+    long. A checkbox is one tap, on any device, with nothing to load.
+    """
     return forms.ModelMultipleChoiceField(
         queryset=Tag.objects.filter(category=category),
         required=False,
         label=label,
-        widget=forms.SelectMultiple(attrs={
-            # Picked up by the admin script, which upgrades these to searchable
-            # pickers; without it they stay ordinary multi-selects and work.
-            'class': 'q-tag-select',
-            'data-placeholder': f'Choose {label.lower()}\u2026',
-            'size': 6,
-        }),
+        widget=forms.CheckboxSelectMultiple(attrs={'class': 'q-tag-choices'}),
     )
 
 

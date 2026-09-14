@@ -166,44 +166,10 @@
         } catch (e) { /* some input types refuse; focus alone is enough */ }
     }
 
-    /*
-     * Turn the per-axis tag selects into searchable pickers.
-     *
-     * The form offers one control per axis - form, language, maqam, metre -
-     * rather than all 65 tags at once. Each holds a couple of dozen related
-     * things, which a plain multi-select can show but not search, and which
-     * needs ctrl-clicking to pick more than one. select2 is already on the
-     * page because the poet and dedication fields use it, so the same picker
-     * is applied here.
-     *
-     * No AJAX: every option is already in the markup, because an axis is
-     * small. If select2 or jQuery is missing for any reason the control stays
-     * an ordinary multi-select, which still works.
-     */
-    function setUpTagPickers() {
-        var selects = document.querySelectorAll('select.q-tag-select');
-        if (!selects.length) return;
-
-        var jq = window.django && window.django.jQuery;
-        if (!jq || !jq.fn || !jq.fn.select2) return;
-
-        selects.forEach(function (select) {
-            var $select = jq(select);
-            if ($select.data('select2')) return;
-            $select.select2({
-                width: '100%',
-                placeholder: select.dataset.placeholder || '',
-                allowClear: false,
-                closeOnSelect: false
-            });
-        });
-    }
-
     document.addEventListener('DOMContentLoaded', function () {
         setUpNavSidebar();
         setUpFilterSidebar();
         setUpFieldsets();
         setUpLiveSearch();
-        setUpTagPickers();
     });
 })();
