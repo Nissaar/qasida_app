@@ -1,8 +1,10 @@
 from django.contrib.auth import views as auth_views
+from django.contrib.sitemaps.views import sitemap
 from django.urls import path
 from django.views.generic import TemplateView
 
 from . import account_views, views
+from .sitemaps import SITEMAPS
 from .forms import (StyledPasswordChangeForm, StyledPasswordResetForm,
                     StyledSetPasswordForm)
 
@@ -17,6 +19,11 @@ urlpatterns = [
         template_name='core/pwa/manifest.webmanifest',
         content_type='application/manifest+json'), name='manifest'),
     path('offline/', TemplateView.as_view(template_name='core/offline.html'), name='offline'),
+    # Both must sit at the site root to be found where crawlers look.
+    path('sitemap.xml', sitemap, {'sitemaps': SITEMAPS},
+         name='django.contrib.sitemaps.views.sitemap'),
+    path('robots.txt', TemplateView.as_view(
+        template_name='core/robots.txt', content_type='text/plain'), name='robots'),
     path('browse/', views.browse, name='browse'),
     path('poets/', views.poets, name='poets'),
     path('categories/', views.categories, name='categories'),

@@ -1,6 +1,15 @@
 {% extends 'core/base.html' %}
 
-{% block title %}{{ heading }} | Qasida Library{% endblock %}
+{% block title %}{{ heading }}{% if author_filter %} - {{ author_filter }}{% endif %} | Qasida Library{% endblock %}
+{% block meta_description %}{% if author_filter %}Qasidas by {{ author_filter }}.{% elif dedication_filter %}Qasidas in praise of {{ dedication_filter }}.{% else %}Browse {{ total }} naats, qasidas and manqabat with transliterations and translations.{% endif %}{% endblock %}
+{% comment %}
+Every combination of filters is a page, and with tags now combining freely
+there are more combinations than works. They are near-identical to each other
+and to the pages they list, which is what gets a site classed as thin content,
+so only the unfiltered first page is offered for indexing - the links on it are
+still followed.
+{% endcomment %}
+{% block robots %}{% if has_filters or page_obj.number > 1 %}<meta name="robots" content="noindex,follow">{% endif %}{% endblock %}
 
 {% block content %}
 <div class="flex flex-wrap items-end justify-between gap-3 mb-5">

@@ -4,7 +4,30 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>{% block title %}Qasida Library{% endblock %}</title>
-    <meta name="description" content="Naats, qasidas, madih and manqabat in Arabic and Urdu.">
+    {% comment %}
+    A description per page, not one for the whole site. Search engines print
+    this under the title, so a single sentence repeated across 3,800 works
+    makes every result look identical and tells a reader nothing about which
+    one to open.
+    {% endcomment %}
+    <meta name="description" content="{% block meta_description %}Naats, qasidas, madih and manqabat in Arabic and Urdu, with transliterations and translations.{% endblock %}">
+    {% comment %}
+    Which address is the real one. The same work is reachable by its numeric
+    id, and a listing by any combination of filters; without this each is
+    counted as a separate page competing with the others.
+    {% endcomment %}
+    <link rel="canonical" href="{{ request.scheme }}://{{ request.get_host }}{% block canonical_path %}{{ request.path }}{% endblock %}">
+    {% block robots %}{% endblock %}
+
+    {% comment %} How a link looks when it is shared, which for this audience
+    is mostly WhatsApp and Telegram rather than search. {% endcomment %}
+    <meta property="og:site_name" content="Qasida Library">
+    <meta property="og:type" content="{% block og_type %}website{% endblock %}">
+    <meta property="og:title" content="{% block og_title %}Qasida Library{% endblock %}">
+    <meta property="og:description" content="{% block og_description %}Naats, qasidas, madih and manqabat in Arabic and Urdu.{% endblock %}">
+    <meta property="og:url" content="{{ request.scheme }}://{{ request.get_host }}{{ request.path }}">
+    <meta property="og:image" content="{% block og_image %}{{ request.scheme }}://{{ request.get_host }}{% static 'core/img/icon-192.png' %}{% endblock %}">
+    <meta name="twitter:card" content="summary">
 
     <link rel="manifest" href="{% url 'manifest' %}">
     <meta name="theme-color" content="#065f46" media="(prefers-color-scheme: light)">

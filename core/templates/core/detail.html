@@ -1,9 +1,43 @@
 {% extends 'core/base.html' %}
 {% load qasida_extras %}
 
-{% block title %}{{ qasida.title|default:"Qasida" }} | Qasida Library{% endblock %}
+{% block title %}{{ qasida.title|default:"Qasida" }}{% if qasida.author %} - {{ qasida.author.name }}{% endif %} | Qasida Library{% endblock %}
+{% block meta_description %}{{ qasida.meta_description }}{% endblock %}
+{% block og_type %}article{% endblock %}
+{% block og_title %}{{ qasida.title|default:"Qasida" }}{% endblock %}
+{% block og_description %}{{ qasida.meta_description }}{% endblock %}
+{% block canonical_path %}{{ qasida.get_absolute_url }}{% endblock %}
+{% with scan=qasida.images.first %}{% if scan %}
+{% block og_image %}{{ request.scheme }}://{{ request.get_host }}{{ scan.image.url }}{% endblock %}
+{% endif %}{% endwith %}
+
+{% block extra_head %}{% endblock %}
 
 {% block content %}
+{% comment %}
+Structured data describing what this page is. Deliberately no text of the poem:
+schema.org has a field for it, and filling it would publish the verse into
+search results and into whatever else reads this, which is not the same as
+serving it on a page a reader chose to open.
+{% endcomment %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "CreativeWork",
+  "@id": "{{ request.scheme }}://{{ request.get_host }}{{ qasida.get_absolute_url }}",
+  "url": "{{ request.scheme }}://{{ request.get_host }}{{ qasida.get_absolute_url }}",
+  "name": "{{ qasida.title|default:'Untitled qasida'|escapejs }}",
+  {% if qasida.native_title %}"alternateName": "{{ qasida.native_title|escapejs }}",{% endif %}
+  {% if qasida.author %}"author": {"@type": "Person", "name": "{{ qasida.author.name|escapejs }}"},{% endif %}
+  {% if qasida.dedicated_to %}"about": {"@type": "Person", "name": "{{ qasida.dedicated_to.name|escapejs }}"},{% endif %}
+  {% if qasida.language_code %}"inLanguage": "{{ qasida.language_code }}",{% endif %}
+  {% if qasida.collection %}"isPartOf": {"@type": "CreativeWorkSeries", "name": "{{ qasida.collection.name|escapejs }}"},{% endif %}
+  "genre": "Devotional poetry",
+  "isAccessibleForFree": true,
+  "description": "{{ qasida.meta_description|escapejs }}",
+  "publisher": {"@type": "Organization", "name": "Qasida Library"}
+}
+</script>
 {# Only a template that extends another may set variables inside its blocks. #}
 {% reader_profile as profile %}
 {% is_favourited qasida as saved %}

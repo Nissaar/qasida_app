@@ -361,6 +361,42 @@ class Qasida(models.Model):
     objects = QasidaQuerySet.as_manager()
 
     @property
+    def meta_description(self):
+        """
+        The sentence a search engine prints under this page's title.
+
+        Composed from what the record *is* - who wrote it, what language, which
+        layers it carries - and never from the verse. A snippet of the poem
+        would read better and would be republishing the text into search
+        results, which is not ours to do; it would also make every page of a
+        multi-part work look alike.
+        """
+        opening = self.title or 'A qasida'
+        if self.author_id:
+            opening = f'{opening} by {self.author.name}'
+        if self.dedicated_to_id:
+            opening = f'{opening}, in praise of {self.dedicated_to.name}'
+
+        carries = []
+        if self.language:
+            carries.append(f'{self.language} lyrics')
+        else:
+            carries.append('lyrics')
+        if self.transliteration:
+            carries.append('Latin transliteration')
+        if self.translation:
+            carries.append('English translation')
+        if self.images.exists():
+            carries.append('scanned pages')
+
+        if len(carries) > 1:
+            layers = ', '.join(carries[:-1]) + ' and ' + carries[-1]
+        else:
+            layers = carries[0]
+
+        return f'{opening}. Read the {layers} on Qasida Library.'
+
+    @property
     def language_code(self):
         """This work's language as a tag a browser understands."""
         return language_code(self.language)

@@ -1,6 +1,8 @@
 {% extends 'core/base.html' %}
 
 {% block title %}In praise of {{ dedication.name }} | Qasida Library{% endblock %}
+{% block meta_description %}{{ total }} qasida{{ total|pluralize }} written in praise of {{ dedication.name }}.{% endblock %}
+{% block og_title %}In praise of {{ dedication.name }}{% endblock %}
 
 {% block content %}
 <nav class="mb-4 text-sm flex flex-wrap items-center gap-x-2">

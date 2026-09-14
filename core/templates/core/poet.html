@@ -1,6 +1,8 @@
 {% extends 'core/base.html' %}
 
 {% block title %}{{ poet_name }} | Qasida Library{% endblock %}
+{% block meta_description %}{{ total }} qasida{{ total|pluralize }} by {{ poet_name }}, with transliterations and translations where they exist.{% endblock %}
+{% block og_title %}Qasidas by {{ poet_name }}{% endblock %}
 
 {% block content %}
 <nav class="mb-4 text-sm">

@@ -2424,3 +2424,123 @@ class DedicationBrowsingTest(TestCase):
         body = self.client.get(reverse('search'),
                                {'dedication': 'The Prophet'}).content.decode()
         self.assertIn('name="dedication" value="The Prophet"', body)
+
+
+class DiscoverabilityTest(TestCase):
+    """
+    What a search engine is told, and what it is told not to bother with.
+
+    Nothing here helps until works are approved - a sitemap listing one work
+    describes a library of one - but the machinery has to be right before
+    approving is worth doing.
+    """
+
+    def setUp(self):
+        self.poet = Poet.named('Findable Poet')
+        self.honoured = Dedication.objects.create(name='Honoured Name')
+        self.approved = make_qasida(
+            title='Approved Work', language='Urdu', author=self.poet,
+            dedicated_to=self.honoured, transliteration='latin',
+            translation='meaning')
+        self.pending = Qasida.objects.create(title='Pending Work', lyrics='x')
+
+    def sitemap(self):
+        return self.client.get('/sitemap.xml').content.decode()
+
+    def test_the_sitemap_is_served(self):
+        response = self.client.get('/sitemap.xml')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('xml', response['Content-Type'])
+
+    def test_it_lists_an_approved_work(self):
+        self.assertIn(self.approved.slug, self.sitemap())
+
+    def test_it_never_lists_an_unapproved_one(self):
+        """
+        A page the site will not serve must not be advertised: a crawler sent
+        to collect 404s learns to trust the sitemap less.
+        """
+        self.assertNotIn(self.pending.slug, self.sitemap())
+
+    def test_it_lists_poets_and_dedications(self):
+        xml = self.sitemap()
+        self.assertIn('Findable', xml)
+        self.assertIn('Honoured', xml)
+
+    def test_a_poet_with_only_unapproved_works_is_not_listed(self):
+        hidden_poet = Poet.named('Hidden Poet')
+        Qasida.objects.create(title='Unseen', lyrics='x', author=hidden_poet)
+        self.assertNotIn('Hidden%20Poet', self.sitemap())
+        self.assertNotIn('Hidden Poet', self.sitemap())
+
+    def test_robots_is_served_and_points_at_the_sitemap(self):
+        body = self.client.get('/robots.txt').content.decode()
+        self.assertIn('sitemap.xml', body)
+        self.assertIn('Disallow: /admin/', body)
+        self.assertIn('Disallow: /my/', body)
+
+    # ---- per-page metadata ------------------------------------------------
+
+    def test_each_work_gets_its_own_description(self):
+        body = self.client.get(self.approved.get_absolute_url()).content.decode()
+        self.assertIn('Approved Work by Findable Poet', body)
+        self.assertIn('Latin transliteration', body)
+
+    def test_the_description_never_republishes_the_verse(self):
+        """
+        A snippet of the poem would read better and would be putting the text
+        into search results, which is not the same as serving it on a page a
+        reader chose to open.
+        """
+        work = make_qasida(title='Quiet', lyrics='DISTINCTIVE-VERSE-TOKEN')
+        self.assertNotIn('DISTINCTIVE-VERSE-TOKEN', work.meta_description)
+
+    def test_a_description_names_only_the_layers_a_work_has(self):
+        bare = make_qasida(title='Bare', language='Urdu', author=None,
+                           transliteration='', translation='')
+        self.assertNotIn('translation', bare.meta_description)
+        self.assertIn('Urdu lyrics', bare.meta_description)
+
+    def test_every_page_declares_which_address_is_the_real_one(self):
+        body = self.client.get(self.approved.get_absolute_url()).content.decode()
+        self.assertIn(f'rel="canonical"', body)
+        self.assertIn(self.approved.get_absolute_url(), body)
+
+    def test_the_numeric_url_redirects_rather_than_competing(self):
+        """Two addresses for one work would split whatever it earns."""
+        response = self.client.get(reverse('qasida_by_id', args=[self.approved.pk]))
+        self.assertRedirects(response, self.approved.get_absolute_url(),
+                             status_code=301)
+
+    # ---- keeping the thin pages out --------------------------------------
+
+    def test_an_unfiltered_listing_is_offered_for_indexing(self):
+        body = self.client.get(reverse('browse')).content.decode()
+        self.assertNotIn('noindex', body)
+
+    def test_a_filtered_listing_is_not(self):
+        """
+        With tags combining freely there are more filter combinations than
+        works, and each is near-identical to the pages it lists.
+        """
+        body = self.client.get(reverse('browse'), {'lang': 'Urdu'}).content.decode()
+        self.assertIn('noindex,follow', body)
+
+    def test_structured_data_is_valid_and_carries_no_verse(self):
+        import json, re
+        work = make_qasida(title='Structured', language='Urdu',
+                           author=self.poet, lyrics='DISTINCTIVE-VERSE-TOKEN')
+        body = self.client.get(work.get_absolute_url()).content.decode()
+        blob = re.search(r'<script type="application/ld\+json">(.*?)</script>',
+                         body, re.S).group(1)
+        data = json.loads(blob)
+        self.assertEqual(data['@type'], 'CreativeWork')
+        self.assertEqual(data['inLanguage'], 'ur')
+        self.assertEqual(data['author']['name'], 'Findable Poet')
+        self.assertNotIn('DISTINCTIVE-VERSE-TOKEN', blob)
+
+    def test_a_shared_link_carries_a_title_and_description(self):
+        body = self.client.get(self.approved.get_absolute_url()).content.decode()
+        self.assertIn('og:title', body)
+        self.assertIn('og:description', body)
+        self.assertIn('og:url', body)

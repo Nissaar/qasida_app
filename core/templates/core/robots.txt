@@ -1,0 +1,20 @@
+# Qasida Library
+#
+# Everything readable is open to crawlers. What is excluded either needs a
+# session, belongs to one reader, or is a filtered view of pages that are
+# already listed individually - and those combinations multiply without
+# adding anything a search engine has not already seen.
+
+User-agent: *
+Allow: /
+
+Disallow: /admin/
+Disallow: /accounts/
+Disallow: /my/
+Disallow: /suggestions/
+Disallow: /search/
+Disallow: /random/
+Disallow: /*/edit/
+Disallow: /*/download/
+
+Sitemap: {{ request.scheme }}://{{ request.get_host }}/sitemap.xml
