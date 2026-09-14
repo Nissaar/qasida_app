@@ -2042,16 +2042,19 @@ class AdminWidgetTest(TestCase):
         return self.client.get(
             f'/admin/core/qasida/{self.qasida.pk}/change/').content.decode()
 
-    def test_tags_are_a_searchable_dropdown_not_a_two_pane_box(self):
+    def test_tags_are_not_a_two_pane_box(self):
         """
         filter_horizontal is unusable past about twenty values; this library
-        has 65 across four unrelated axes.
+        has 65 across four unrelated axes. They are offered one axis at a
+        time instead, by the admin form - see TagAxisWidgetTest.
         """
         from django.contrib import admin as django_admin
+        from .forms import QasidaAdminForm
         from .models import Qasida as QasidaModel
         qasida_admin = django_admin.site._registry[QasidaModel]
-        self.assertIn('tags', qasida_admin.autocomplete_fields)
         self.assertNotIn('tags', getattr(qasida_admin, 'filter_horizontal', ()))
+        self.assertIs(qasida_admin.form, QasidaAdminForm)
+        self.assertIn('tags_maqam', QasidaAdminForm.base_fields)
 
     def test_the_poet_is_a_dropdown_with_an_add_button(self):
         body = self.change_form()
@@ -2077,3 +2080,135 @@ class AdminWidgetTest(TestCase):
         results = self.client.get('/admin/core/qasida/',
                                   {'q': 'Findable Poet'}).context['cl'].result_list
         self.assertEqual([w.title for w in results], ['By Someone'])
+
+
+class TagAxisWidgetTest(TestCase):
+    """
+    One control per axis on the qasida form, rather than all 65 tags at once.
+
+    Choosing a metre should not mean scrolling past the languages.
+    """
+
+    def setUp(self):
+        self.staff = User.objects.create_superuser('root', 'r@example.com',
+                                                   GOOD_PASSWORD)
+        self.client.force_login(self.staff)
+        self.form_tag = Tag.objects.create(name='naat')
+        self.language_tag = Tag.objects.create(name='urdu')
+        self.maqam_tag = Tag.objects.create(name='maqam-hijaz')
+        self.bahr_tag = Tag.objects.create(name='bahr-kamil')
+        self.qasida = make_qasida(title='Taggable')
+
+    def admin_form(self, instance=None):
+        from .forms import QasidaAdminForm
+        return QasidaAdminForm(instance=instance or self.qasida)
+
+    def test_each_axis_gets_its_own_control(self):
+        fields = self.admin_form().fields
+        for name in ('tags_form', 'tags_language', 'tags_maqam', 'tags_bahr'):
+            self.assertIn(name, fields, name)
+
+    def test_a_control_offers_only_its_own_axis(self):
+        fields = self.admin_form().fields
+        self.assertEqual(list(fields['tags_maqam'].queryset), [self.maqam_tag])
+        self.assertEqual(list(fields['tags_language'].queryset), [self.language_tag])
+        self.assertNotIn(self.bahr_tag, fields['tags_form'].queryset)
+
+    def test_an_axis_nothing_is_filed_under_is_not_rendered(self):
+        """
+        An empty control is noise on an already long form.
+
+        Asserted against the admin rather than the form: the fields are
+        declared on the form so the admin can see them at all, and the admin
+        is what decides which are shown.
+        """
+        from django.contrib import admin as django_admin
+        from .models import Qasida as QasidaModel
+        qasida_admin = django_admin.site._registry[QasidaModel]
+        shown = qasida_admin.get_fields(self._request(), self.qasida)
+        self.assertIn('tags_maqam', shown)
+        self.assertNotIn('tags_other', shown)
+
+    def _request(self):
+        request = type('R', (), {})()
+        request.user = self.staff
+        return request
+
+    def test_what_a_work_already_carries_is_preselected(self):
+        self.qasida.tags.set([self.maqam_tag, self.language_tag])
+        fields = self.admin_form(self.qasida).fields
+        self.assertEqual(list(fields['tags_maqam'].initial), [self.maqam_tag])
+        self.assertEqual(list(fields['tags_language'].initial), [self.language_tag])
+        self.assertEqual(list(fields['tags_bahr'].initial), [])
+
+    def post_data(self, **overrides):
+        data = {'title': 'Taggable', 'native_title': '', 'language': '',
+                'text_quality': 'ok', 'lyrics': 'x', 'transliteration': '',
+                'translation': '', 'translation_origin': '',
+                'review_state': 'approved', 'slug': self.qasida.slug,
+                'images-TOTAL_FORMS': '0', 'images-INITIAL_FORMS': '0',
+                'media-TOTAL_FORMS': '0', 'media-INITIAL_FORMS': '0'}
+        data.update(overrides)
+        return data
+
+    def test_choosing_across_axes_lands_in_the_one_relation(self):
+        from .forms import QasidaAdminForm
+        form = QasidaAdminForm(
+            {'title': 'Taggable', 'lyrics': 'x', 'text_quality': 'ok',
+             'review_state': 'approved', 'slug': self.qasida.slug,
+             'tags_form': [self.form_tag.pk],
+             'tags_maqam': [self.maqam_tag.pk]},
+            instance=self.qasida)
+        self.assertTrue(form.is_valid(), form.errors)
+        form.save()
+        self.assertEqual(
+            sorted(self.qasida.tags.values_list('name', flat=True)),
+            ['maqam-hijaz', 'naat'])
+
+    def test_clearing_one_axis_leaves_the_others_alone(self):
+        from .forms import QasidaAdminForm
+        self.qasida.tags.set([self.form_tag, self.maqam_tag])
+        form = QasidaAdminForm(
+            {'title': 'Taggable', 'lyrics': 'x', 'text_quality': 'ok',
+             'review_state': 'approved', 'slug': self.qasida.slug,
+             'tags_form': [self.form_tag.pk]},   # maqam deliberately cleared
+            instance=self.qasida)
+        self.assertTrue(form.is_valid(), form.errors)
+        form.save()
+        self.assertEqual(list(self.qasida.tags.values_list('name', flat=True)),
+                         ['naat'])
+
+    def test_a_tag_on_an_axis_never_offered_is_not_silently_dropped(self):
+        """
+        An axis with no control must not have its tags cleared on save.
+
+        Nothing is filed as "other" here, so that control is not rendered - and
+        a work carrying such a tag would otherwise lose it the moment anybody
+        saved the record for an unrelated reason.
+        """
+        from .forms import QasidaAdminForm
+        stray = Tag.objects.create(name='zz-unfiled', category=Tag.CATEGORY_OTHER)
+        self.qasida.tags.set([self.form_tag, stray])
+        # Rebuild so the form is constructed while 'other' still has a member.
+        form = QasidaAdminForm(instance=self.qasida)
+        self.assertIn('tags_other', form.fields)
+
+        # Now the case that matters: an axis that is genuinely absent.
+        stray.delete()
+        form = QasidaAdminForm(
+            {'title': 'Taggable', 'lyrics': 'x', 'text_quality': 'ok',
+             'review_state': 'approved', 'slug': self.qasida.slug,
+             'tags_form': [self.form_tag.pk]},
+            instance=self.qasida)
+        self.assertTrue(form.is_valid(), form.errors)
+        form.save()
+        self.assertIn('naat', list(self.qasida.tags.values_list('name', flat=True)))
+
+    def test_the_change_form_renders_the_controls(self):
+        body = self.client.get(
+            f'/admin/core/qasida/{self.qasida.pk}/change/').content.decode()
+        self.assertIn('q-tag-select', body)
+        self.assertIn('name="tags_maqam"', body)
+        self.assertIn('name="tags_bahr"', body)
+        # And no longer the two-pane box.
+        self.assertNotIn('SelectFilter2', body)

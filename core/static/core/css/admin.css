@@ -776,3 +776,29 @@ html, body { max-width: 100%; overflow-x: hidden; }
     /* Nothing may force the page itself sideways. */
     #content, #content-main, .module, form { max-width: 100%; }
 }
+
+
+/* ---- per-axis tag pickers --------------------------------------------
+ * One control per axis rather than all 65 tags in a single box. Before
+ * select2 upgrades them they are ordinary multi-selects, so they are given a
+ * sane size either way.
+ */
+select.q-tag-select {
+    width: 100%;
+    min-height: 6.5rem;
+    padding: .4rem;
+}
+/* Once upgraded, the chosen tags read as pills rather than highlighted rows. */
+.q-tag-select + .select2-container .select2-selection--multiple {
+    min-height: 2.6rem;
+    padding: .15rem .3rem;
+    border-radius: var(--q-radius-sm);
+    border-color: var(--q-line);
+}
+.q-tag-select + .select2-container .select2-selection__choice {
+    background: var(--q-accent-tint);
+    border-color: var(--q-accent);
+    color: var(--q-accent-strong);
+    border-radius: 999px;
+    padding: .1rem .5rem;
+}

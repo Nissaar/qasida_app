@@ -247,3 +247,105 @@ class FavouriteNoteForm(StyledFormMixin, forms.ModelForm):
         widgets = {'note': forms.TextInput(attrs={
             'placeholder': 'Why you saved this, for your own reference',
             'dir': 'auto'})}
+
+
+def _axis_field(category, label):
+    """One multi-select offering a single axis of the tag vocabulary."""
+    return forms.ModelMultipleChoiceField(
+        queryset=Tag.objects.filter(category=category),
+        required=False,
+        label=label,
+        widget=forms.SelectMultiple(attrs={
+            # Picked up by the admin script, which upgrades these to searchable
+            # pickers; without it they stay ordinary multi-selects and work.
+            'class': 'q-tag-select',
+            'data-placeholder': f'Choose {label.lower()}\u2026',
+            'size': 6,
+        }),
+    )
+
+
+_AXIS_LABELS = dict(Tag.CATEGORY_CHOICES)
+
+
+class QasidaAdminForm(forms.ModelForm):
+    """
+    The qasida form in the admin, with the tag vocabulary split by axis.
+
+    Tags arrive from the source sites as one flat list mixing four unrelated
+    things - what kind of poem it is, its language, the melodic mode it is
+    sung in, the metre it is written in - plus a few describing the state of
+    our own record. Offering all 65 in a single control means choosing a metre
+    by scrolling past languages. One control per axis means each holds a
+    couple of dozen related things, and an editor wanting a maqam looks only
+    at maqams.
+
+    Which axis a tag belongs to is stored on the tag (see Tag.category), so
+    these are built from that rather than from a list repeated here. The
+    fields are declared at class level rather than added in __init__ because
+    the admin decides what to render from the form class, and a field that
+    exists only on the instance is never shown.
+    """
+
+    # form field name -> the axis it offers
+    TAG_FIELDS = (
+        ('tags_form', Tag.CATEGORY_FORM),
+        ('tags_language', Tag.CATEGORY_LANGUAGE),
+        ('tags_maqam', Tag.CATEGORY_MAQAM),
+        ('tags_bahr', Tag.CATEGORY_BAHR),
+        ('tags_condition', Tag.CATEGORY_CONDITION),
+        ('tags_other', Tag.CATEGORY_OTHER),
+    )
+
+    tags_form = _axis_field(Tag.CATEGORY_FORM, _AXIS_LABELS[Tag.CATEGORY_FORM])
+    tags_language = _axis_field(Tag.CATEGORY_LANGUAGE, _AXIS_LABELS[Tag.CATEGORY_LANGUAGE])
+    tags_maqam = _axis_field(Tag.CATEGORY_MAQAM, _AXIS_LABELS[Tag.CATEGORY_MAQAM])
+    tags_bahr = _axis_field(Tag.CATEGORY_BAHR, _AXIS_LABELS[Tag.CATEGORY_BAHR])
+    tags_condition = _axis_field(Tag.CATEGORY_CONDITION, _AXIS_LABELS[Tag.CATEGORY_CONDITION])
+    tags_other = _axis_field(Tag.CATEGORY_OTHER, _AXIS_LABELS[Tag.CATEGORY_OTHER])
+
+    class Meta:
+        model = Qasida
+        # Replaced by the per-axis fields above.
+        exclude = ('tags',)
+
+    @classmethod
+    def populated_axes(cls):
+        """
+        The axes worth offering: the ones something is actually filed under.
+
+        Used both to decide what the admin renders and, on save, which axes a
+        submission speaks for - the two must agree, or an axis that was never
+        shown would be read as "nothing chosen" and silently cleared.
+        """
+        present = set(Tag.objects.values_list('category', flat=True).distinct())
+        return [(name, category) for name, category in cls.TAG_FIELDS
+                if category in present]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self.instance.pk:
+            return
+        chosen = set(self.instance.tags.values_list('pk', flat=True))
+        for name, category in self.TAG_FIELDS:
+            field = self.fields.get(name)
+            if field is not None:
+                field.initial = field.queryset.filter(pk__in=chosen)
+
+    def _save_m2m(self):
+        """
+        Fold every axis back into the one relation the model actually has.
+
+        Called on the admin's save path and by save(commit=True), so both
+        reach here. Only the axes that were offered are read: an axis whose
+        control was never rendered must keep whatever the work already
+        carries, rather than being emptied by a save made for another reason.
+        """
+        super()._save_m2m()
+        offered, chosen = [], []
+        for name, category in self.populated_axes():
+            offered.append(category)
+            chosen.extend(self.cleaned_data.get(name) or [])
+
+        untouched = list(self.instance.tags.exclude(category__in=offered))
+        self.instance.tags.set(chosen + untouched)

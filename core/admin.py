@@ -7,6 +7,7 @@ from django.db.models import Count, Max
 from django.utils import timezone
 
 from .admin_filters import TextSearchPanel
+from .forms import QasidaAdminForm
 from .ocr_tool import OcrUploadForm, run_ocr
 from .tasks import enrich_qasida
 
@@ -120,11 +121,24 @@ class QasidaAdmin(LibraryAdmin):
                      'lyrics', 'transliteration')
     list_select_related = ('source_site', 'collection', 'dedicated_to', 'author')
     # Searchable dropdowns with a + beside them: pick an existing value, or add
-    # one without leaving the page. Tags were a two-pane box with arrows, which
-    # is unusable once the vocabulary passes about twenty - this library has 65
-    # across four unrelated axes, so choosing meant hunting through a list that
-    # mixed metres with languages.
-    autocomplete_fields = ('author', 'dedicated_to', 'tags')
+    # one without leaving the page.
+    autocomplete_fields = ('author', 'dedicated_to')
+    # Tags were a two-pane box with arrows holding all 65 at once, so choosing
+    # a metre meant scrolling past the languages. The form offers one control
+    # per axis instead and folds them back into the single relation on save.
+    form = QasidaAdminForm
+
+    def get_fields(self, request, obj=None):
+        """Leave out any tag axis nothing is filed under.
+
+        An empty control is noise on a form this long, and the form's own
+        save path uses the same rule, so an axis that is not shown keeps
+        whatever the work already carries rather than being cleared.
+        """
+        fields = super().get_fields(request, obj)
+        offered = {name for name, _ in QasidaAdminForm.populated_axes()}
+        return [name for name in fields
+                if not name.startswith('tags_') or name in offered]
     inlines = [QasidaMediaInline, QasidaImageInline]
 
     def get_queryset(self, request):
