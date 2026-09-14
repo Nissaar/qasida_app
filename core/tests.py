@@ -2343,3 +2343,84 @@ class MissingDetailFilterTest(TestCase):
         labels = [label for label, _ in MissingDetailFilter.GAPS.values()]
         self.assertIn('No poet named', labels)
         self.assertNotIn('No any tag', labels)
+
+
+class DedicationBrowsingTest(TestCase):
+    """
+    Browsing by whom a work honours.
+
+    Much of this repertoire is grouped by that rather than by who wrote it,
+    and the site offered no way in at all: the field existed, nothing read it.
+    """
+
+    def setUp(self):
+        self.prophet = Dedication.objects.create(name='The Prophet',
+                                                 native_name='النبي')
+        self.shaykh = Dedication.objects.create(name='A Shaykh')
+        for title in ('First', 'Second'):
+            make_qasida(title=title, dedicated_to=self.prophet)
+        make_qasida(title='Third', dedicated_to=self.shaykh)
+        make_qasida(title='Undedicated')
+
+    def test_the_index_lists_each_with_a_count(self):
+        response = self.client.get(reverse('dedications'))
+        self.assertEqual(response.status_code, 200)
+        counts = {d.name: d.n for d in response.context['dedications']}
+        self.assertEqual(counts, {'The Prophet': 2, 'A Shaykh': 1})
+
+    def test_the_index_counts_works_honouring_nobody(self):
+        response = self.client.get(reverse('dedications'))
+        self.assertEqual(response.context['undedicated'], 1)
+
+    def test_one_dedication_lists_its_works(self):
+        response = self.client.get(reverse('dedication', args=['The Prophet']))
+        self.assertEqual(sorted(w.title for w in response.context['page_obj']),
+                         ['First', 'Second'])
+
+    def test_the_name_is_matched_without_regard_to_case(self):
+        response = self.client.get(reverse('dedication', args=['the prophet']))
+        self.assertEqual(response.status_code, 200)
+
+    def test_an_unknown_dedication_is_not_found(self):
+        self.assertEqual(
+            self.client.get(reverse('dedication', args=['Nobody'])).status_code, 404)
+
+    def test_the_native_name_is_shown(self):
+        body = self.client.get(reverse('dedication', args=['The Prophet'])).content.decode()
+        self.assertIn('النبي', body)
+
+    def test_an_unapproved_work_is_never_listed(self):
+        Qasida.objects.create(title='Hidden', lyrics='x',
+                              dedicated_to=self.prophet)
+        response = self.client.get(reverse('dedication', args=['The Prophet']))
+        self.assertEqual(sorted(w.title for w in response.context['page_obj']),
+                         ['First', 'Second'])
+
+    def test_the_rail_offers_it_as_a_filter(self):
+        response = self.client.get(reverse('browse'))
+        names = [d.name for d in response.context['all_dedications']]
+        self.assertIn('The Prophet', names)
+
+    def test_filtering_a_listing_by_dedication(self):
+        response = self.client.get(reverse('search'), {'dedication': 'The Prophet'})
+        self.assertEqual(sorted(w.title for w in response.context['page_obj']),
+                         ['First', 'Second'])
+
+    def test_it_combines_with_the_other_filters(self):
+        work = Qasida.objects.get(title='First')
+        work.language = 'Urdu'
+        work.save()
+        response = self.client.get(reverse('search'),
+                                   {'dedication': 'The Prophet', 'lang': 'Urdu'})
+        self.assertEqual([w.title for w in response.context['page_obj']], ['First'])
+
+    def test_the_chosen_dedication_can_be_removed(self):
+        response = self.client.get(reverse('search'),
+                                   {'dedication': 'The Prophet', 'lang': 'Urdu'})
+        self.assertIn('lang=Urdu', response.context['qs_without_dedication'])
+        self.assertNotIn('dedication=', response.context['qs_without_dedication'])
+
+    def test_searching_within_a_dedication_keeps_it(self):
+        body = self.client.get(reverse('search'),
+                               {'dedication': 'The Prophet'}).content.decode()
+        self.assertIn('name="dedication" value="The Prophet"', body)

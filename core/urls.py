@@ -20,6 +20,10 @@ urlpatterns = [
     path('browse/', views.browse, name='browse'),
     path('poets/', views.poets, name='poets'),
     path('categories/', views.categories, name='categories'),
+    path('dedications/', views.dedications, name='dedications'),
+    # `path` rather than `slug`: a name may carry punctuation, and this
+    # matches the poet route above it.
+    path('dedication/<path:name>/', views.dedication, name='dedication'),
     path('collections/', views.collections, name='collections'),
     path('collection/<slug:slug>/', views.collection, name='collection'),
     path('search/', views.search, name='search'),

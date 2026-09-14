@@ -5,6 +5,7 @@
     <input id="facet-q" type="search" name="q" dir="auto" value="{{ query }}" placeholder="Title, line or author" class="input">
     {% if lang_filter %}<input type="hidden" name="lang" value="{{ lang_filter }}">{% endif %}
     {% if author_filter %}<input type="hidden" name="author" value="{{ author_filter }}">{% endif %}
+    {% if dedication_filter %}<input type="hidden" name="dedication" value="{{ dedication_filter }}">{% endif %}
     {% comment %} One hidden field per chosen tag, so searching within a
     narrowed set keeps the narrowing. {% endcomment %}
     {% for name in tag_filters %}<input type="hidden" name="tag" value="{{ name }}">{% endfor %}
@@ -48,6 +49,21 @@
     <p class="text-sm text-stone-500">No poet is named in these results.</p>
     {% endif %}
 </div>
+
+{% if all_dedications %}
+<div class="card p-4">
+    <h2 class="eyebrow mb-2">In praise of</h2>
+    <ul class="space-y-0.5 max-h-60 overflow-y-auto thin-scroll">
+        {% for entry in all_dedications %}
+        {% if entry.name|lower == dedication_filter|lower %}
+        <li><a href="?{{ qs_without_dedication }}" class="facet-on" title="Remove this filter"><span dir="auto">{{ entry.name }}</span><span class="facet-count">{{ entry.n }} &times;</span></a></li>
+        {% else %}
+        <li><a href="?{{ qs_without_dedication }}{% if qs_without_dedication %}&amp;{% endif %}dedication={{ entry.name|urlencode }}" class="facet"><span dir="auto">{{ entry.name }}</span><span class="facet-count">{{ entry.n }}</span></a></li>
+        {% endif %}
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
 
 <div class="card p-4">
     <h2 class="eyebrow">Tags</h2>

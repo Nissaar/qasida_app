@@ -9,8 +9,8 @@ from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from .forms import QasidaForm
-from .models import (Collection, Favourite, Poet, Qasida, ReadingHistory,
-                     Suggestion, Tag)
+from .models import (Collection, Dedication, Favourite, Poet, Qasida,
+                     ReadingHistory, Suggestion, Tag)
 from .export import LAYERS, available_layers
 from .pdf import build_pdf, filename_for
 from .search import normalize
@@ -77,6 +77,7 @@ def _read_filters(request):
         'q': request.GET.get('q', '').strip(),
         'lang': request.GET.get('lang', '').strip(),
         'author': request.GET.get('author', '').strip(),
+        'dedication': request.GET.get('dedication', '').strip(),
         'tags': tags,
     }
 
@@ -139,6 +140,8 @@ def _apply_filters(request, filters, skip=()):
         qasidas = qasidas.filter(language__iexact=filters['lang'])
     if filters['author'] and 'author' not in skip:
         qasidas = qasidas.filter(author__name__iexact=filters['author'])
+    if filters['dedication'] and 'dedication' not in skip:
+        qasidas = qasidas.filter(dedicated_to__name__iexact=filters['dedication'])
     if filters['tags'] and 'tag' not in skip:
         # ANDed, and each as its own join: a single join with two conditions
         # asks for one tag that is both things at once, which nothing is.
@@ -168,6 +171,13 @@ def _author_facets(scope, limit=AUTHOR_FACET_LIMIT):
             .order_by('-n', 'name')[:limit])
 
 
+def _dedication_facets(scope, limit=AUTHOR_FACET_LIMIT):
+    """Who the works in `scope` are written in praise of, most honoured first."""
+    return (Dedication.objects.filter(qasidas__in=scope)
+            .annotate(n=Count('qasidas', distinct=True))
+            .order_by('-n', 'name')[:limit])
+
+
 def _language_facets(scope):
     return (scope.exclude(language='')
             .values('language')
@@ -179,7 +189,7 @@ def _listing(request, heading):
     """Shared paginated listing with scoped facets, used for browsing and searching."""
     filters = _read_filters(request)
     has_filters = bool(filters['q'] or filters['lang'] or filters['author']
-                       or filters['tags'])
+                       or filters['dedication'] or filters['tags'])
 
     results = (_apply_filters(request, filters)
                .select_related('author', 'dedicated_to')
@@ -201,6 +211,7 @@ def _listing(request, heading):
     # its counts are taken with the author filter lifted, and each number
     # answers "how many if I pick this poet instead".
     author_scope = _apply_filters(request, filters, skip=('author',))
+    dedication_scope = _apply_filters(request, filters, skip=('dedication',))
 
     active_tags = [{
         'name': name,
@@ -217,16 +228,19 @@ def _listing(request, heading):
         'tag_filters': filters['tags'],
         'active_tags': active_tags,
         'author_filter': filters['author'],
+        'dedication_filter': filters['dedication'],
         'has_filters': has_filters,
         'querystring': without(),
         'qs_without_lang': without('lang'),
         'qs_without_author': without('author'),
+        'qs_without_dedication': without('dedication'),
         'qs_without_q': without('q'),
         'tag_groups': _grouped_tag_facets(_tag_facets(tag_scope), filters['tags'], request),
         'all_languages': _language_facets(language_scope),
         'all_authors': _author_facets(author_scope),
         'author_total': Poet.objects.filter(qasidas__in=author_scope).distinct().count(),
         'author_shown': AUTHOR_FACET_LIMIT,
+        'all_dedications': _dedication_facets(dedication_scope),
     }
     return render(request, 'core/listing.html', context)
 
@@ -496,6 +510,39 @@ def poets(request):
         'poets': entries,
         'total_poets': entries.count(),
         'unattributed': scope.filter(author__isnull=True).count(),
+    })
+
+
+def dedications(request):
+    """
+    Everyone the library's works are written in praise of.
+
+    Much of this repertoire is grouped by whom it honours rather than by who
+    wrote it, which is a way in the site did not offer until now.
+    """
+    scope = _visible(request)
+    entries = (Dedication.objects.filter(qasidas__in=scope)
+               .annotate(n=Count('qasidas', distinct=True))
+               .order_by('-n', 'name'))
+    return render(request, 'core/dedications.html', {
+        'dedications': entries,
+        'total_dedications': entries.count(),
+        'undedicated': scope.filter(dedicated_to__isnull=True).count(),
+    })
+
+
+def dedication(request, name):
+    """Everything written in praise of one person."""
+    honoured = get_object_or_404(Dedication, name__iexact=name)
+    works = (_visible(request).filter(dedicated_to=honoured)
+             .select_related('author', 'dedicated_to')
+             .prefetch_related('tags', 'images')
+             .order_by('title'))
+    paginator = Paginator(works, PAGE_SIZE)
+    return render(request, 'core/dedication.html', {
+        'dedication': honoured,
+        'page_obj': paginator.get_page(request.GET.get('page')),
+        'total': paginator.count,
     })
 
 
