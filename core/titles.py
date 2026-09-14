@@ -57,7 +57,7 @@ def _split_scripts(text):
 
 def split_title(raw):
     """
-    Return (title, arabic_title, author) for a source title string.
+    Return (title, native_title, author) for a source title string.
 
     A title with nothing to separate comes back as-is with the other two fields
     empty, so plain titles from the other sources pass through untouched.

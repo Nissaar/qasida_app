@@ -891,7 +891,7 @@ def scrape_damas(website):
         stats['seen'] += 1
         link = post.get('link') or ''
         raw_title = _clean_title(post.get('title', {}).get('rendered', ''))
-        title, arabic_title, author = split_title(raw_title)
+        title, native_title, author = split_title(raw_title)
         title = title or 'Unknown Title'
 
         if not link:
@@ -996,7 +996,7 @@ def scrape_damas(website):
 
         qasida = Qasida.objects.create(
             title=title,
-            arabic_title=arabic_title,
+            native_title=native_title,
             # A name from a source becomes a record of that poet, reusing
             # one we already hold rather than repeating the name per work.
             author=Poet.named(author),
@@ -1146,11 +1146,11 @@ def scrape_midhah(website, limit=None):
         code = (composition.get('inLanguage') or '').strip().lower()
         language = MIDHAH_LANGUAGES.get(code, code.title() or 'Urdu')
 
-        title, arabic_title, author = split_title(_clean_title(composition.get('name', '')))
+        title, native_title, author = split_title(_clean_title(composition.get('name', '')))
 
         qasida = Qasida.objects.create(
             title=title or 'Untitled',
-            arabic_title=arabic_title,
+            native_title=native_title,
             author=Poet.named(poet or author),
             language=language,
             lyrics=lyrics,
@@ -1312,11 +1312,11 @@ def scrape_generic(website, limit=None):
             stats['nothing_found'] += 1
             continue
 
-        title, arabic_title, author = split_title(_clean_title(work['title']))
+        title, native_title, author = split_title(_clean_title(work['title']))
         language = work['language'] or ('Arabic' if _arabic_len(work['lyrics']) > 40 else '')
         qasida = Qasida.objects.create(
             title=(title or 'Untitled')[:200],
-            arabic_title=arabic_title[:200],
+            native_title=native_title[:200],
             author=Poet.named((work['author'] or author)[:200]),
             language=(language or 'Unknown')[:50],
             lyrics=work['lyrics'],
@@ -1458,7 +1458,7 @@ def scrape_wayback(website, limit=None, refresh=False):
             stats['nothing_found'] += 1
             continue
 
-        title, arabic_title, author = split_title(_clean_title(work['title']))
+        title, native_title, author = split_title(_clean_title(work['title']))
         language = work['language'] or ('Arabic' if _arabic_len(work['lyrics']) > 40 else 'Unknown')
 
         if existing is not None:
@@ -1478,7 +1478,7 @@ def scrape_wayback(website, limit=None, refresh=False):
 
         qasida = Qasida.objects.create(
             title=(title or 'Untitled')[:200],
-            arabic_title=arabic_title[:200],
+            native_title=native_title[:200],
             author=Poet.named((work['author'] or author)[:200]),
             language=language[:50],
             lyrics=work['lyrics'],

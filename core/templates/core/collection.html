@@ -8,8 +8,8 @@
 
 <header class="mb-6">
     <h1 dir="auto" class="text-2xl sm:text-3xl font-bold tracking-tight text-brand-900 dark:text-brand-100">{{ collection.name }}</h1>
-    {% if collection.arabic_name %}
-    <p dir="rtl" lang="ar" class="font-naskh text-2xl text-brand-700 dark:text-brand-300 mt-1">{{ collection.arabic_name }}</p>
+    {% if collection.native_name %}
+    <p dir="rtl" lang="ar" class="font-naskh text-2xl text-brand-700 dark:text-brand-300 mt-1">{{ collection.native_name }}</p>
     {% endif %}
     <p class="text-sm text-stone-500 dark:text-stone-400 mt-1.5 tabular-nums">{{ total }} part{{ total|pluralize }}, in reading order</p>
     {% if collection.description %}
@@ -27,8 +27,8 @@
             <a href="{{ part.get_absolute_url }}" dir="auto" class="block font-medium text-brand-800 dark:text-brand-200 hover:underline truncate">
                 {{ part.title|default:"Untitled" }}
             </a>
-            {% if part.arabic_title %}
-            <span dir="rtl" lang="ar" class="block font-naskh text-sm text-stone-600 dark:text-stone-300">{{ part.arabic_title }}</span>
+            {% if part.native_title %}
+            <span dir="rtl" lang="{{ part.language_code }}" class="block font-naskh text-sm text-stone-600 dark:text-stone-300">{{ part.native_title }}</span>
             {% endif %}
         </span>
         {% if part.media.exists %}<span class="chip shrink-0">recording</span>{% endif %}

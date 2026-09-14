@@ -117,7 +117,7 @@ class QasidaAdmin(LibraryAdmin):
     actions = ['approve_for_display', 'send_back_for_review', 'reject_qasidas',
                'enrich_selected', 'enrich_selected_overwrite',
                'add_to_collection', 'remove_from_collection']
-    search_fields = ('title', 'arabic_title', 'author__name', 'dedicated_to__name',
+    search_fields = ('title', 'native_title', 'author__name', 'dedicated_to__name',
                      'lyrics', 'transliteration')
     list_select_related = ('source_site', 'collection', 'dedicated_to', 'author')
     # Searchable dropdowns with a + beside them: pick an existing value, or add
@@ -362,8 +362,8 @@ class CollectionPartInline(admin.TabularInline):
 
 @admin.register(Collection)
 class CollectionAdmin(LibraryAdmin):
-    list_display = ('name', 'arabic_name', 'part_count')
-    search_fields = ('name', 'arabic_name')
+    list_display = ('name', 'native_name', 'part_count')
+    search_fields = ('name', 'native_name')
     prepopulated_fields = {'slug': ('name',)}
     inlines = [CollectionPartInline]
 
@@ -492,8 +492,8 @@ class DedicationAdmin(LibraryAdmin):
     they were editing.
     """
 
-    list_display = ('name', 'arabic_name', 'qasida_count')
-    search_fields = ('name', 'arabic_name')
+    list_display = ('name', 'native_name', 'qasida_count')
+    search_fields = ('name', 'native_name')
     ordering = ('name',)
 
     def get_queryset(self, request):
@@ -515,8 +515,8 @@ class PoetAdmin(LibraryAdmin):
     a misspelling can be fixed once rather than on every work that repeats it.
     """
 
-    list_display = ('name', 'arabic_name', 'qasida_count')
-    search_fields = ('name', 'arabic_name', 'notes')
+    list_display = ('name', 'native_name', 'qasida_count')
+    search_fields = ('name', 'native_name', 'notes')
     ordering = ('name',)
     list_per_page = 50
 

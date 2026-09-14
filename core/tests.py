@@ -916,7 +916,7 @@ class LiveSearchTest(TestCase):
     def setUp(self):
         self.url = reverse('search_suggest')
         self.qasida = make_qasida(title='Findable Work', author='Some Poet',
-                                  language='Arabic', arabic_title='مكتبة القصائد')
+                                  language='Arabic', native_title='مكتبة القصائد')
 
     def test_it_answers_json(self):
         response = self.client.get(self.url, {'q': 'findable'})
@@ -1366,7 +1366,7 @@ class SuggestionFieldsTest(TestCase):
 
     def setUp(self):
         self.qasida = make_qasida(
-            title='Old Title', arabic_title='عنوان', author='Old Poet',
+            title='Old Title', native_title='عنوان', author='Old Poet',
             language='Urdu', lyrics='line one\nline two',
             transliteration='latin one', translation='meaning one',
             translation_origin=Qasida.TRANSLATION_MACHINE)
@@ -1377,7 +1377,7 @@ class SuggestionFieldsTest(TestCase):
         data = {
             'email': 'reader@example.com',
             'suggested_title': self.qasida.title,
-            'suggested_arabic_title': self.qasida.arabic_title,
+            'suggested_native_title': self.qasida.native_title,
             'suggested_author': self.qasida.author,
             'suggested_language': self.qasida.language,
             'suggested_lyrics': self.qasida.lyrics,
@@ -1413,7 +1413,7 @@ class SuggestionFieldsTest(TestCase):
     def test_every_part_of_a_record_can_be_corrected(self):
         self.client.post(self.url, self.form(
             suggested_title='New Title',
-            suggested_arabic_title='عنوان جديد',
+            suggested_native_title='عنوان جديد',
             suggested_author='New Poet',
             suggested_language='Arabic',
             suggested_lyrics='fixed one\nfixed two',
@@ -1648,7 +1648,7 @@ class DedicationTest(TestCase):
 
     def setUp(self):
         self.prophet = Dedication.objects.create(name='The Prophet',
-                                                 arabic_name='النبي')
+                                                 native_name='النبي')
 
     def test_it_shows_on_the_page(self):
         qasida = make_qasida(title='Praise', author='A Poet',
@@ -1657,7 +1657,7 @@ class DedicationTest(TestCase):
         self.assertIn('The Prophet', body)
         self.assertIn('Dedicated to', body)
 
-    def test_the_arabic_name_shows_beside_it(self):
+    def test_the_native_name_shows_beside_it(self):
         qasida = make_qasida(title='Praise', dedicated_to=self.prophet)
         body = self.client.get(qasida.get_absolute_url()).content.decode()
         self.assertIn('النبي', body)
@@ -1669,7 +1669,7 @@ class DedicationTest(TestCase):
 
     def test_it_is_searchable_by_either_name(self):
         shaykh = Dedication.objects.create(name='Shaykh Abdul Qadir',
-                                           arabic_name='الشيخ عبد القادر')
+                                           native_name='الشيخ عبد القادر')
         make_qasida(title='Praise', dedicated_to=shaykh)
         for term in ('abdul qadir', 'عبد القادر'):
             response = self.client.get(reverse('search'), {'q': term})
@@ -1717,7 +1717,7 @@ class DedicationTest(TestCase):
         self.assertEqual(Dedication.objects.count(), 1)
 
     def editor_post(self, **overrides):
-        data = {'title': 'Praise', 'arabic_title': '', 'author': '', 'language': '',
+        data = {'title': 'Praise', 'native_title': '', 'author': '', 'language': '',
                 'text_quality': 'ok', 'lyrics': 'x', 'transliteration': '',
                 'translation': '', 'translation_origin': '', 'tags_text': '',
                 'dedicated_to': '', 'new_dedication': ''}
@@ -1946,7 +1946,7 @@ class PoetRecordTest(TestCase):
 
     def test_the_poet_is_searchable_by_either_name(self):
         poet = Poet.named('Imam al-Busiri')
-        poet.arabic_name = 'الإمام البوصيري'
+        poet.native_name = 'الإمام البوصيري'
         poet.save()
         make_qasida(title='Findable', author=poet)
         # The search document is built on save, so the work needs re-saving
@@ -1974,7 +1974,7 @@ class PoetEditingTest(TestCase):
         self.qasida = make_qasida(title='Editable', author=None)
 
     def editor_post(self, **overrides):
-        data = {'title': 'Editable', 'arabic_title': '', 'language': '',
+        data = {'title': 'Editable', 'native_title': '', 'language': '',
                 'text_quality': 'ok', 'lyrics': 'x', 'transliteration': '',
                 'translation': '', 'translation_origin': '', 'tags_text': '',
                 'dedicated_to': '', 'new_dedication': '',
@@ -2212,3 +2212,70 @@ class TagAxisWidgetTest(TestCase):
         self.assertIn('name="tags_bahr"', body)
         # And no longer the two-pane box.
         self.assertNotIn('SelectFilter2', body)
+
+
+class NativeScriptTest(TestCase):
+    """
+    Urdu and Arabic share a script but not a face.
+
+    Urdu is set in Nastaliq, Arabic in Naskh, and each looks wrong in the
+    other's. The face follows the lang attribute, so the attribute has to
+    carry a tag a browser understands - "urdu" is not one, and a browser given
+    it silently falls back, which is what was happening to 3,300 of the 3,800
+    works here.
+    """
+
+    def test_a_language_name_becomes_a_language_tag(self):
+        from .models import language_code
+        self.assertEqual(language_code('Urdu'), 'ur')
+        self.assertEqual(language_code('Arabic'), 'ar')
+        self.assertEqual(language_code('persian'), 'fa')
+        self.assertEqual(language_code('  URDU  '), 'ur')
+
+    def test_an_unknown_language_yields_no_tag(self):
+        """Better no tag than a wrong one; the default face then applies."""
+        from .models import language_code
+        for value in ('Unknown', '', None, 'Klingon'):
+            self.assertEqual(language_code(value), '')
+
+    def test_a_work_reports_its_own_tag(self):
+        self.assertEqual(make_qasida(language='Urdu').language_code, 'ur')
+        self.assertEqual(make_qasida(title='B', language='Arabic').language_code, 'ar')
+
+    def test_an_urdu_page_marks_its_verse_as_urdu(self):
+        qasida = make_qasida(title='Urdu Work', language='Urdu',
+                             native_title='عنوان', lyrics='verse one')
+        body = self.client.get(qasida.get_absolute_url()).content.decode()
+        self.assertIn('lang="ur"', body)
+        self.assertNotIn('lang="urdu"', body)
+
+    def test_an_arabic_page_marks_its_verse_as_arabic(self):
+        qasida = make_qasida(title='Arabic Work', language='Arabic',
+                             native_title='عنوان', lyrics='verse one')
+        body = self.client.get(qasida.get_absolute_url()).content.decode()
+        self.assertIn('lang="ar"', body)
+
+    def test_the_native_title_is_kept_and_shown(self):
+        """The column is script-neutral: it held Urdu all along."""
+        qasida = make_qasida(title='Titled', language='Urdu',
+                             native_title='اردو عنوان')
+        self.assertEqual(Qasida.objects.get(pk=qasida.pk).native_title,
+                         'اردو عنوان')
+        body = self.client.get(qasida.get_absolute_url()).content.decode()
+        self.assertIn('اردو عنوان', body)
+
+    def test_the_native_title_is_searchable(self):
+        make_qasida(title='Findable', language='Urdu', native_title='اردو عنوان')
+        response = self.client.get(reverse('search'), {'q': 'اردو عنوان'})
+        self.assertEqual([w.title for w in response.context['page_obj']],
+                         ['Findable'])
+
+    def test_a_reader_can_correct_the_native_title(self):
+        qasida = make_qasida(title='Wrong', language='Urdu', native_title='پرانا')
+        self.client.post(qasida.get_absolute_url(), {
+            'email': 'reader@example.com',
+            'suggested_native_title': 'نیا عنوان',
+        })
+        Suggestion.objects.get().apply()
+        qasida.refresh_from_db()
+        self.assertEqual(qasida.native_title, 'نیا عنوان')

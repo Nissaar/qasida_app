@@ -27,8 +27,8 @@
                     <h1 dir="auto" class="font-display text-3xl sm:text-4xl leading-tight text-brand-900 dark:text-brand-100">
                         {{ qasida.title|default:"Untitled qasida" }}
                     </h1>
-                    {% if qasida.arabic_title %}
-                    <p dir="rtl" lang="ar" class="font-naskh text-2xl text-brand-700 dark:text-brand-300 mt-1 leading-relaxed">{{ qasida.arabic_title }}</p>
+                    {% if qasida.native_title %}
+                    <p dir="rtl" lang="{{ qasida.language_code }}" class="font-naskh text-2xl text-brand-700 dark:text-brand-300 mt-1 leading-relaxed">{{ qasida.native_title }}</p>
                     {% endif %}
                     {% if qasida.author %}
                     <p dir="auto" class="text-sm text-stone-500 dark:text-stone-400 mt-2">{{ qasida.author }}</p>
@@ -189,7 +189,7 @@
             <div class="divide-y divide-stone-100 dark:divide-stone-800">
                 {% for row in qasida|stanza_rows %}
                 <div class="py-5 first:pt-0 last:pb-0">
-                    <div dir="auto" lang="{{ qasida.language|lower }}" class="prose-lyrics">{{ row.original }}</div>
+                    <div dir="auto" lang="{{ qasida.language_code }}" class="prose-lyrics">{{ row.original }}</div>
                     {% if row.latin %}
                     <div dir="ltr" class="latin-block mt-2.5 max-w-3xl whitespace-pre-line text-sm sm:text-base text-stone-500 dark:text-stone-400 leading-relaxed">{{ row.latin }}</div>
                     {% endif %}
@@ -319,8 +319,8 @@
                         <input id="s-title" type="text" name="suggested_title" dir="auto" value="{{ qasida.title }}" class="input">
                     </div>
                     <div>
-                        <label for="s-arabic-title" class="block text-sm font-medium mb-1">Title in Arabic script</label>
-                        <input id="s-arabic-title" type="text" name="suggested_arabic_title" dir="rtl" lang="ar" value="{{ qasida.arabic_title }}" class="input font-naskh">
+                        <label for="s-native-title" class="block text-sm font-medium mb-1">Title in its own script</label>
+                        <input id="s-native-title" type="text" name="suggested_native_title" dir="rtl" lang="{{ qasida.language_code }}" value="{{ qasida.native_title }}" class="input font-naskh">
                     </div>
                     <div>
                         <label for="s-author" class="block text-sm font-medium mb-1">Poet</label>
@@ -378,8 +378,8 @@
                     <dt class="text-stone-500 dark:text-stone-400">Dedicated to</dt>
                     <dd class="font-medium text-right">
                         <span dir="auto">{{ qasida.dedicated_to.name }}</span>
-                        {% if qasida.dedicated_to.arabic_name %}
-                        <span dir="rtl" lang="ar" class="block font-naskh text-brand-700 dark:text-brand-300">{{ qasida.dedicated_to.arabic_name }}</span>
+                        {% if qasida.dedicated_to.native_name %}
+                        <span dir="rtl" lang="{{ qasida.language_code }}" class="block font-naskh text-brand-700 dark:text-brand-300">{{ qasida.dedicated_to.native_name }}</span>
                         {% endif %}
                     </dd>
                 </div>

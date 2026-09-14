@@ -14,8 +14,8 @@
     {% for item in collections %}
     <a href="{% url 'collection' item.slug %}" class="tile">
         <span dir="auto" class="font-semibold text-brand-800 dark:text-brand-200">{{ item.name }}</span>
-        {% if item.arabic_name %}
-        <span dir="rtl" lang="ar" class="font-naskh text-base text-stone-600 dark:text-stone-300">{{ item.arabic_name }}</span>
+        {% if item.native_name %}
+        <span dir="rtl" lang="ar" class="font-naskh text-base text-stone-600 dark:text-stone-300">{{ item.native_name }}</span>
         {% endif %}
         <span class="tile-count">{{ item.n }} part{{ item.n|pluralize }}</span>
     </a>

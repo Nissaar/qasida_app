@@ -26,8 +26,8 @@
                     <a href="{{ qasida.get_absolute_url }}" class="text-brand-800 dark:text-brand-200 hover:underline">
                         {{ qasida.title|default:"Untitled qasida" }}</a>
                 </h2>
-                {% if qasida.arabic_title %}
-                <p dir="rtl" lang="ar" class="font-naskh text-base text-stone-600 dark:text-stone-300 mt-0.5">{{ qasida.arabic_title }}</p>
+                {% if qasida.native_title %}
+                <p dir="rtl" lang="{{ qasida.language_code }}" class="font-naskh text-base text-stone-600 dark:text-stone-300 mt-0.5">{{ qasida.native_title }}</p>
                 {% endif %}
                 <p class="text-xs text-stone-500 dark:text-stone-400 mt-1">
                     {% if qasida.author %}<span dir="auto">{{ qasida.author }}</span> &middot; {% endif %}{{ qasida.language|default:"Unknown" }}

@@ -70,8 +70,8 @@ def _document_html(qasida, layers):
 
     parts = ['<div class="titleblock">']
     parts.append(f'<h1 dir="{_direction(qasida.title)}">{escape(qasida.title or "Untitled")}</h1>')
-    if qasida.arabic_title:
-        parts.append(f'<h2 dir="rtl">{escape(qasida.arabic_title)}</h2>')
+    if qasida.native_title:
+        parts.append(f'<h2 dir="rtl">{escape(qasida.native_title)}</h2>')
     if qasida.author_id:
         poet = qasida.author.name
         parts.append(f'<p class="byline" dir="{_direction(poet)}">{escape(poet)}</p>')

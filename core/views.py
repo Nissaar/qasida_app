@@ -339,7 +339,7 @@ def search_suggest(request):
         for qasida in matches.order_by('title')[:SUGGEST_LIMIT]:
             results.append({
                 'title': qasida.title or 'Untitled qasida',
-                'arabic_title': qasida.arabic_title,
+                'native_title': qasida.native_title,
                 'author': qasida.author.name if qasida.author_id else '',
                 'language': qasida.language,
                 'url': qasida.get_absolute_url(),

@@ -139,7 +139,7 @@ class Collection(models.Model):
     this gives them a common parent and an order to be read in.
     """
     name = models.CharField(max_length=200, unique=True)
-    arabic_name = models.CharField(max_length=200, blank=True)
+    native_name = models.CharField(max_length=200, blank=True)
     slug = models.SlugField(max_length=220, unique=True)
     description = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -167,9 +167,9 @@ class Poet(models.Model):
     difference is not small.
     """
     name = models.CharField(max_length=200, unique=True)
-    arabic_name = models.CharField(
+    native_name = models.CharField(
         max_length=200, blank=True,
-        help_text="The same name in Arabic script, where there is one.")
+        help_text="The same name in its own script, where there is one.")
     notes = models.TextField(
         blank=True, help_text="Anything worth recording: dates, order, region.")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -207,9 +207,9 @@ class Dedication(models.Model):
     answered at all.
     """
     name = models.CharField(max_length=200, unique=True)
-    arabic_name = models.CharField(
+    native_name = models.CharField(
         max_length=200, blank=True,
-        help_text="The same name in Arabic script, where there is one.")
+        help_text="The same name in its own script, where there is one.")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -217,6 +217,34 @@ class Dedication(models.Model):
 
     def __str__(self):
         return self.name
+
+
+# The stored language is free text from the sources - "Urdu", "Arabic" - which
+# is not a language tag. A browser given lang="urdu" ignores it, and with it any
+# chance of choosing a font that suits the script. That matters here: Urdu is
+# set in Nastaliq and Arabic in Naskh, both written in the Arabic script, and
+# each looks wrong in the other's face. This library is 3,300 Urdu works to 470
+# Arabic, so the common case was the one being mis-set.
+LANGUAGE_CODES = {
+    'arabic': 'ar',
+    'urdu': 'ur',
+    'persian': 'fa',
+    'farsi': 'fa',
+    'punjabi': 'pa',
+    'sindhi': 'sd',
+    'pashto': 'ps',
+    'english': 'en',
+    'turkish': 'tr',
+    'french': 'fr',
+    'german': 'de',
+    'spanish': 'es',
+    'swedish': 'sv',
+}
+
+
+def language_code(language):
+    """A BCP-47 tag for a free-text language name, or '' if unrecognised."""
+    return LANGUAGE_CODES.get((language or '').strip().lower(), '')
 
 
 class QasidaQuerySet(models.QuerySet):
@@ -236,7 +264,7 @@ class Qasida(models.Model):
     # copied around; a title written only in Arabic script has no Latin text
     # to build from and falls back to the id.
     slug = models.SlugField(max_length=220, unique=True, blank=True)
-    arabic_title = models.CharField(max_length=200, blank=True)
+    native_title = models.CharField(max_length=200, blank=True)
     author = models.ForeignKey(
         'Poet', null=True, blank=True, on_delete=models.SET_NULL,
         related_name='qasidas',
@@ -332,6 +360,11 @@ class Qasida(models.Model):
 
     objects = QasidaQuerySet.as_manager()
 
+    @property
+    def language_code(self):
+        """This work's language as a tag a browser understands."""
+        return language_code(self.language)
+
     def build_slug(self):
         """
         A readable, unique URL fragment for this work.
@@ -367,12 +400,12 @@ class Qasida(models.Model):
         # related row it has no use for.
         dedication = ''
         if self.dedicated_to_id:
-            dedication = f'{self.dedicated_to.name} {self.dedicated_to.arabic_name}'
+            dedication = f'{self.dedicated_to.name} {self.dedicated_to.native_name}'
         poet = ''
         if self.author_id:
-            poet = f'{self.author.name} {self.author.arabic_name}'
+            poet = f'{self.author.name} {self.author.native_name}'
         self.search_text = build_document(
-            self.title, self.arabic_title, poet, dedication,
+            self.title, self.native_title, poet, dedication,
             self.lyrics, self.transliteration, self.translation)
         update_fields = kwargs.get('update_fields')
         if update_fields:
@@ -473,7 +506,7 @@ class Suggestion(models.Model):
     # differs from the record is stored, so an editor reviewing one of these
     # sees the change rather than a copy of the whole work.
     suggested_title = models.CharField(max_length=200, blank=True)
-    suggested_arabic_title = models.CharField(max_length=200, blank=True)
+    suggested_native_title = models.CharField(max_length=200, blank=True)
     suggested_author = models.CharField(max_length=200, blank=True)
     suggested_language = models.CharField(max_length=50, blank=True)
     suggested_lyrics = models.TextField(blank=True)
@@ -495,7 +528,7 @@ class Suggestion(models.Model):
     # call it when showing an editor what would change.
     FIELDS = (
         ('suggested_title', 'title', 'Title'),
-        ('suggested_arabic_title', 'arabic_title', 'Title in Arabic script'),
+        ('suggested_native_title', 'native_title', 'Title in its own script'),
         ('suggested_author', 'author', 'Poet'),
         ('suggested_language', 'language', 'Language'),
         ('suggested_lyrics', 'lyrics', 'Lyrics'),

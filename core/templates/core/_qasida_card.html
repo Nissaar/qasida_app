@@ -32,8 +32,8 @@
             {% endif %}
         </div>
 
-        {% if qasida.arabic_title %}
-        <p dir="rtl" lang="ar" class="font-naskh text-base text-stone-600 dark:text-stone-300 mt-0.5 leading-relaxed">{{ qasida.arabic_title }}</p>
+        {% if qasida.native_title %}
+        <p dir="rtl" lang="{{ qasida.language_code }}" class="font-naskh text-base text-stone-600 dark:text-stone-300 mt-0.5 leading-relaxed">{{ qasida.native_title }}</p>
         {% endif %}
 
         <p class="text-xs text-stone-500 dark:text-stone-400 mt-1.5">

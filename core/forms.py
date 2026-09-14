@@ -39,12 +39,12 @@ class QasidaForm(forms.ModelForm):
 
     class Meta:
         model = Qasida
-        fields = ['title', 'arabic_title', 'author', 'dedicated_to', 'language',
+        fields = ['title', 'native_title', 'author', 'dedicated_to', 'language',
                   'text_quality', 'lyrics', 'transliteration', 'translation',
                   'translation_origin']
         widgets = {
             'title': forms.TextInput(attrs={'class': INPUT_CLASS, 'dir': 'auto'}),
-            'arabic_title': forms.TextInput(attrs={'class': INPUT_CLASS, 'dir': 'rtl', 'lang': 'ar'}),
+            'native_title': forms.TextInput(attrs={'class': INPUT_CLASS, 'dir': 'rtl'}),
             'author': forms.Select(attrs={'class': INPUT_CLASS}),
             'dedicated_to': forms.Select(attrs={'class': INPUT_CLASS}),
             'language': forms.TextInput(attrs={'class': INPUT_CLASS}),

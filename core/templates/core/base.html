@@ -55,7 +55,7 @@
     </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Naskh+Arabic:wght@400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Naskh+Arabic:wght@400;500;700&family=Noto+Nastaliq+Urdu:wght@400;600&display=swap" rel="stylesheet">
 
     <style type="text/tailwindcss">
         @layer components {
@@ -131,6 +131,18 @@
         [hidden] { display: none !important; }
         summary::-webkit-details-marker { display: none; }
         summary.list-none { list-style: none; }
+        /* Urdu is set in Nastaliq, Arabic in Naskh. Both are written in the
+           Arabic script and each looks wrong in the other's face, so the face
+           follows the lang attribute rather than being chosen per template.
+           Nastaliq slopes down to the left and needs far more room between
+           lines than Naskh does, or the descenders of one line collide with
+           the next. */
+        :lang(ur) {
+            font-family: "Noto Nastaliq Urdu", "Noto Naskh Arabic", serif;
+        }
+        .prose-lyrics:lang(ur) { line-height: 2.9; }
+        .font-naskh:lang(ur) { font-family: "Noto Nastaliq Urdu", "Noto Naskh Arabic", serif; }
+
         /* Verse size, set on the account and applied to the whole page. */
         .lyrics-sm .prose-lyrics { font-size: 1rem; line-height: 2; }
         .lyrics-lg .prose-lyrics { font-size: 1.55rem; line-height: 2.35; }
@@ -409,12 +421,12 @@
                     title.textContent = row.title;
                     link.appendChild(title);
 
-                    if (row.arabic_title) {
+                    if (row.native_title) {
                         var arabic = document.createElement('span');
                         arabic.className = 'suggest-meta suggest-arabic';
                         arabic.setAttribute('dir', 'rtl');
                         arabic.setAttribute('lang', 'ar');
-                        arabic.textContent = row.arabic_title;
+                        arabic.textContent = row.native_title;
                         link.appendChild(arabic);
                     }
 

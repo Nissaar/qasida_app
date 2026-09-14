@@ -14,7 +14,7 @@ from core.titles import split_title
 
 
 class Command(BaseCommand):
-    help = "Split packed titles into title/arabic_title/author and rebuild search_text."
+    help = "Split packed titles into title/native_title/author and rebuild search_text."
 
     def add_arguments(self, parser):
         parser.add_argument('--titles', action='store_true',
@@ -31,18 +31,18 @@ class Command(BaseCommand):
             fields = ['search_text']
 
             if split_titles:
-                title, arabic_title, author = split_title(qasida.title)
+                title, native_title, author = split_title(qasida.title)
                 # Only rewrite when the parse actually separated something, so a
                 # plain title from another source is never damaged.
-                if (arabic_title or author) and title:
-                    if (qasida.title, qasida.arabic_title, qasida.author) != (title, arabic_title, author):
+                if (native_title or author) and title:
+                    if (qasida.title, qasida.native_title, qasida.author) != (title, native_title, author):
                         qasida.title = title
-                        qasida.arabic_title = arabic_title
+                        qasida.native_title = native_title
                         qasida.author = author or qasida.author
-                        fields += ['title', 'arabic_title', 'author']
+                        fields += ['title', 'native_title', 'author']
                         changed_titles += 1
 
-            document = build_document(qasida.title, qasida.arabic_title,
+            document = build_document(qasida.title, qasida.native_title,
                                       qasida.author, qasida.lyrics)
             if document != qasida.search_text or len(fields) > 1:
                 qasida.search_text = document
