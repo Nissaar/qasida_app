@@ -739,3 +739,40 @@ html, body { max-width: 100%; overflow-x: hidden; }
 @media (max-width: 767px) {
     .q-paginator-top { padding: 0 1rem .7rem; }
 }
+
+
+/* ---- phones, continued -----------------------------------------------
+ * These rules only began to apply once this stylesheet was loaded after
+ * Django's responsive.css; before that Django's own mobile rules, written
+ * for the stock layout rather than this one, won every conflict.
+ */
+@media (max-width: 767px) {
+    /* Django's select2 widgets size themselves from an inline style, which
+       overflows a narrow screen. */
+    .select2-container { width: 100% !important; max-width: 100%; }
+    .select2-container .select2-selection--multiple,
+    .select2-container .select2-selection--single { min-height: 2.5rem; }
+    /* The dropdown panel must not sit wider than the viewport. */
+    .select2-dropdown { max-width: calc(100vw - 1.5rem); }
+
+    /* A related-widget wrapper puts the + and pencil beside the field; on a
+       phone they belong under it, or the field is squeezed to nothing. */
+    .related-widget-wrapper { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+    .related-widget-wrapper > select,
+    .related-widget-wrapper > .select2-container { flex: 1 1 100%; }
+
+    /* Both sets of pagination controls wrap rather than overflow. */
+    .q-paginator-top, .paginator {
+        display: flex; flex-wrap: wrap; align-items: center; gap: .4rem;
+    }
+
+    /* Inline formsets are tables on desktop and unreadable at this width. */
+    .inline-group .tabular td, .inline-group .tabular th { white-space: normal; }
+    .inline-group .tabular { overflow-x: auto; }
+
+    /* The date/time shortcuts stack under their field instead of beside it. */
+    .form-row .datetime input { width: auto; max-width: 100%; }
+
+    /* Nothing may force the page itself sideways. */
+    #content, #content-main, .module, form { max-width: 100%; }
+}

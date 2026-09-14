@@ -167,12 +167,12 @@
         </div>
         <div class="panel-body sm:grid-cols-2">
             {% for entry in poets|slice:":6" %}
-            <a href="{% url 'poet' entry.author %}" class="panel-item flex items-center gap-3">
+            <a href="{% url 'poet' entry.name %}" class="panel-item flex items-center gap-3">
                 <span class="shrink-0 h-9 w-9 rounded-full bg-brand-100 dark:bg-brand-900 text-brand-800 dark:text-brand-200 grid place-items-center text-sm font-semibold">
-                    {{ entry.author|slice:":1"|upper }}
+                    {{ entry.name|slice:":1"|upper }}
                 </span>
                 <span class="min-w-0">
-                    <span dir="auto" class="block text-sm font-medium truncate">{{ entry.author }}</span>
+                    <span dir="auto" class="block text-sm font-medium truncate">{{ entry.name }}</span>
                     <span class="tile-count">{{ entry.n }} work{{ entry.n|pluralize }}</span>
                 </span>
             </a>

@@ -156,6 +156,46 @@ class Collection(models.Model):
         super().save(*args, **kwargs)
 
 
+class Poet(models.Model):
+    """
+    Someone who wrote a qasida.
+
+    A table of its own rather than a name typed onto each work, for the same
+    reason as Dedication: typed by hand, one poet arrives in several
+    spellings, and "everything by this poet" stops being a question anyone can
+    answer. This library holds some 360 of them across 3,800 works, so the
+    difference is not small.
+    """
+    name = models.CharField(max_length=200, unique=True)
+    arabic_name = models.CharField(
+        max_length=200, blank=True,
+        help_text="The same name in Arabic script, where there is one.")
+    notes = models.TextField(
+        blank=True, help_text="Anything worth recording: dates, order, region.")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('name',)
+
+    @classmethod
+    def named(cls, name):
+        """
+        The poet of this name, created if not already known.
+
+        None for a blank name, because most of this library names no poet at
+        all and an empty string is not a person. Matched without regard to
+        case, so a crawler meeting the same name capitalised differently does
+        not manufacture a second record of one person.
+        """
+        name = (name or '').strip()
+        if not name:
+            return None
+        return cls.objects.filter(name__iexact=name).first() or cls.objects.create(name=name)
+
+    def __str__(self):
+        return self.name
+
+
 class Dedication(models.Model):
     """
     Who a qasida is addressed to or written in praise of.
@@ -197,7 +237,10 @@ class Qasida(models.Model):
     # to build from and falls back to the id.
     slug = models.SlugField(max_length=220, unique=True, blank=True)
     arabic_title = models.CharField(max_length=200, blank=True)
-    author = models.CharField(max_length=200, blank=True)
+    author = models.ForeignKey(
+        'Poet', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='qasidas',
+        help_text="Who wrote it. Choose one, or add a new one with the +.")
     # Who the poem is addressed to or written in praise of - the Prophet, a
     # saint, a teacher. Distinct from the poet, and often the thing a reader
     # is actually looking for: much of this repertoire is grouped by whom it
@@ -325,8 +368,11 @@ class Qasida(models.Model):
         dedication = ''
         if self.dedicated_to_id:
             dedication = f'{self.dedicated_to.name} {self.dedicated_to.arabic_name}'
+        poet = ''
+        if self.author_id:
+            poet = f'{self.author.name} {self.author.arabic_name}'
         self.search_text = build_document(
-            self.title, self.arabic_title, self.author, dedication,
+            self.title, self.arabic_title, poet, dedication,
             self.lyrics, self.transliteration, self.translation)
         update_fields = kwargs.get('update_fields')
         if update_fields:
@@ -468,10 +514,13 @@ class Suggestion(models.Model):
         for field, target, label in self.FIELDS:
             proposed = getattr(self, field)
             if proposed.strip():
+                current = getattr(self.qasida, target)
                 listed.append({
                     'label': label,
                     'field': target,
-                    'current': getattr(self.qasida, target),
+                    # Rendered beside the text the reader typed, so a relation
+                    # is shown by its name rather than as an object.
+                    'current': '' if current is None else str(current),
                     'proposed': proposed,
                 })
         return listed
@@ -480,7 +529,13 @@ class Suggestion(models.Model):
         """Fold this suggestion into its qasida and mark it approved."""
         for field, target, _ in self.FIELDS:
             proposed = getattr(self, field)
-            if proposed.strip():
+            if not proposed.strip():
+                continue
+            # The poet is a relation; a reader proposes a name, which becomes
+            # a record of that poet if we do not already hold one.
+            if target == 'author':
+                setattr(self.qasida, target, Poet.named(proposed))
+            else:
                 setattr(self.qasida, target, proposed)
 
         # A translation a reader has corrected is no longer the machine's, and

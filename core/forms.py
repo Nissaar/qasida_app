@@ -4,7 +4,7 @@ from django.contrib.auth.forms import (AuthenticationForm, PasswordChangeForm,
                                        PasswordResetForm, SetPasswordForm,
                                        UserCreationForm)
 
-from .models import Dedication, Favourite, Qasida, ReaderProfile, Tag
+from .models import Dedication, Favourite, Poet, Qasida, ReaderProfile, Tag
 
 # The shell defines .input as a Tailwind component class, so widgets reuse it
 # instead of restating utilities (and inheriting dark mode for free).
@@ -30,6 +30,12 @@ class QasidaForm(forms.ModelForm):
         help_text='Fill this in only if the name you want is not in the list above.',
         widget=forms.TextInput(attrs={'class': INPUT_CLASS, 'dir': 'auto'}),
     )
+    new_poet = forms.CharField(
+        required=False,
+        label='…or add a new poet',
+        help_text='Fill this in only if the poet you want is not in the list above.',
+        widget=forms.TextInput(attrs={'class': INPUT_CLASS, 'dir': 'auto'}),
+    )
 
     class Meta:
         model = Qasida
@@ -39,7 +45,7 @@ class QasidaForm(forms.ModelForm):
         widgets = {
             'title': forms.TextInput(attrs={'class': INPUT_CLASS, 'dir': 'auto'}),
             'arabic_title': forms.TextInput(attrs={'class': INPUT_CLASS, 'dir': 'rtl', 'lang': 'ar'}),
-            'author': forms.TextInput(attrs={'class': INPUT_CLASS, 'dir': 'auto'}),
+            'author': forms.Select(attrs={'class': INPUT_CLASS}),
             'dedicated_to': forms.Select(attrs={'class': INPUT_CLASS}),
             'language': forms.TextInput(attrs={'class': INPUT_CLASS}),
             'text_quality': forms.Select(attrs={'class': INPUT_CLASS}),
@@ -67,6 +73,10 @@ class QasidaForm(forms.ModelForm):
             # the unique constraint.
             existing = Dedication.objects.filter(name__iexact=name).first()
             cleaned['dedicated_to'] = existing or Dedication.objects.create(name=name)
+
+        poet = (cleaned.get('new_poet') or '').strip()
+        if poet:
+            cleaned['author'] = Poet.named(poet)
         return cleaned
 
     def save(self, commit=True):

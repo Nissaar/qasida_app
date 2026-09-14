@@ -21,7 +21,7 @@ from PIL import Image, ImageFilter, ImageOps
 
 from .extract import extract_work
 from .fetching import BotChallenge, HEADERS, RateLimited, USER_AGENT, polite_get
-from .models import Qasida, QasidaImage, Tag, SourceWebsite
+from .models import Poet, Qasida, QasidaImage, Tag, SourceWebsite
 from .titles import split_title
 
 ARABIC_RE = re.compile(r'[؀-ۿ]')
@@ -997,7 +997,9 @@ def scrape_damas(website):
         qasida = Qasida.objects.create(
             title=title,
             arabic_title=arabic_title,
-            author=author,
+            # A name from a source becomes a record of that poet, reusing
+            # one we already hold rather than repeating the name per work.
+            author=Poet.named(author),
             lyrics=lyrics if not scan_only else _strip_viewer_chrome(
                 soup.get_text(separator='\n', strip=True)),
             source_url=link,
@@ -1149,7 +1151,7 @@ def scrape_midhah(website, limit=None):
         qasida = Qasida.objects.create(
             title=title or 'Untitled',
             arabic_title=arabic_title,
-            author=poet or author,
+            author=Poet.named(poet or author),
             language=language,
             lyrics=lyrics,
             transliteration=transliteration,
@@ -1315,7 +1317,7 @@ def scrape_generic(website, limit=None):
         qasida = Qasida.objects.create(
             title=(title or 'Untitled')[:200],
             arabic_title=arabic_title[:200],
-            author=(work['author'] or author)[:200],
+            author=Poet.named((work['author'] or author)[:200]),
             language=(language or 'Unknown')[:50],
             lyrics=work['lyrics'],
             source_url=url,
@@ -1477,7 +1479,7 @@ def scrape_wayback(website, limit=None, refresh=False):
         qasida = Qasida.objects.create(
             title=(title or 'Untitled')[:200],
             arabic_title=arabic_title[:200],
-            author=(work['author'] or author)[:200],
+            author=Poet.named((work['author'] or author)[:200]),
             language=language[:50],
             lyrics=work['lyrics'],
             source_url=url,

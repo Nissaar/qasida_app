@@ -29,10 +29,10 @@
     {% if all_authors %}
     <ul class="space-y-0.5 max-h-60 overflow-y-auto thin-scroll">
         {% for entry in all_authors %}
-        {% if entry.author|lower == author_filter|lower %}
-        <li><a href="?{{ qs_without_author }}" class="facet-on" title="Remove this filter"><span dir="auto">{{ entry.author }}</span><span class="facet-count">{{ entry.n }} &times;</span></a></li>
+        {% if entry.name|lower == author_filter|lower %}
+        <li><a href="?{{ qs_without_author }}" class="facet-on" title="Remove this filter"><span dir="auto">{{ entry.name }}</span><span class="facet-count">{{ entry.n }} &times;</span></a></li>
         {% else %}
-        <li><a href="?{{ qs_without_author }}{% if qs_without_author %}&amp;{% endif %}author={{ entry.author|urlencode }}" class="facet"><span dir="auto">{{ entry.author }}</span><span class="facet-count">{{ entry.n }}</span></a></li>
+        <li><a href="?{{ qs_without_author }}{% if qs_without_author %}&amp;{% endif %}author={{ entry.name|urlencode }}" class="facet"><span dir="auto">{{ entry.name }}</span><span class="facet-count">{{ entry.n }}</span></a></li>
         {% endif %}
         {% endfor %}
     </ul>

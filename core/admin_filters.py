@@ -11,7 +11,7 @@ from django.contrib import admin
 
 # field label -> (query parameter, ORM lookup)
 TEXT_FILTERS = {
-    'Author': ('author_contains', 'author__icontains'),
+    'Author': ('author_contains', 'author__name__icontains'),
     'Title': ('title_contains', 'title__icontains'),
     'Tag': ('tag_contains', 'tags__name__icontains'),
     'Source URL': ('source_contains', 'source_url__icontains'),

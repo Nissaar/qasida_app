@@ -17,8 +17,8 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from .models import (Dedication, Favourite, Qasida, QasidaImage, ReaderProfile,
-                     ReadingHistory, Suggestion, Tag)
+from .models import (Dedication, Favourite, Poet, Qasida, QasidaImage,
+                     ReaderProfile, ReadingHistory, Suggestion, Tag)
 
 User = get_user_model()
 
@@ -48,6 +48,10 @@ def make_qasida(**overrides):
         'review_state': Qasida.REVIEW_APPROVED,
     }
     fields.update(overrides)
+    # Tests name a poet the way a person would, as text; the record holds a
+    # relation to one. An empty name means nobody is credited.
+    if isinstance(fields.get('author'), str):
+        fields['author'] = Poet.named(fields['author'])
     return Qasida.objects.create(**fields)
 
 
@@ -1317,7 +1321,7 @@ class AuthorFilterTest(TestCase):
 
     def test_the_facet_lists_poets_present_in_the_results(self):
         response = self.client.get(reverse('search'))
-        names = [entry['author'] for entry in response.context['all_authors']]
+        names = [entry.name for entry in response.context['all_authors']]
         self.assertIn('Poet One', names)
         self.assertIn('Poet Two', names)
         # A work with no poet named contributes no entry.
@@ -1325,7 +1329,7 @@ class AuthorFilterTest(TestCase):
 
     def test_the_facet_counts_works_per_poet(self):
         response = self.client.get(reverse('search'))
-        counts = {e['author']: e['n'] for e in response.context['all_authors']}
+        counts = {e.name: e.n for e in response.context['all_authors']}
         self.assertEqual(counts['Poet One'], 2)
         self.assertEqual(counts['Poet Two'], 1)
 
@@ -1423,7 +1427,7 @@ class SuggestionFieldsTest(TestCase):
 
         self.qasida.refresh_from_db()
         self.assertEqual(self.qasida.title, 'New Title')
-        self.assertEqual(self.qasida.author, 'New Poet')
+        self.assertEqual(self.qasida.author.name, 'New Poet')
         self.assertEqual(self.qasida.language, 'Arabic')
         self.assertEqual(self.qasida.lyrics, 'fixed one\nfixed two')
         self.assertEqual(self.qasida.transliteration, 'latin fixed')
@@ -1888,3 +1892,188 @@ class ScansInThePdfTest(TestCase):
         self.add_scan(1)
         body = self.client.get(self.qasida.get_absolute_url()).content.decode()
         self.assertIn('name="scans"', body)
+
+
+class PoetRecordTest(TestCase):
+    """
+    The poet is a record, not a name typed onto each work.
+
+    Typed by hand the same poet arrives in several spellings, and "everything
+    by this poet" stops being answerable. It also means a misspelling is
+    corrected once rather than on every work that repeats it.
+    """
+
+    def test_a_name_becomes_a_record(self):
+        poet = Poet.named('Imam al-Busiri')
+        self.assertEqual(poet.name, 'Imam al-Busiri')
+
+    def test_the_same_name_is_not_recorded_twice(self):
+        first = Poet.named('Imam al-Busiri')
+        again = Poet.named('Imam al-Busiri')
+        self.assertEqual(first.pk, again.pk)
+        self.assertEqual(Poet.objects.count(), 1)
+
+    def test_case_does_not_manufacture_a_second_person(self):
+        """Three crawlers, three capitalisations, one poet."""
+        Poet.named('Imam al-Busiri')
+        Poet.named('imam al-busiri')
+        Poet.named('IMAM AL-BUSIRI')
+        self.assertEqual(Poet.objects.count(), 1)
+
+    def test_no_name_means_nobody_is_credited(self):
+        for blank in ('', '   ', None):
+            self.assertIsNone(Poet.named(blank))
+        self.assertEqual(Poet.objects.count(), 0)
+
+    def test_correcting_a_poet_corrects_every_work_at_once(self):
+        poet = Poet.named('Msipelt Name')
+        for title in ('One', 'Two', 'Three'):
+            make_qasida(title=title, author=poet)
+
+        poet.name = 'Spelt Correctly'
+        poet.save()
+
+        for work in Qasida.objects.filter(author=poet):
+            self.assertEqual(work.author.name, 'Spelt Correctly')
+
+    def test_deleting_a_poet_leaves_the_works_alone(self):
+        poet = Poet.named('Removed By Mistake')
+        work = make_qasida(title='Orphaned', author=poet)
+        poet.delete()
+        work.refresh_from_db()
+        self.assertIsNone(work.author)
+        self.assertTrue(Qasida.objects.filter(pk=work.pk).exists())
+
+    def test_the_poet_is_searchable_by_either_name(self):
+        poet = Poet.named('Imam al-Busiri')
+        poet.arabic_name = 'الإمام البوصيري'
+        poet.save()
+        make_qasida(title='Findable', author=poet)
+        # The search document is built on save, so the work needs re-saving
+        # after the Arabic name was added.
+        Qasida.objects.get(title='Findable').save()
+
+        for term in ('busiri', 'البوصيري'):
+            response = self.client.get(reverse('search'), {'q': term})
+            self.assertEqual([w.title for w in response.context['page_obj']],
+                             ['Findable'], term)
+
+    def test_a_crawled_name_reuses_a_poet_already_known(self):
+        """What the crawlers do, four times over, across three sources."""
+        make_qasida(title='From source A', author='Shared Poet')
+        make_qasida(title='From source B', author='shared poet')
+        self.assertEqual(Poet.objects.filter(name__iexact='shared poet').count(), 1)
+        self.assertEqual(Poet.named('Shared Poet').qasidas.count(), 2)
+
+
+class PoetEditingTest(TestCase):
+    """Choosing a poet from a list, and adding one that is not on it."""
+
+    def setUp(self):
+        self.existing = Poet.named('Known Poet')
+        self.qasida = make_qasida(title='Editable', author=None)
+
+    def editor_post(self, **overrides):
+        data = {'title': 'Editable', 'arabic_title': '', 'language': '',
+                'text_quality': 'ok', 'lyrics': 'x', 'transliteration': '',
+                'translation': '', 'translation_origin': '', 'tags_text': '',
+                'dedicated_to': '', 'new_dedication': '',
+                'author': '', 'new_poet': ''}
+        data.update(overrides)
+        return data
+
+    def test_the_editor_offers_a_list_and_a_way_to_add_to_it(self):
+        staff = User.objects.create_superuser('root', 'r@example.com', GOOD_PASSWORD)
+        self.client.force_login(staff)
+        form = self.client.get(
+            reverse('qasida_edit', args=[self.qasida.slug])).context['form']
+        self.assertIn('author', form.fields)
+        self.assertIn('new_poet', form.fields)
+        self.assertIn(self.existing, form.fields['author'].queryset)
+
+    def test_choosing_one_from_the_list(self):
+        from .forms import QasidaForm
+        form = QasidaForm(self.editor_post(author=self.existing.pk),
+                          instance=self.qasida)
+        self.assertTrue(form.is_valid(), form.errors)
+        form.save()
+        self.qasida.refresh_from_db()
+        self.assertEqual(self.qasida.author, self.existing)
+
+    def test_adding_one_that_is_not_on_the_list(self):
+        from .forms import QasidaForm
+        form = QasidaForm(self.editor_post(new_poet='Newly Met Poet'),
+                          instance=self.qasida)
+        self.assertTrue(form.is_valid(), form.errors)
+        form.save()
+        self.qasida.refresh_from_db()
+        self.assertEqual(self.qasida.author.name, 'Newly Met Poet')
+
+    def test_adding_one_that_exists_reuses_it_whatever_the_case(self):
+        from .forms import QasidaForm
+        form = QasidaForm(self.editor_post(new_poet='known poet'),
+                          instance=self.qasida)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data['author'], self.existing)
+        self.assertEqual(Poet.objects.count(), 1)
+
+    def test_a_reader_can_propose_a_poet_by_name(self):
+        """A correction names a poet; approving it records that poet."""
+        work = make_qasida(title='Misattributed', author='Wrong Poet')
+        self.client.post(work.get_absolute_url(), {
+            'email': 'reader@example.com',
+            'suggested_author': 'Correct Poet',
+        })
+        Suggestion.objects.get().apply()
+        work.refresh_from_db()
+        self.assertEqual(work.author.name, 'Correct Poet')
+
+
+class AdminWidgetTest(TestCase):
+    """The widgets an editor actually meets on a qasida."""
+
+    def setUp(self):
+        self.staff = User.objects.create_superuser('root', 'r@example.com',
+                                                   GOOD_PASSWORD)
+        self.client.force_login(self.staff)
+        self.qasida = make_qasida(title='Editable')
+
+    def change_form(self):
+        return self.client.get(
+            f'/admin/core/qasida/{self.qasida.pk}/change/').content.decode()
+
+    def test_tags_are_a_searchable_dropdown_not_a_two_pane_box(self):
+        """
+        filter_horizontal is unusable past about twenty values; this library
+        has 65 across four unrelated axes.
+        """
+        from django.contrib import admin as django_admin
+        from .models import Qasida as QasidaModel
+        qasida_admin = django_admin.site._registry[QasidaModel]
+        self.assertIn('tags', qasida_admin.autocomplete_fields)
+        self.assertNotIn('tags', getattr(qasida_admin, 'filter_horizontal', ()))
+
+    def test_the_poet_is_a_dropdown_with_an_add_button(self):
+        body = self.change_form()
+        self.assertIn('name="author"', body)
+        self.assertIn('admin-autocomplete', body)
+        self.assertIn('add_id_author', body)
+
+    def test_poets_have_a_section_of_their_own(self):
+        Poet.named('Listed Poet')
+        listing = self.client.get('/admin/core/poet/')
+        self.assertEqual(listing.status_code, 200)
+        self.assertContains(listing, 'Listed Poet')
+
+    def test_that_section_counts_the_works_of_each_poet(self):
+        poet = Poet.named('Prolific')
+        for title in ('A', 'B'):
+            make_qasida(title=title, author=poet)
+        rows = self.client.get('/admin/core/poet/').context['cl'].result_list
+        self.assertEqual([p._works for p in rows if p.pk == poet.pk], [2])
+
+    def test_searching_a_qasida_by_its_poet_still_works(self):
+        make_qasida(title='By Someone', author='Findable Poet')
+        results = self.client.get('/admin/core/qasida/',
+                                  {'q': 'Findable Poet'}).context['cl'].result_list
+        self.assertEqual([w.title for w in results], ['By Someone'])

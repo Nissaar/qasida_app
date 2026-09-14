@@ -40,6 +40,19 @@
 <script src="{% static 'core/js/admin.js' %}" defer></script>
 {% endblock %}
 
+{% comment %}
+Django loads its own responsive.css in this block, which comes after
+extrastyle in admin/base.html - so every mobile rule in our stylesheet was
+being overridden by Django's, which is written for the stock layout rather
+than the sidebar rail here. Keeping block.super preserves the viewport meta
+tag and Django's rules as a base; reloading ours afterwards puts it last in
+source order, where it belongs.
+{% endcomment %}
+{% block responsive %}
+{{ block.super }}
+<link rel="stylesheet" href="{% static 'core/css/admin.css' %}">
+{% endblock %}
+
 {% block branding %}
 <h1 id="site-name">
     <a href="{% url 'admin:index' %}">

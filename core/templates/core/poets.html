@@ -13,12 +13,12 @@
 {% if poets %}
 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
     {% for entry in poets %}
-    <a href="{% url 'poet' entry.author %}" class="tile flex-row items-center gap-3">
+    <a href="{% url 'poet' entry.name %}" class="tile flex-row items-center gap-3">
         <span class="shrink-0 h-10 w-10 rounded-full bg-brand-100 dark:bg-brand-900 text-brand-800 dark:text-brand-200 grid place-items-center font-semibold">
-            {{ entry.author|slice:":1"|upper }}
+            {{ entry.name|slice:":1"|upper }}
         </span>
         <span class="min-w-0">
-            <span dir="auto" class="block font-medium truncate">{{ entry.author }}</span>
+            <span dir="auto" class="block font-medium truncate">{{ entry.name }}</span>
             <span class="tile-count">{{ entry.n }} work{{ entry.n|pluralize }}</span>
         </span>
     </a>

@@ -9,7 +9,7 @@ from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from .forms import QasidaForm
-from .models import (Collection, Favourite, Qasida, ReadingHistory,
+from .models import (Collection, Favourite, Poet, Qasida, ReadingHistory,
                      Suggestion, Tag)
 from .export import LAYERS, available_layers
 from .pdf import build_pdf, filename_for
@@ -138,7 +138,7 @@ def _apply_filters(request, filters, skip=()):
     if filters['lang'] and 'lang' not in skip:
         qasidas = qasidas.filter(language__iexact=filters['lang'])
     if filters['author'] and 'author' not in skip:
-        qasidas = qasidas.filter(author__iexact=filters['author'])
+        qasidas = qasidas.filter(author__name__iexact=filters['author'])
     if filters['tags'] and 'tag' not in skip:
         # ANDed, and each as its own join: a single join with two conditions
         # asks for one tag that is both things at once, which nothing is.
@@ -163,10 +163,9 @@ AUTHOR_FACET_LIMIT = 30
 
 def _author_facets(scope, limit=AUTHOR_FACET_LIMIT):
     """Poets represented in `scope`, most prolific first, with a count."""
-    return (scope.exclude(author='')
-            .values('author')
-            .annotate(n=Count('id', distinct=True))
-            .order_by('-n', 'author')[:limit])
+    return (Poet.objects.filter(qasidas__in=scope)
+            .annotate(n=Count('qasidas', distinct=True))
+            .order_by('-n', 'name')[:limit])
 
 
 def _language_facets(scope):
@@ -183,6 +182,7 @@ def _listing(request, heading):
                        or filters['tags'])
 
     results = (_apply_filters(request, filters)
+               .select_related('author', 'dedicated_to')
                .prefetch_related('tags', 'images').order_by('-created_at'))
     paginator = Paginator(results, PAGE_SIZE)
     page_obj = paginator.get_page(request.GET.get('page'))
@@ -225,8 +225,7 @@ def _listing(request, heading):
         'tag_groups': _grouped_tag_facets(_tag_facets(tag_scope), filters['tags'], request),
         'all_languages': _language_facets(language_scope),
         'all_authors': _author_facets(author_scope),
-        'author_total': (author_scope.exclude(author='')
-                         .values('author').distinct().count()),
+        'author_total': Poet.objects.filter(qasidas__in=author_scope).distinct().count(),
         'author_shown': AUTHOR_FACET_LIMIT,
     }
     return render(request, 'core/listing.html', context)
@@ -243,10 +242,9 @@ HOME_PERSONAL_COUNT = 4
 
 
 def _top_poets(scope, limit):
-    return (scope.exclude(author='')
-            .values('author')
-            .annotate(n=Count('id'))
-            .order_by('-n', 'author')[:limit])
+    return (Poet.objects.filter(qasidas__in=scope)
+            .annotate(n=Count('qasidas', distinct=True))
+            .order_by('-n', 'name')[:limit])
 
 
 def _tags_in_group(scope, category, limit):
@@ -342,7 +340,7 @@ def search_suggest(request):
             results.append({
                 'title': qasida.title or 'Untitled qasida',
                 'arabic_title': qasida.arabic_title,
-                'author': qasida.author,
+                'author': qasida.author.name if qasida.author_id else '',
                 'language': qasida.language,
                 'url': qasida.get_absolute_url(),
             })
@@ -377,7 +375,11 @@ def _suggested_changes(request, qasida):
     changed = {}
     for field, target, _label in Suggestion.FIELDS:
         proposed = _submitted(request.POST.get(field))
-        if proposed and proposed != _submitted(getattr(qasida, target)):
+        current = getattr(qasida, target)
+        # The poet is a relation, so compare against its name rather than
+        # against the object, whose repr would never match what was typed.
+        current = current.name if isinstance(current, Poet) else current
+        if proposed and proposed != _submitted(current):
             changed[field] = proposed
     return changed
 
@@ -472,7 +474,8 @@ def random_qasida(request):
 
 def poet(request, name):
     """Everything attributed to one poet."""
-    works = (_visible(request).filter(author__iexact=name)
+    works = (_visible(request).filter(author__name__iexact=name)
+             .select_related('author')
              .prefetch_related('tags', 'images')
              .order_by('title'))
     paginator = Paginator(works, PAGE_SIZE)
@@ -486,14 +489,13 @@ def poet(request, name):
 def poets(request):
     """Every poet the library holds, with how much of each it has."""
     scope = _visible(request)
-    entries = (scope.exclude(author='')
-               .values('author')
-               .annotate(n=Count('id'))
-               .order_by('-n', 'author'))
+    entries = (Poet.objects.filter(qasidas__in=scope)
+               .annotate(n=Count('qasidas', distinct=True))
+               .order_by('-n', 'name'))
     return render(request, 'core/poets.html', {
         'poets': entries,
-        'total_poets': len(entries),
-        'unattributed': scope.filter(author='').count(),
+        'total_poets': entries.count(),
+        'unattributed': scope.filter(author__isnull=True).count(),
     })
 
 

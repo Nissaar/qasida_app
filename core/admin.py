@@ -13,9 +13,9 @@ from .tasks import enrich_qasida
 admin.site.site_header = "Qasida Library"
 admin.site.site_title = "Qasida Library"
 admin.site.index_title = "Library administration"
-from .models import (Collection, Dedication, Favourite, Tag, Qasida, QasidaImage,
-                     QasidaMedia, ReadingHistory, ReaderProfile, Suggestion,
-                     SourceWebsite)
+from .models import (Collection, Dedication, Favourite, Tag, Poet, Qasida,
+                     QasidaImage, QasidaMedia, ReadingHistory, ReaderProfile,
+                     Suggestion, SourceWebsite)
 
 class LibraryAdmin(admin.ModelAdmin):
     """
@@ -116,13 +116,15 @@ class QasidaAdmin(LibraryAdmin):
     actions = ['approve_for_display', 'send_back_for_review', 'reject_qasidas',
                'enrich_selected', 'enrich_selected_overwrite',
                'add_to_collection', 'remove_from_collection']
-    search_fields = ('title', 'arabic_title', 'author', 'dedicated_to__name',
+    search_fields = ('title', 'arabic_title', 'author__name', 'dedicated_to__name',
                      'lyrics', 'transliteration')
-    list_select_related = ('source_site', 'collection', 'dedicated_to')
-    # A select with a + beside it: pick an existing dedication, or add one
-    # without leaving the page.
-    autocomplete_fields = ('dedicated_to',)
-    filter_horizontal = ('tags',)
+    list_select_related = ('source_site', 'collection', 'dedicated_to', 'author')
+    # Searchable dropdowns with a + beside them: pick an existing value, or add
+    # one without leaving the page. Tags were a two-pane box with arrows, which
+    # is unusable once the vocabulary passes about twenty - this library has 65
+    # across four unrelated axes, so choosing meant hunting through a list that
+    # mixed metres with languages.
+    autocomplete_fields = ('author', 'dedicated_to', 'tags')
     inlines = [QasidaMediaInline, QasidaImageInline]
 
     def get_queryset(self, request):
@@ -479,6 +481,30 @@ class DedicationAdmin(LibraryAdmin):
     list_display = ('name', 'arabic_name', 'qasida_count')
     search_fields = ('name', 'arabic_name')
     ordering = ('name',)
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(_works=Count('qasidas'))
+
+    @admin.display(description='Qasidas', ordering='_works')
+    def qasida_count(self, obj):
+        return obj._works
+
+
+@admin.register(Poet)
+class PoetAdmin(LibraryAdmin):
+    """
+    The poets this library holds, and where to correct them.
+
+    Registered in its own right for two reasons: it is what puts the + beside
+    the dropdown on a qasida, so an editor meeting an unknown name adds it
+    without abandoning the record they were editing; and it is the only place
+    a misspelling can be fixed once rather than on every work that repeats it.
+    """
+
+    list_display = ('name', 'arabic_name', 'qasida_count')
+    search_fields = ('name', 'arabic_name', 'notes')
+    ordering = ('name',)
+    list_per_page = 50
 
     def get_queryset(self, request):
         return super().get_queryset(request).annotate(_works=Count('qasidas'))
