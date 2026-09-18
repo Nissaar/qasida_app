@@ -238,18 +238,31 @@ h2 { font-weight: 600; letter-spacing: -.01em; }
     margin: 0;
     padding: 0;
 }
+/* #logout-form button is named explicitly alongside the others: Django styles
+   it in its own selector, outside #user-tools, so setting these on the parent
+   alone left Log out shouting in uppercase with a white underline beside two
+   links in sentence case. */
 #user-tools a,
-#user-tools button {
+#user-tools button,
+#logout-form button {
     color: var(--q-ink-soft);
     border-bottom: none;
     border-radius: var(--q-radius-sm);
     padding: .4rem .6rem;
     font-weight: 500;
+    font-size: 0.75rem;
+    letter-spacing: 0;
+    text-transform: none;
     transition: background-color .12s ease, color .12s ease;
 }
-#user-tools a:hover, #user-tools button:hover {
+#user-tools a:hover, #user-tools button:hover,
+#logout-form button:hover, #logout-form button:active {
     background: var(--q-surface-3);
     color: var(--q-ink);
+    /* Django nudges the button down 1px on hover to fake the underline
+       shifting; there is no underline here, so it only wobbles. */
+    margin-bottom: 0;
+    border-bottom: none;
 }
 /* Django renders the log-out control as a form; it should read as a control
    on the same row, not as a block that pushes everything down. */
@@ -688,8 +701,17 @@ a.q-stat:hover { border-color: var(--q-accent-line); transform: translateY(-1px)
     letter-spacing: .04em;
     text-transform: uppercase;
     color: var(--q-muted);
+    /* top MUST stay 0.
+     *
+     * A sticky offset is measured from the nearest scrollport, and that is
+     * .results here - it carries overflow-x for wide tables, which makes it a
+     * scroll container on both axes - not the viewport. The header's natural
+     * offset inside .results is 0, so any positive top is larger than where it
+     * already sits and sticky pushes it *down* by that much, parking it on top
+     * of the first row of results. Offsetting it by the height of the top bar
+     * looked right and put the header over row one on every changelist. */
     position: sticky;
-    top: var(--q-topbar);
+    top: 0;
     z-index: 2;
 }
 #changelist thead th a { color: inherit; }
@@ -926,6 +948,47 @@ fieldset { border: none; padding: .2rem 0 .5rem; }
 
 /* ---- filter rail ------------------------------------------------------ */
 #changelist-filter { width: 16rem; padding-bottom: .4rem; }
+/* Django 5.0 renders each filter as <details><summary>By …</summary>, where
+   earlier versions used an <h3> followed by a list. Only .q-filter-head - this
+   project's own Find panel - was still matching, so every stock filter heading
+   in the rail was falling back to an unstyled summary with a native disclosure
+   triangle beside it. */
+#changelist-filter summary {
+    list-style: none;
+    cursor: pointer;
+    position: relative;
+    padding: .8rem 2rem .35rem 1rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--q-faint);
+    user-select: none;
+}
+#changelist-filter summary::-webkit-details-marker,
+#changelist-filter summary::marker { display: none; content: ""; }
+#changelist-filter summary:hover { color: var(--q-ink-soft); }
+/* The same chevron the collapsible panels elsewhere use, so a disclosure in
+   the rail and a disclosure on a form read as the same control. */
+#changelist-filter summary::after {
+    content: "";
+    position: absolute;
+    right: 1rem;
+    top: 50%;
+    width: .35rem;
+    height: .35rem;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: translateY(-20%) rotate(-45deg);
+    transition: transform .16s ease;
+    opacity: .5;
+}
+#changelist-filter details[open] > summary::after {
+    transform: translateY(-60%) rotate(45deg);
+}
+#changelist-filter summary:hover::after { opacity: 1; }
+#changelist-filter details + details { border-top: 1px solid var(--q-line-soft); }
+
 #changelist-filter h3, .q-filter-head {
     font-size: 0.6875rem;
     font-weight: 600;
@@ -1022,8 +1085,17 @@ fieldset { border: none; padding: .2rem 0 .5rem; }
     margin-right: .2rem;
     font-weight: 600;
 }
-.paginator a { color: var(--q-muted); }
-.paginator a:hover { background: var(--q-surface-3); color: var(--q-ink); }
+/* Matched on :link and :visited to outrank Django's own rule at that
+   specificity, which fills every page number with the button colour. Mapping
+   --button-bg to the accent therefore turned all 179 of them into solid green
+   pills, and left the page you are actually on as the one plain item on the
+   row - the emphasis exactly inverted. */
+.paginator a, .paginator a:link, .paginator a:visited {
+    background: transparent;
+    color: var(--q-muted);
+    padding: .25rem .55rem;
+}
+.paginator a:hover, .paginator a:focus { background: var(--q-surface-3); color: var(--q-ink); }
 .paginator .this-page { background: var(--q-accent-tint); color: var(--q-accent-ink); }
 
 /* The second set of pagination controls, above the grid. Django's own sit
