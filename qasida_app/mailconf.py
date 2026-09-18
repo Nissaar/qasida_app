@@ -77,17 +77,20 @@ def mailgun_config(login, password, region=None, port_raw=None):
 
 def looks_like_an_api_key(password):
     """
-    Whether a password looks like a Mailgun API key rather than an SMTP one.
+    Whether a password is unmistakably a Mailgun API key rather than an SMTP one.
 
     These are different credentials, and an API key will not authenticate over
     SMTP. It is the commonest way to configure Mailgun wrongly, and it fails
     only at send time, so from the reader's side a password reset simply never
     arrives and nothing says why.
+
+    Only the "key-" prefix counts. This used to flag any long unbroken hex
+    string as well, on the reasoning that newer keys look like that - but so do
+    Mailgun's own SMTP passwords, so the test fired on correct configurations
+    and the warning appeared beside mail that had just been delivered
+    successfully. A check that cannot tell the two apart is not worth having:
+    it teaches whoever reads the log to ignore this warning, which is the
+    opposite of what it is for. The prefix is decisive, and an SMTP password
+    never carries it.
     """
-    text = (password or '').strip().lower()
-    if not text:
-        return False
-    if text.startswith('key-'):
-        return True
-    # Newer private keys are long unbroken hex.
-    return len(text) >= 32 and all(c in '0123456789abcdef-' for c in text)
+    return (password or '').strip().lower().startswith('key-')

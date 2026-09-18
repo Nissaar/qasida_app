@@ -828,12 +828,17 @@ class MailConfigTest(TestCase):
     def test_an_api_key_pasted_instead_of_an_smtp_password_is_recognised(self):
         for key in ('key-3ax6xnjp29jd6fds4gc373sgvjxleqe3',
                     'KEY-3ax6xnjp29jd6fds4gc373sgvjxleqe3',
-                    '0123456789abcdef0123456789abcdef'):
+                    '  key-3ax6xnjp29jd6fds4gc373sgvjxleqe3  '):
             self.assertTrue(self.mailconf.looks_like_an_api_key(key), key)
 
     def test_a_real_password_is_not_mistaken_for_an_api_key(self):
         for password in ('', None, 'hunter2', 'a long but ordinary passphrase',
-                         'Str0ng-SMTP-Password!'):
+                         'Str0ng-SMTP-Password!',
+                         # Mailgun's own SMTP passwords are long unbroken hex,
+                         # which this used to flag - so the warning fired on a
+                         # configuration that was delivering mail perfectly.
+                         '0123456789abcdef0123456789abcdef',
+                         '151a2b3c4d5e6f7890abcdef12345678-9abc'):
             self.assertFalse(self.mailconf.looks_like_an_api_key(password),
                              repr(password))
 
