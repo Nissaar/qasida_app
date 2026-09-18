@@ -207,17 +207,51 @@
         });
     }
 
+    /*
+     * Remember which filter groups are open, and start the later ones closed.
+     *
+     * Django renders each filter as <details><summary> and marks every one of
+     * them open. On the qasida list that is six groups at once - one of them
+     * every dedication in the library - so the rail runs several screens past
+     * the results it is meant to narrow, and reopens itself on every page you
+     * visit.
+     *
+     * This used to be done by makeCollapsible over the <h3> headings Django
+     * rendered before 5.0; that markup is gone, the selector matched nothing,
+     * and the feature had quietly stopped existing. The disclosure is native
+     * now, so this only decides the starting state and remembers what you do
+     * with it. A group holding a chosen value always opens, whatever was
+     * remembered: hiding the filter that is currently in force is how someone
+     * ends up unable to find why a list is short.
+     */
+    var FILTER_OPEN_BY_DEFAULT = 2;
+
     function setUpFilterSidebar() {
         var filter = document.getElementById('changelist-filter');
         if (!filter) return;
-        // Each filter is an <h3> followed by its list or form.
-        filter.querySelectorAll('h3').forEach(function (heading, index) {
-            var panel = heading.nextElementSibling;
-            if (!panel || panel.tagName === 'H3') return;
-            var label = (heading.textContent || ('filter-' + index)).trim();
-            // Everything past the second group starts closed: five open groups
-            // is what made this sidebar unusable.
-            makeCollapsible(heading, panel, 'filter:' + label, index > 1);
+
+        filter.querySelectorAll('details').forEach(function (group, index) {
+            var summary = group.querySelector('summary');
+            var label = group.dataset.filterTitle ||
+                        (summary && summary.textContent.trim()) || ('filter-' + index);
+            var key = 'filter:' + label;
+            var stored = null;
+            try {
+                stored = localStorage.getItem(STORE_PREFIX + key);
+            } catch (e) { /* private mode: fall back to the defaults below */ }
+
+            var active = group.querySelector('li.selected');
+            if (active) {
+                group.open = true;
+            } else if (stored !== null) {
+                group.open = stored !== '1';
+            } else {
+                group.open = index < FILTER_OPEN_BY_DEFAULT;
+            }
+
+            group.addEventListener('toggle', function () {
+                remember(key, !group.open);
+            });
         });
     }
 
