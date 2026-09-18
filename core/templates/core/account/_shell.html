@@ -21,6 +21,7 @@ four unrelated pages. `tab` says which is current.
         <a href="{% url 'my_library' %}" class="pill {% if tab == 'saved' %}pill-on{% endif %}">Saved</a>
         <a href="{% url 'my_history' %}" class="pill {% if tab == 'history' %}pill-on{% endif %}">Recently read</a>
         <a href="{% url 'my_corrections' %}" class="pill {% if tab == 'corrections' %}pill-on{% endif %}">My corrections</a>
+        <a href="{% url 'my_contributions' %}" class="pill {% if tab == 'contributions' %}pill-on{% endif %}">Contributions</a>
         <a href="{% url 'account_settings' %}" class="pill {% if tab == 'settings' %}pill-on{% endif %}">Settings</a>
     </div>
 </nav>

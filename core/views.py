@@ -1,16 +1,20 @@
 from urllib.parse import urlencode
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
+from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db.models import Count, Q
 from django.db.models.functions import Length
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
-from .forms import QasidaForm
-from .models import (Collection, Dedication, Favourite, Poet, Qasida,
-                     ReadingHistory, Suggestion, Tag)
+from . import notify, throttle
+from .forms import (ContactForm, QasidaForm, QasidaRequestForm,
+                    QasidaSubmissionForm)
+from .models import (Collection, Contribution, Dedication, Favourite, Poet,
+                     Qasida, ReadingHistory, SourceWebsite, Suggestion, Tag)
 from .export import LAYERS, available_layers
 from .pdf import build_pdf, filename_for
 from .search import normalize
@@ -422,7 +426,7 @@ def qasida_detail(request, slug):
                 'Nothing was changed, so there is nothing to review. Edit a '
                 'field, add a tag, or describe what is wrong.')
         else:
-            Suggestion.objects.create(
+            suggestion = Suggestion.objects.create(
                 qasida=qasida,
                 user=request.user if request.user.is_authenticated else None,
                 email=email,
@@ -430,6 +434,10 @@ def qasida_detail(request, slug):
                 note=note,
                 **changes,
             )
+            # The correction is already stored; telling an editor about it is
+            # the part that can fail, and notify swallows that rather than
+            # losing the correction to a mail server being down.
+            notify.suggestion_received(suggestion, request)
             messages.success(request, 'Thank you. Your correction has been sent for review.')
             return redirect('qasida_detail', slug=qasida.slug)
     elif request.user.is_authenticated:
@@ -607,3 +615,190 @@ def qasida_download(request, slug):
                             content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="{filename_for(qasida, layers)}"'
     return response
+
+
+# --------------------------------------------------------------------------
+# About, privacy, and writing in
+# --------------------------------------------------------------------------
+
+def about(request):
+    """What this library is, where its texts come from, and who keeps it."""
+    scope = _visible(request)
+    return render(request, 'core/about.html', {
+        'poet_count': Poet.objects.filter(qasidas__in=scope).distinct().count(),
+        'language_count': scope.exclude(language='').values('language').distinct().count(),
+        'translated_count': scope.exclude(translation='').count(),
+        'transliterated_count': scope.exclude(transliteration='').count(),
+        'sources': SourceWebsite.objects.filter(is_active=True).order_by('name'),
+    })
+
+
+def privacy(request):
+    """What the site stores about a reader, and what it does not."""
+    return render(request, 'core/privacy.html', {})
+
+
+# How many messages one address, or one account, may send before the form
+# starts refusing. Generous for a person - nobody writes to a library six
+# times in an hour - and low enough that a script gets nowhere.
+CONTACT_LIMIT = 6
+CONTACT_WINDOW = 60 * 60
+
+
+def contact(request):
+    """
+    Write to the library.
+
+    The message is saved before it is mailed, and mailing failing does not
+    fail the request: a mail relay refusing connections must not turn someone
+    taking the trouble to write in into an error page and a lost message.
+    """
+    keys = throttle.keys_for(request, 'contact')
+    form = ContactForm(request.POST or None, user=request.user)
+
+    if request.method == 'POST':
+        if any(throttle.over_limit(key, CONTACT_LIMIT) for key in keys):
+            messages.error(
+                request,
+                'That is several messages in a short time. Please wait an hour, '
+                f'or write straight to {settings.CONTACT_EMAIL}.')
+        elif form.is_valid():
+            message = form.save(commit=False)
+            if request.user.is_authenticated:
+                message.user = request.user
+            message.save()
+            for key in keys:
+                throttle.record(key, CONTACT_WINDOW)
+            notify.contact_received(message, request)
+            messages.success(
+                request,
+                'Thank you - your message has arrived. You will get a reply at '
+                f'{message.email}.')
+            return redirect('contact')
+
+    return render(request, 'core/contact.html', {'form': form})
+
+
+# --------------------------------------------------------------------------
+# Contributions: asking for a work, and sending one in
+# --------------------------------------------------------------------------
+
+# Per account and per address, in a day. A prolific contributor sending in a
+# dozen texts is exactly what this library wants; a thousand is a script.
+CONTRIBUTION_LIMIT = 20
+CONTRIBUTION_WINDOW = 60 * 60 * 24
+
+
+def contribute(request):
+    """
+    The two ways in, side by side.
+
+    A landing page rather than sending people straight to a form, because
+    which of the two someone wants depends on something they may not have
+    thought about yet: whether they have the text in front of them.
+    """
+    mine = None
+    if request.user.is_authenticated:
+        mine = (Contribution.objects.filter(user=request.user)
+                .order_by('-created_at')[:5])
+    return render(request, 'core/contribute.html', {'mine': mine})
+
+
+def _contribution_view(request, form_class, template, heading, lead):
+    """
+    The shared body of the request and submission forms.
+
+    Both save a Contribution, count it against the sender's allowance, tell an
+    editor, and send the reader to their own list where they can see it
+    waiting. Only the form class and the words around it differ.
+    """
+    keys = throttle.keys_for(request, 'contribution')
+    form = form_class(request.POST or None)
+
+    if request.method == 'POST':
+        if any(throttle.over_limit(key, CONTRIBUTION_LIMIT) for key in keys):
+            messages.error(
+                request,
+                'That is a great deal in one day. Please carry on tomorrow, or '
+                f'write to {settings.CONTACT_EMAIL} and we will sort it out.')
+        elif form.is_valid():
+            contribution = form.save(user=request.user)
+            for key in keys:
+                throttle.record(key, CONTRIBUTION_WINDOW)
+            notify.contribution_received(contribution, request)
+            messages.success(
+                request,
+                'Thank you. An editor will read it, and you can follow what '
+                'happens to it here.')
+            return redirect('my_contributions')
+
+    # Offered to the language field as a datalist, so the spellings already in
+    # the library are one keystroke away and a new one is still typeable.
+    languages = (_visible(request).exclude(language='')
+                 .values_list('language', flat=True).distinct().order_by('language'))
+
+    return render(request, template, {
+        'form': form,
+        'heading': heading,
+        'lead': lead,
+        'known_languages': languages,
+    })
+
+
+@login_required
+def request_qasida(request):
+    """Ask the library for a work it does not hold."""
+    return _contribution_view(
+        request, QasidaRequestForm, 'core/contribution_form.html',
+        heading='Request a qasida',
+        lead=('Tell us what you are looking for and we will try to find it, '
+              'read it and add it. Anything you know helps - a line, a poet, '
+              'where you heard it.'))
+
+
+@login_required
+def submit_qasida(request):
+    """Send in a text for an editor to read and publish."""
+    return _contribution_view(
+        request, QasidaSubmissionForm, 'core/contribution_form.html',
+        heading='Submit a qasida',
+        lead=('Send in a text you have. An editor reads everything before it '
+              'goes on the site, so nothing you send appears unchecked - and '
+              'where it comes from matters as much as the verses themselves.'))
+
+
+@staff_member_required
+def contribution_inbox(request):
+    """Review queue for what readers have asked for and sent in."""
+    if request.method == 'POST':
+        contribution = get_object_or_404(Contribution, pk=request.POST.get('contribution'))
+        action = request.POST.get('action')
+        note = (request.POST.get('staff_note') or '').strip()
+
+        if action == 'publish' and contribution.can_publish():
+            qasida = contribution.publish(by=request.user)
+            notify.contribution_decided(contribution, request)
+            messages.success(
+                request,
+                f'Created a record from "{contribution.display_title}". Read it '
+                f'through and approve it, and it goes on the site.')
+            return redirect('qasida_edit', slug=qasida.slug)
+        if action == 'accept':
+            contribution.accept(by=request.user, note=note)
+            notify.contribution_decided(contribution, request)
+            messages.success(request, f'Accepted "{contribution.display_title}".')
+        else:
+            contribution.decline(by=request.user, note=note)
+            notify.contribution_decided(contribution, request)
+            messages.success(request, f'Declined "{contribution.display_title}".')
+        return redirect('contribution_inbox')
+
+    waiting = (Contribution.objects.filter(status=Contribution.STATUS_PENDING)
+               .select_related('user').order_by('created_at'))
+    decided = (Contribution.objects.exclude(status=Contribution.STATUS_PENDING)
+               .select_related('user', 'published_as', 'reviewed_by')[:20])
+    return render(request, 'core/contributions.html', {
+        'waiting': waiting,
+        'decided': decided,
+        'waiting_count': waiting.count(),
+    })

@@ -1,37 +1,18 @@
 {% extends "admin/base.html" %}
-{% load static %}
+{% load i18n static %}
 
 {% block title %}{% if subtitle %}{{ subtitle }} | {% endif %}{{ title }} | Qasida Library{% endblock %}
 
 {% block extrastyle %}
 {{ block.super }}
 <link rel="icon" href="{% static 'core/img/favicon-32.png' %}" sizes="32x32">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Naskh+Arabic:wght@400;600&display=swap" rel="stylesheet">
-<style>
-    /* The admin exposes its palette as custom properties, so rebranding is a
-       matter of redefining them rather than overriding rules. */
-    :root {
-        --primary: #047857;
-        --secondary: #047857;
-        --accent: #0e9f6e;
-        --primary-fg: #ffffff;
-        --header-color: #d1fae5;
-        --header-bg: #04543d;
-        --header-branding-color: #ffffff;
-        --header-link-color: #ffffff;
-        --breadcrumbs-fg: #065f46;
-        --breadcrumbs-link-fg: #04543d;
-        --breadcrumbs-bg: #d1fae5;
-        --link-fg: #047857;
-        --link-hover-color: #04543d;
-        --button-bg: #047857;
-        --button-hover-bg: #04543d;
-        --default-button-bg: #0e9f6e;
-        --default-button-hover-bg: #047857;
-        --font-family-primary: Inter, system-ui, sans-serif;
-    }
-</style>
-<!-- Loaded after the palette so its card styling wins over the stock slabs. -->
+{% comment %}
+The palette used to be declared inline here. It now lives in admin.css beside
+the tokens it is built from, so Django's variables and this project's cannot
+drift apart, and so dark mode is defined once rather than twice.
+{% endcomment %}
 <link rel="stylesheet" href="{% static 'core/css/admin.css' %}">
 {% endblock %}
 
@@ -55,13 +36,41 @@ source order, where it belongs.
 
 {% block branding %}
 <h1 id="site-name">
-    <a href="{% url 'admin:index' %}">
-        <img src="{% static 'core/img/favicon-32.png' %}" alt="" width="24" height="24"
-             style="vertical-align:-6px; margin-right:.5rem; border-radius:6px;">
-        Qasida Library administration
-    </a>
+    <a href="{% url 'admin:index' %}">Qasida Library administration</a>
 </h1>
 {% endblock %}
 
-{% comment %} The sidebar carries the brand, navigation, tools and the signed-in user,
-   so the top bar is left to Django's own controls rather than repeating them. {% endcomment %}
+{% comment %}
+The top bar.
+
+The brand and the navigation are in the rail, so what is left here is about
+the person using the admin rather than about the library: the way back to the
+public site, the theme, and who is signed in. Django's own stack of slash-
+separated links is replaced, but every one of them is still here - and the
+theme toggle is Django's own, so it keeps writing data-theme and keeps working
+with the stylesheet's own dark mode.
+{% endcomment %}
+{% block usertools %}
+{% if has_permission %}
+<div id="user-tools">
+    {% if site_url %}
+    <a href="{{ site_url }}" title="{% translate 'Open the public site' %}">
+        {% translate 'View site' %}
+    </a>
+    {% endif %}
+    {% if user.has_usable_password %}
+    <a href="{% url 'admin:password_change' %}">{% translate 'Password' %}</a>
+    {% endif %}
+    <span class="q-topbar-divider" aria-hidden="true"></span>
+    {% include "admin/color_theme_toggle.html" %}
+    <span class="q-whoami">
+        <span class="q-avatar" aria-hidden="true">{{ user.get_username|slice:":1"|upper }}</span>
+        <span>{% firstof user.get_short_name user.get_username %}</span>
+    </span>
+    <form id="logout-form" method="post" action="{% url 'admin:logout' %}">
+        {% csrf_token %}
+        <button type="submit">{% translate 'Log out' %}</button>
+    </form>
+</div>
+{% endif %}
+{% endblock %}

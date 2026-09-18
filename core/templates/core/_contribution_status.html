@@ -1,0 +1,15 @@
+{% comment %}
+Where one contribution stands, as a badge.
+
+Shared by the contribute page, the contributor's own list and the staff inbox,
+so the three cannot come to describe the same three states differently.
+{% endcomment %}
+{% if contribution.status == 'pending' %}
+<span class="badge-warn">Waiting for an editor</span>
+{% elif contribution.status == 'accepted' %}
+<span class="inline-flex items-center gap-1 rounded-full bg-brand-100 dark:bg-brand-900 px-2 py-0.5 text-xs font-medium text-brand-800 dark:text-brand-200">
+    Accepted{% if contribution.published_as %} &mdash; in the library{% endif %}
+</span>
+{% else %}
+<span class="inline-flex items-center gap-1 rounded-full bg-stone-100 dark:bg-stone-800 px-2 py-0.5 text-xs font-medium text-stone-600 dark:text-stone-300">Not taken</span>
+{% endif %}

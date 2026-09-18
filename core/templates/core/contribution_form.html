@@ -1,0 +1,43 @@
+{% extends 'core/base.html' %}
+
+{% block title %}{{ heading }} | Qasida Library{% endblock %}
+{% block meta_description %}{{ lead }}{% endblock %}
+{% block robots %}<meta name="robots" content="noindex">{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl">
+    <nav class="mb-4 text-sm">
+        <a href="{% url 'contribute' %}" class="text-stone-500 dark:text-stone-400 hover:text-brand-700 dark:hover:text-brand-300">&larr; Contribute</a>
+    </nav>
+
+    <h1 class="font-display text-3xl text-brand-900 dark:text-brand-100">{{ heading }}</h1>
+    <p class="text-stone-600 dark:text-stone-300 mt-3 leading-relaxed">{{ lead }}</p>
+
+    {% comment %}
+    The language field offers the spellings already in the library, so the same
+    language does not arrive as "Urdu", "urdu" and "Urdū" - while still being
+    an ordinary text box, so a language nobody has used yet can be typed.
+    {% endcomment %}
+    <datalist id="known-languages">
+        {% for language in known_languages %}<option value="{{ language }}">{% endfor %}
+    </datalist>
+
+    <form method="post" class="card p-6 mt-6 grid gap-4" novalidate>
+        {% csrf_token %}
+        {% include 'core/_form.html' %}
+        <div class="flex flex-wrap items-center gap-3 pt-2 border-t border-stone-100 dark:border-stone-800 mt-2">
+            <button type="submit" class="btn-primary">Send it in</button>
+            <a href="{% url 'contribute' %}" class="btn-quiet">Cancel</a>
+            <p class="text-xs text-stone-500 dark:text-stone-400 basis-full sm:basis-auto">
+                You can follow it on <a href="{% url 'my_contributions' %}" class="text-brand-700 dark:text-brand-300 hover:underline">your contributions page</a>.
+            </p>
+        </div>
+    </form>
+
+    <p class="text-xs text-stone-500 dark:text-stone-400 mt-4 leading-relaxed">
+        Sending this stores what you typed, your account name and your email
+        address, and emails it to the library. See the
+        <a href="{% url 'privacy' %}" class="hover:underline">privacy page</a>.
+    </p>
+</div>
+{% endblock %}

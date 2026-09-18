@@ -1,0 +1,71 @@
+{% extends 'core/account/_shell.html' %}
+
+{% block title %}My contributions | Qasida Library{% endblock %}
+
+{% block panel %}
+<div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+    <p class="text-sm text-stone-500 dark:text-stone-400">
+        Qasidas you have asked for and sent in, and where each one stands.
+    </p>
+    <div class="flex gap-2">
+        <a href="{% url 'request_qasida' %}" class="btn-ghost py-1.5 px-3 text-xs">Request one</a>
+        <a href="{% url 'submit_qasida' %}" class="btn-primary py-1.5 px-3 text-xs">Submit one</a>
+    </div>
+</div>
+
+{% if page_obj.object_list %}
+{% if waiting or accepted %}
+<div class="grid grid-cols-3 gap-3 mb-5">
+    <div class="stat"><span class="stat-value">{{ total }}</span><span class="stat-label">sent</span></div>
+    <div class="stat"><span class="stat-value">{{ waiting }}</span><span class="stat-label">waiting</span></div>
+    <div class="stat"><span class="stat-value">{{ accepted }}</span><span class="stat-label">accepted</span></div>
+</div>
+{% endif %}
+
+<ul class="card divide-y divide-stone-100 dark:divide-stone-800">
+    {% for contribution in page_obj %}
+    <li class="px-4 sm:px-5 py-4">
+        <div class="flex flex-wrap items-start justify-between gap-2">
+            <div class="min-w-0">
+                <p dir="auto" class="font-medium">{{ contribution.display_title }}</p>
+                <p class="text-xs text-stone-500 dark:text-stone-400 mt-0.5">
+                    {% if contribution.is_submission %}Submitted{% else %}Requested{% endif %}
+                    {{ contribution.created_at|date:"j M Y" }}{% if contribution.poet_name %} &middot; {{ contribution.poet_name }}{% endif %}{% if contribution.language %} &middot; {{ contribution.language }}{% endif %}
+                </p>
+            </div>
+            {% include 'core/_contribution_status.html' with contribution=contribution %}
+        </div>
+
+        {% if contribution.staff_note %}
+        <div class="mt-3 rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 p-3">
+            <p class="eyebrow mb-1">From the editors</p>
+            <p dir="auto" class="text-sm whitespace-pre-line text-stone-700 dark:text-stone-200">{{ contribution.staff_note }}</p>
+        </div>
+        {% endif %}
+
+        {% if contribution.published_as %}
+        <p class="text-sm mt-2">
+            <a href="{{ contribution.published_as.get_absolute_url }}" class="text-brand-700 dark:text-brand-300 hover:underline">
+                Read it in the library &rarr;
+            </a>
+        </p>
+        {% endif %}
+    </li>
+    {% endfor %}
+</ul>
+{% include 'core/account/_pagination.html' %}
+{% else %}
+<div class="card p-10 text-center">
+    <p class="font-display text-xl text-brand-900 dark:text-brand-100">Nothing sent yet</p>
+    <p class="text-sm text-stone-500 dark:text-stone-400 mt-2 max-w-md mx-auto leading-relaxed">
+        This library is built out of what people bring to it. If a qasida you
+        know is not here, ask for it; if you have the text in front of you, send
+        it in and an editor will read it through.
+    </p>
+    <div class="flex flex-wrap justify-center gap-2 mt-6">
+        <a href="{% url 'request_qasida' %}" class="btn-ghost">Request a qasida</a>
+        <a href="{% url 'submit_qasida' %}" class="btn-primary">Submit a qasida</a>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

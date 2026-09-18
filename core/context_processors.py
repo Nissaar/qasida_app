@@ -1,6 +1,7 @@
 """Shell-wide values. The header, footer and empty states all quote library
 totals, so they are supplied globally rather than threaded through every view."""
 
+from django.conf import settings
 from django.db.models import Count
 
 from .models import Qasida, QasidaImage, Tag
@@ -21,3 +22,15 @@ def library_stats(request):
         'library_pending': (Qasida.objects.filter(review_state=Qasida.REVIEW_PENDING).count()
                             if getattr(getattr(request, 'user', None), 'is_staff', False) else 0),
     }
+
+
+def site_contact(request):
+    """
+    The address the library is reachable at.
+
+    In the shell rather than in each view, because the footer prints it on
+    every page and the contact and about pages quote the same one. Held in
+    settings so it is set once, per deployment, instead of being typed into
+    templates where a change means finding them all.
+    """
+    return {'contact_email': settings.CONTACT_EMAIL}

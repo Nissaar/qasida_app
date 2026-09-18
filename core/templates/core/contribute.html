@@ -1,0 +1,96 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Contribute | Qasida Library{% endblock %}
+{% block meta_description %}Ask the Qasida Library for a work it does not hold, or send in a text of your own for an editor to read and publish.{% endblock %}
+{% block og_title %}Contribute to the Qasida Library{% endblock %}
+{% block og_description %}Ask for a work that is missing, or send one in.{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl">
+    <p class="eyebrow mb-2">Contribute</p>
+    <h1 class="font-display text-3xl sm:text-4xl text-brand-900 dark:text-brand-100">The library grows by being told what it is missing</h1>
+    <p class="text-lg text-stone-600 dark:text-stone-300 mt-4 leading-relaxed">
+        {{ library_total }} works are here because someone published them and a
+        crawler found them. The ones that are not on any website &mdash; in a
+        pamphlet, in a notebook, in the way your teacher recites it &mdash; can
+        only arrive one way.
+    </p>
+</div>
+
+<div class="grid gap-4 md:grid-cols-2 mt-8">
+    <a href="{% url 'request_qasida' %}" class="card-link p-6 flex flex-col">
+        <svg class="h-7 w-7 text-brand-700 dark:text-brand-300 mb-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <h2 class="font-display text-xl text-brand-900 dark:text-brand-100">Request a qasida</h2>
+        <p class="text-sm text-stone-600 dark:text-stone-300 mt-2 leading-relaxed flex-grow">
+            You know it exists but cannot find it here. Tell us whatever you have
+            &mdash; a title, a line, a poet, where you heard it &mdash; and we
+            will go looking.
+        </p>
+        <span class="mt-4 text-sm font-medium text-brand-700 dark:text-brand-300">Ask for one &rarr;</span>
+    </a>
+
+    <a href="{% url 'submit_qasida' %}" class="card-link p-6 flex flex-col">
+        <svg class="h-7 w-7 text-brand-700 dark:text-brand-300 mb-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+        <h2 class="font-display text-xl text-brand-900 dark:text-brand-100">Submit a qasida</h2>
+        <p class="text-sm text-stone-600 dark:text-stone-300 mt-2 leading-relaxed flex-grow">
+            You have the text. Send the verses, whatever you know about where they
+            come from, and a transliteration or translation if you have one. An
+            editor reads it before it goes up.
+        </p>
+        <span class="mt-4 text-sm font-medium text-brand-700 dark:text-brand-300">Send one in &rarr;</span>
+    </a>
+</div>
+
+<div class="max-w-3xl mt-10 grid gap-6">
+    <section class="card p-6">
+        <h2 class="font-display text-lg text-brand-900 dark:text-brand-100 mb-3">What happens to it</h2>
+        <ol class="text-sm text-stone-600 dark:text-stone-300 leading-relaxed space-y-3">
+            <li><strong class="font-medium text-stone-800 dark:text-stone-100">1. It waits.</strong> Everything sent in goes into one queue, in the order it arrived.</li>
+            <li><strong class="font-medium text-stone-800 dark:text-stone-100">2. Someone reads it.</strong> A text is checked against whatever source you gave before it becomes a record &mdash; the same reading every crawled work gets, for the same reason: a mistake published as scripture is worse than a gap.</li>
+            <li><strong class="font-medium text-stone-800 dark:text-stone-100">3. You are told.</strong> Accepted or not, you get an email and it appears on <a href="{% url 'my_contributions' %}" class="text-brand-700 dark:text-brand-300 hover:underline">your contributions page</a> with a link to the finished work.</li>
+        </ol>
+    </section>
+
+    <section class="card p-6">
+        <h2 class="font-display text-lg text-brand-900 dark:text-brand-100 mb-3">Before you send a text</h2>
+        <ul class="text-sm text-stone-600 dark:text-stone-300 leading-relaxed space-y-2 list-disc pl-5">
+            <li>Say where it comes from. A book and page, a recording, whom you had it from &mdash; this is what makes it checkable, and an unsourced text is much harder to accept.</li>
+            <li>Only send what is free to republish. A translation still under someone's copyright cannot go up, however good it is.</li>
+            <li>One verse to a line, with a blank line between stanzas. It is not fussiness: it is what lets the text be set beside its transliteration.</li>
+            <li>If the text only exists as a photograph of a page, send it to
+                <a href="mailto:{{ contact_email }}" class="text-brand-700 dark:text-brand-300 hover:underline">{{ contact_email }}</a>
+                instead &mdash; scans are welcome and are read here with OCR.</li>
+        </ul>
+    </section>
+
+    {% if mine %}
+    <section class="card overflow-hidden">
+        <div class="panel-head">
+            <h2 class="panel-title">What you have sent</h2>
+            <a href="{% url 'my_contributions' %}" class="view-all">All of it</a>
+        </div>
+        <ul class="divide-y divide-stone-100 dark:divide-stone-800">
+            {% for contribution in mine %}
+            <li class="px-5 py-3.5 flex flex-wrap items-center justify-between gap-2">
+                <span dir="auto" class="font-medium text-sm">{{ contribution.display_title }}</span>
+                {% include 'core/_contribution_status.html' with contribution=contribution %}
+            </li>
+            {% endfor %}
+        </ul>
+    </section>
+    {% elif not user.is_authenticated %}
+    <section class="card p-6">
+        <h2 class="font-display text-lg text-brand-900 dark:text-brand-100 mb-2">Both forms need an account</h2>
+        <p class="text-sm text-stone-600 dark:text-stone-300 leading-relaxed mb-4">
+            Not to keep anyone out &mdash; it is so an editor can write back to
+            you about what you sent, and so you have a page that says what became
+            of it. It takes a username, an email address and a password.
+        </p>
+        <div class="flex flex-wrap gap-2">
+            <a href="{% url 'register' %}" class="btn-primary">Create an account</a>
+            <a href="{% url 'login' %}?next={% url 'contribute' %}" class="btn-ghost">Sign in</a>
+        </div>
+    </section>
+    {% endif %}
+</div>
+{% endblock %}

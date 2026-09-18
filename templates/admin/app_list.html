@@ -1,0 +1,63 @@
+{% load i18n %}
+{% comment %}
+The navigation list, as a list rather than a table.
+
+Django renders this as one table per app with a row per model and a cell for
+the Add link. That markup is there because the same template serves the
+sidebar and the per-app index page; here it means the sidebar is built out of
+table semantics, which screen readers announce as data, and which leaves no
+sensible place to hang an icon.
+
+Rewritten as nested lists, which is what a navigation is. The class names
+Django's own nav_sidebar.js filter looks for - .module, .current-model - are
+kept, so typing in the filter box still narrows this, and so does the
+collapsing in admin.js, which finds each group by its heading.
+{% endcomment %}
+
+{% if app_list %}
+  {% for app in app_list %}
+    <div class="app-{{ app.app_label }} module q-nav-group{% if app.app_url in request.path|urlencode %} current-app{% endif %}">
+      <h2 class="q-nav-heading">
+        <a href="{{ app.app_url }}" class="section" title="{% blocktranslate with name=app.name %}Models in the {{ name }} application{% endblocktranslate %}">{{ app.name }}</a>
+      </h2>
+      <ul class="q-nav-list">
+        {% for model in app.models %}
+          <li class="model-{{ model.object_name|lower }}{% if model.admin_url in request.path|urlencode %} current-model{% endif %}">
+            {% if model.admin_url %}
+              <a href="{{ model.admin_url }}" class="q-nav-link"{% if model.admin_url in request.path|urlencode %} aria-current="page"{% endif %}>
+                {% include "admin/_nav_icon.html" with icon_for=model.object_name|lower %}
+                <span>{{ model.name }}</span>
+              </a>
+            {% else %}
+              <span class="q-nav-link">
+                {% include "admin/_nav_icon.html" with icon_for=model.object_name|lower %}
+                <span>{{ model.name }}</span>
+              </span>
+            {% endif %}
+
+            {% comment %}
+            The Add and Change links belong to the per-app index page, where
+            show_changelinks is on. The sidebar passes it off, and there they
+            would be a second and third control on every row of a rail that is
+            only for getting somewhere.
+            {% endcomment %}
+            {% if show_changelinks %}
+              <span class="q-nav-actions">
+                {% if model.add_url %}<a href="{{ model.add_url }}" class="addlink">{% translate 'Add' %}</a>{% endif %}
+                {% if model.admin_url %}
+                  {% if model.view_only %}
+                    <a href="{{ model.admin_url }}" class="viewlink">{% translate 'View' %}</a>
+                  {% else %}
+                    <a href="{{ model.admin_url }}" class="changelink">{% translate 'Change' %}</a>
+                  {% endif %}
+                {% endif %}
+              </span>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endfor %}
+{% else %}
+  <p class="q-empty">{% translate 'You don’t have permission to view or edit anything.' %}</p>
+{% endif %}

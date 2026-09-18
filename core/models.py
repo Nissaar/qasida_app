@@ -782,3 +782,211 @@ class ReaderProfile(models.Model):
 
     def __str__(self):
         return f"Reading preferences for {self.user}"
+
+
+class Contribution(models.Model):
+    """
+    A work a reader wants the library to hold: asked for, or brought in full.
+
+    Both are the same act seen from two distances - "this is missing" and
+    "this is missing, here it is" - and an editor works through them in one
+    queue, so they are one table with a `kind` rather than two that would have
+    to be merged on every listing. The difference that matters is whether
+    there is a text: a submission carries one and can be turned into a record
+    in a click, a request carries only enough to go and find it.
+
+    Nothing here is ever published by being saved. Accepting a submission
+    creates an ordinary Qasida in the same "awaiting review" state a crawled
+    one arrives in, so reader-sent text passes the same gate as everything
+    else before a visitor can read it.
+    """
+
+    KIND_REQUEST = 'request'
+    KIND_SUBMISSION = 'submission'
+    KIND_CHOICES = [
+        (KIND_REQUEST, 'Request - please add this'),
+        (KIND_SUBMISSION, 'Submission - here is the text'),
+    ]
+
+    STATUS_PENDING = 'pending'
+    STATUS_ACCEPTED = 'accepted'
+    STATUS_DECLINED = 'declined'
+    STATUS_CHOICES = [
+        (STATUS_PENDING, 'Waiting for an editor'),
+        (STATUS_ACCEPTED, 'Accepted'),
+        (STATUS_DECLINED, 'Declined'),
+    ]
+
+    kind = models.CharField(max_length=10, choices=KIND_CHOICES, default=KIND_SUBMISSION)
+    # Both forms are behind a sign-in, so there is always an account at the
+    # time of sending. SET_NULL rather than CASCADE: a text someone brought
+    # has become part of the library's record of where its contents came
+    # from, and closing an account should not erase that history.
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                             on_delete=models.SET_NULL, related_name='contributions')
+
+    title = models.CharField(max_length=200, blank=True)
+    native_title = models.CharField(
+        max_length=200, blank=True,
+        help_text="The title in its own script, where you know it.")
+    poet_name = models.CharField(
+        max_length=200, blank=True, verbose_name='Poet',
+        help_text="Who wrote it, if you know.")
+    dedication_name = models.CharField(
+        max_length=200, blank=True, verbose_name='In praise of',
+        help_text="Who it is addressed to or written in praise of.")
+    language = models.CharField(max_length=50, blank=True)
+
+    # Filled in on a submission; empty on a request, which is the whole
+    # difference between the two.
+    lyrics = models.TextField(blank=True)
+    transliteration = models.TextField(blank=True)
+    translation = models.TextField(blank=True)
+
+    source_url = models.URLField(
+        max_length=500, blank=True,
+        help_text="A link to where this was published, if there is one.")
+    source_note = models.TextField(
+        blank=True,
+        help_text="Where it comes from: a book, a recording, a gathering.")
+    note = models.TextField(
+        blank=True, help_text="Anything the editors should know.")
+
+    status = models.CharField(max_length=8, choices=STATUS_CHOICES,
+                              default=STATUS_PENDING, db_index=True)
+    # What an editor wants the sender to read: why it was declined, or what
+    # was done with it. Shown to the contributor on their own page.
+    staff_note = models.TextField(
+        blank=True, verbose_name='Reply to the contributor',
+        help_text="Shown to them on their contributions page, and emailed.")
+    # The record this became, once one exists. A request can carry one too:
+    # it is how a reader learns that what they asked for is now held.
+    published_as = models.ForeignKey(Qasida, null=True, blank=True,
+                                     on_delete=models.SET_NULL,
+                                     related_name='contributions')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                                    on_delete=models.SET_NULL,
+                                    related_name='contributions_reviewed')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('-created_at',)
+        # Named rather than left to Django, which derives a name from a hash
+        # of the fields: the queue is read by status far more often than by
+        # anything else, and a name says so to whoever reads the schema.
+        indexes = [models.Index(fields=['status', 'kind'], name='contribution_queue_idx')]
+
+    @property
+    def is_submission(self):
+        return self.kind == self.KIND_SUBMISSION
+
+    @property
+    def display_title(self):
+        """Something to call this in a list, whichever fields were filled."""
+        return self.title or self.native_title or f'Contribution {self.pk}'
+
+    def can_publish(self):
+        """Whether there is a text here to make a record out of."""
+        return bool(self.lyrics.strip()) and self.published_as_id is None
+
+    def publish(self, by=None):
+        """
+        Turn a submission into a record of its own, awaiting review.
+
+        Deliberately not approved: the review queue exists because text that
+        arrives from outside has to be read by a person before the site
+        serves it, and text typed in by a reader is no different from text a
+        crawler found. The editor who accepts it lands on the new record and
+        approves it there, having read it.
+        """
+        if not self.can_publish():
+            return self.published_as
+
+        dedication = None
+        name = self.dedication_name.strip()
+        if name:
+            dedication = (Dedication.objects.filter(name__iexact=name).first()
+                          or Dedication.objects.create(name=name))
+
+        qasida = Qasida.objects.create(
+            title=self.title.strip(),
+            native_title=self.native_title.strip(),
+            author=Poet.named(self.poet_name),
+            dedicated_to=dedication,
+            language=self.language.strip(),
+            lyrics=self.lyrics,
+            transliteration=self.transliteration,
+            translation=self.translation,
+            # A reader who typed out a translation is the source of it, and
+            # the page must not warn that a machine wrote it.
+            translation_origin=(Qasida.TRANSLATION_READER
+                                if self.translation.strip() else Qasida.TRANSLATION_NONE),
+            source_url=self.source_url or None,
+            review_state=Qasida.REVIEW_PENDING,
+        )
+        self.published_as = qasida
+        self.accept(by=by)
+        return qasida
+
+    def accept(self, by=None, note=None):
+        self.status = self.STATUS_ACCEPTED
+        self._close(by, note)
+
+    def decline(self, by=None, note=None):
+        self.status = self.STATUS_DECLINED
+        self._close(by, note)
+
+    def _close(self, by, note):
+        if note is not None:
+            self.staff_note = note
+        self.reviewed_at = timezone.now()
+        self.reviewed_by = by if (by is not None and by.is_authenticated) else None
+        self.save(update_fields=['status', 'staff_note', 'reviewed_at',
+                                 'reviewed_by', 'published_as'])
+
+    def __str__(self):
+        return f'{self.get_kind_display()}: {self.display_title}'
+
+
+class ContactMessage(models.Model):
+    """
+    A message sent from the contact page.
+
+    Stored as well as emailed. Mail is the part of this that can fail
+    silently - a rejected relay, a full mailbox, a rule that files it
+    somewhere nobody looks - and a library that invites people to write in
+    should not be able to lose what they wrote.
+    """
+
+    TOPIC_GENERAL = 'general'
+    TOPIC_CORRECTION = 'correction'
+    TOPIC_CONTRIBUTE = 'contribute'
+    TOPIC_RIGHTS = 'rights'
+    TOPIC_TECHNICAL = 'technical'
+    TOPIC_CHOICES = [
+        (TOPIC_GENERAL, 'General enquiry'),
+        (TOPIC_CORRECTION, 'A mistake in a text'),
+        (TOPIC_CONTRIBUTE, 'Offering a qasida or a scan'),
+        (TOPIC_RIGHTS, 'Copyright or a request to take something down'),
+        (TOPIC_TECHNICAL, 'Something is broken'),
+    ]
+
+    name = models.CharField(max_length=120)
+    email = models.EmailField()
+    topic = models.CharField(max_length=12, choices=TOPIC_CHOICES, default=TOPIC_GENERAL)
+    message = models.TextField()
+    # Set when the sender happened to be signed in, so a reply can be matched
+    # to an account without asking them who they are.
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                             on_delete=models.SET_NULL, related_name='contact_messages')
+    is_handled = models.BooleanField(
+        default=False, verbose_name='Dealt with',
+        help_text="Tick once this has been answered.")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('-created_at',)
+
+    def __str__(self):
+        return f'{self.get_topic_display()} from {self.email}'

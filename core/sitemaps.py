@@ -82,7 +82,10 @@ class StaticSitemap(Sitemap):
     priority = 0.7
 
     def items(self):
-        return ['home', 'browse', 'poets', 'dedications', 'collections', 'categories']
+        # The contribution forms are deliberately absent: both need an account,
+        # so a crawler sent there collects a sign-in page wearing their titles.
+        return ['home', 'browse', 'poets', 'dedications', 'collections',
+                'categories', 'about', 'contribute', 'contact', 'privacy']
 
     def location(self, name):
         return reverse(name)

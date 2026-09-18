@@ -1,85 +1,175 @@
 /*
- * Qasida Library admin styling.
- *
- * The layout follows JewelMS: a full-height dark sidebar carrying the brand,
- * the navigation and the signed-in user, a slim top bar, and a content area of
- * white rounded cards with bold headings and stat tiles. The palette is this
- * project's own - warm stone neutrals with emerald, matching the public site.
+ * Qasida Library admin.
  *
  * Django's own class names are restyled rather than replaced, so every stock
- * page and third-party widget keeps working.
+ * page and third-party widget keeps working; only a handful of q- classes are
+ * new, and those belong to the templates in this project.
+ *
+ * The look is deliberately quiet. An admin is a tool somebody uses for hours,
+ * not a landing page: one accent colour used only where something is actually
+ * primary, hairline borders instead of boxes inside boxes, sentence case
+ * instead of a wall of tracked-out capitals, and a light rail rather than a
+ * dark slab, so the eye is not dragged to the navigation on every glance.
+ * Everything that is not content - chrome, labels, counts - is set in the
+ * quietest colour that still passes contrast.
  */
 
+/* ---- tokens ----------------------------------------------------------- */
+
 :root {
-    /* Warm neutrals (stone), to match the paper ground of the public site. */
-    --q-stone-900: #1c1917;
-    --q-stone-800: #292524;
-    --q-stone-500: #78716c;
-    --q-stone-400: #a8a29e;
-    --q-stone-300: #d6d3d1;
-    --q-stone-100: #f5f5f4;
-    --q-stone-50: #fafaf9;
+    color-scheme: light;
 
-    /* Emerald, as on the public site. */
-    --q-accent: #047857;
-    --q-accent-strong: #065f46;
-    --q-accent-bright: #6ee7b7;
-    --q-accent-tint: #ecfdf5;
+    /* Warm neutrals, to match the paper ground of the public site. */
+    --q-ink: #1c1917;
+    --q-ink-soft: #57534e;
+    --q-muted: #78716c;
+    --q-faint: #a8a29e;
 
-    /* The sidebar is a deep emerald rather than a neutral black, so the dark
-       rail reads as part of the same identity. */
-    --q-rail: #04352a;
-    --q-rail-hover: #075640;
-    --q-rail-line: #0a4634;
-    --q-rail-text: #a7d9c7;
-    --q-rail-faint: #6ba892;
-
+    --q-ground: #f7f6f4;
     --q-surface: #ffffff;
-    --q-ground: #faf9f7;
-    --q-line: #ece9e4;
-    --q-ink: var(--q-stone-900);
-    --q-muted: var(--q-stone-500);
-    --q-faint: var(--q-stone-400);
+    --q-surface-2: #faf9f8;
+    --q-surface-3: #f3f1ef;
+    --q-line: #e7e3df;
+    --q-line-soft: #f0edea;
 
-    --q-radius: 1rem;
-    --q-radius-sm: .75rem;
-    --q-radius-xs: .5rem;
-    --q-shadow: 0 1px 2px rgba(28, 25, 23, .04);
-    --q-shadow-lg: 0 10px 30px -12px rgba(28, 25, 23, .2);
-    --q-sidebar: 15.5rem;
+    /* Emerald, as on the public site, but used sparingly. */
+    --q-accent: #0f7a5a;
+    --q-accent-hover: #0b6148;
+    --q-accent-ink: #065f46;
+    --q-accent-tint: #e9f7f1;
+    --q-accent-line: #bfe6d6;
+    --q-on-accent: #ffffff;
+
+    --q-warn: #b45309;
+    --q-warn-tint: #fef4e6;
+    --q-warn-line: #f5dfba;
+    --q-danger: #b91c1c;
+    --q-danger-tint: #fdeceb;
+    --q-danger-line: #f6cfcb;
+    --q-info-tint: #eef2f7;
+    --q-info-line: #d9e0ea;
+
+    --q-radius: 14px;
+    --q-radius-sm: 10px;
+    --q-radius-xs: 8px;
+    --q-radius-pill: 999px;
+
+    /* One soft elevation, and one for things that float. Anything more and
+       every panel starts competing to look nearest. */
+    --q-shadow: 0 1px 2px rgba(28, 25, 23, .04), 0 1px 1px rgba(28, 25, 23, .03);
+    --q-shadow-lg: 0 12px 32px -14px rgba(28, 25, 23, .28);
+    --q-ring: 0 0 0 3px rgba(15, 122, 90, .18);
+
+    --q-sidebar: 16rem;
+    --q-topbar: 3.5rem;
 }
 
+/* Two selectors for the same values: one for the theme chosen by hand, which
+   Django's own toggle writes to data-theme, and one for the browser's
+   preference when nothing has been chosen. */
 :root[data-theme="dark"] {
-    --q-surface: #1a1715;
-    --q-ground: #100e0d;
-    --q-line: #2b2622;
-    --q-ink: #f0efed;
-    --q-muted: #a8a29e;
-    --q-faint: #78716c;
+    color-scheme: dark;
+
+    --q-ink: #f2f0ee;
+    --q-ink-soft: #cfcac5;
+    --q-muted: #a09a94;
+    --q-faint: #7d7771;
+
+    --q-ground: #131110;
+    --q-surface: #1c1917;
+    --q-surface-2: #211d1b;
+    --q-surface-3: #2a2522;
+    --q-line: #332d29;
+    --q-line-soft: #2a2522;
+
+    --q-accent: #34b88c;
+    --q-accent-hover: #4fcfa3;
+    --q-accent-ink: #8fe3c4;
+    --q-accent-tint: #10241d;
+    --q-accent-line: #1d4438;
+    --q-on-accent: #07261c;
+
+    --q-warn: #f0b95f;
+    --q-warn-tint: #2a1f0f;
+    --q-warn-line: #4a3617;
+    --q-danger: #f28b82;
+    --q-danger-tint: #2b1514;
+    --q-danger-line: #4b2320;
+    --q-info-tint: #1d2229;
+    --q-info-line: #2e3640;
+
     --q-shadow: none;
+    --q-shadow-lg: 0 12px 32px -14px rgba(0, 0, 0, .6);
+    --q-ring: 0 0 0 3px rgba(52, 184, 140, .25);
 }
+
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-        --q-surface: #1a1715;
-        --q-ground: #100e0d;
-        --q-line: #2b2622;
-        --q-ink: #f0efed;
-        --q-muted: #a8a29e;
-        --q-faint: #78716c;
+        color-scheme: dark;
+
+        --q-ink: #f2f0ee;
+        --q-ink-soft: #cfcac5;
+        --q-muted: #a09a94;
+        --q-faint: #7d7771;
+
+        --q-ground: #131110;
+        --q-surface: #1c1917;
+        --q-surface-2: #211d1b;
+        --q-surface-3: #2a2522;
+        --q-line: #332d29;
+        --q-line-soft: #2a2522;
+
+        --q-accent: #34b88c;
+        --q-accent-hover: #4fcfa3;
+        --q-accent-ink: #8fe3c4;
+        --q-accent-tint: #10241d;
+        --q-accent-line: #1d4438;
+        --q-on-accent: #07261c;
+
+        --q-warn: #f0b95f;
+        --q-warn-tint: #2a1f0f;
+        --q-warn-line: #4a3617;
+        --q-danger: #f28b82;
+        --q-danger-tint: #2b1514;
+        --q-danger-line: #4b2320;
+        --q-info-tint: #1d2229;
+        --q-info-line: #2e3640;
+
         --q-shadow: none;
+        --q-shadow-lg: 0 12px 32px -14px rgba(0, 0, 0, .6);
+        --q-ring: 0 0 0 3px rgba(52, 184, 140, .25);
     }
 }
 
 
-/* ---- fluid scale ------------------------------------------------------
- * Sizes below are in rem, and the root grows with the viewport, so the admin
- * reads the same on a laptop and on a wide monitor. rem also tracks the
- * browser's font-size setting, so zoom and accessibility preferences work.
+/* ---- base -------------------------------------------------------------
+ * Sizes are in rem and the root grows with the viewport, so the admin reads
+ * the same on a laptop and on a wide monitor. rem also tracks the browser's
+ * own font-size setting, so zoom and accessibility preferences work.
  */
 html { font-size: clamp(15px, 0.22vw + 14px, 18px); }
 
+body {
+    background: var(--q-ground);
+    color: var(--q-ink);
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    font-feature-settings: "cv05" 1, "ss01" 1;
+    -webkit-font-smoothing: antialiased;
+}
+a { text-decoration: none; color: var(--q-accent); }
+a:hover { color: var(--q-accent-hover); }
+button, [role="button"], input[type=submit], .button { cursor: pointer; }
+:is(a, button, input, select, textarea, summary):focus-visible {
+    outline: 2px solid var(--q-accent);
+    outline-offset: 2px;
+}
+::selection { background: var(--q-accent-tint); color: var(--q-accent-ink); }
+hr { border: none; border-top: 1px solid var(--q-line); }
+
 /* Scraped text can contain very long unbroken runs; without this they refuse
-   to wrap and push out of the card.
+   to wrap and push out of the panel.
 
    Table cells are deliberately NOT in this list. A cell that may break inside
    a word, and may shrink to nothing, is one the browser will happily squeeze
@@ -97,187 +187,336 @@ body { overflow-wrap: anywhere; }
    unless it is told it may, so without this the wide results table pushes the
    whole row past the viewport - and because the page itself is set never to
    scroll sideways, the overflow is simply clipped and the filter rail and the
-   Add button disappear off the right edge. The table scrolls inside .results
-   instead, which is what it is there for. */
+   Add button disappear off the right edge. */
 #changelist, #changelist-form, .changelist-form-container, .results { min-width: 0; }
 img, svg, video, iframe { max-width: 100%; }
+html, body { max-width: 100%; overflow-x: hidden; }
 
-body {
-    background: var(--q-ground);
+h1 {
+    font-size: clamp(1.25rem, .8vw + 1rem, 1.6rem);
+    font-weight: 600;
+    letter-spacing: -.021em;
+    margin: .1rem 0 1.25rem;
     color: var(--q-ink);
-    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    font-size: 0.875rem;
-    line-height: 1.55;
 }
-a { text-decoration: none; }
-button, [role="button"], input[type=submit], .btn { cursor: pointer; }
+h2 { font-weight: 600; letter-spacing: -.01em; }
 
-/* ---- top bar: slim, because the brand lives in the sidebar ------------ */
+
+/* ---- top bar ----------------------------------------------------------
+ * The brand lives in the rail, so this carries only what is about the person
+ * using it: where they are, the site itself, the theme, and the way out.
+ */
 #header {
+    position: sticky;
+    top: 0;
+    z-index: 20;
     background: var(--q-surface);
+    background: color-mix(in srgb, var(--q-surface) 86%, transparent);
+    -webkit-backdrop-filter: saturate(1.6) blur(10px);
+    backdrop-filter: saturate(1.6) blur(10px);
     color: var(--q-ink);
     border-bottom: 1px solid var(--q-line);
     box-shadow: none;
-    padding: 0 1.5rem;
-    min-height: 3.5rem;
+    padding: 0 1.25rem;
+    min-height: var(--q-topbar);
     display: flex;
     align-items: center;
     justify-content: flex-end;
+    gap: .75rem;
 }
 #branding { display: none; }
+
 #user-tools {
-    font-size: 0.7812rem;
-    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: .35rem;
+    font-size: 0.75rem;
+    font-weight: 500;
     text-transform: none;
     letter-spacing: 0;
     color: var(--q-muted);
     margin: 0;
     padding: 0;
 }
-#user-tools a { color: var(--q-muted); border-bottom: none; }
-#user-tools a:hover { color: var(--q-accent); }
+#user-tools a,
+#user-tools button {
+    color: var(--q-ink-soft);
+    border-bottom: none;
+    border-radius: var(--q-radius-sm);
+    padding: .4rem .6rem;
+    font-weight: 500;
+    transition: background-color .12s ease, color .12s ease;
+}
+#user-tools a:hover, #user-tools button:hover {
+    background: var(--q-surface-3);
+    color: var(--q-ink);
+}
+/* Django renders the log-out control as a form; it should read as a control
+   on the same row, not as a block that pushes everything down. */
+#user-tools form { display: inline; margin: 0; }
+#user-tools form button {
+    background: none;
+    border: 0;
+    font: inherit;
+    cursor: pointer;
+}
 
+/* The chip carrying who is signed in. */
+.q-whoami {
+    display: inline-flex;
+    align-items: center;
+    gap: .45rem;
+    padding: .25rem .6rem .25rem .25rem;
+    border: 1px solid var(--q-line);
+    border-radius: var(--q-radius-pill);
+    background: var(--q-surface-2);
+    color: var(--q-ink);
+    font-weight: 600;
+    max-width: 12rem;
+}
+.q-whoami span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.q-topbar-divider {
+    width: 1px;
+    height: 1.25rem;
+    background: var(--q-line);
+    margin: 0 .15rem;
+}
+
+/* Django's own theme toggle, which writes data-theme on the root. It ships
+   unstyled apart from the icons, and lands here as a bare button. */
+button.theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 2rem;
+    width: 2rem;
+    padding: 0;
+    border: 1px solid var(--q-line);
+    border-radius: var(--q-radius-sm);
+    background: var(--q-surface-2);
+    color: var(--q-ink-soft);
+    cursor: pointer;
+    transition: background-color .12s ease, color .12s ease, border-color .12s ease;
+}
+button.theme-toggle:hover { background: var(--q-surface-3); color: var(--q-ink); border-color: var(--q-faint); }
+button.theme-toggle svg { height: 1rem; width: 1rem; fill: currentColor; }
+
+
+/* ---- breadcrumbs ------------------------------------------------------ */
 div.breadcrumbs {
     background: transparent;
     border: none;
     color: var(--q-faint);
-    padding: 1.25rem 1.75rem 0;
+    padding: 1.15rem 1.75rem .25rem;
     font-size: 0.75rem;
-    font-weight: 600;
+    font-weight: 500;
 }
 div.breadcrumbs a { color: var(--q-muted); }
 div.breadcrumbs a:hover { color: var(--q-accent); }
 
-#content { padding: 1.25rem 1.75rem 3rem; }
+#content { padding: .75rem 1.75rem 4rem; }
 #content-main { min-width: 0; }
-h1 { font-size: clamp(1.35rem, 1.1vw + 1rem, 1.9rem); font-weight: 800; letter-spacing: -.03em; margin: .25rem 0 1.4rem; }
-h2 { font-weight: 700; }
 
-/* ---- dark sidebar ---------------------------------------------------- */
+
+/* ---- sidebar ----------------------------------------------------------
+ * Light, and separated from the content by a hairline rather than by a slab
+ * of colour. Navigation is not the thing being worked on, so it should not be
+ * the first thing the eye lands on.
+ */
 #nav-sidebar {
-    background: var(--q-rail);
+    background: var(--q-surface);
     width: var(--q-sidebar);
-    border-right: none;
-    padding: 0 14px 18px;
+    border-right: 1px solid var(--q-line);
+    padding: 0 .7rem 1.25rem;
     min-height: 100vh;
 }
-.q-brand { padding: 22px 10px 18px; }
+
+.q-brand { padding: 1rem .35rem .85rem; }
 .q-brand-mark {
     display: flex;
     align-items: center;
-    gap: 10px;
-    font-size: 1.25rem;
-    font-weight: 800;
-    letter-spacing: -.04em;
-    color: #fff;
+    gap: .55rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    letter-spacing: -.02em;
+    color: var(--q-ink);
 }
 .q-brand-mark img { border-radius: 7px; }
+.q-brand-mark small {
+    display: block;
+    font-size: .6875rem;
+    font-weight: 500;
+    letter-spacing: 0;
+    color: var(--q-faint);
+}
 
 #nav-filter {
-    background: var(--q-rail-hover);
-    border: 2px solid transparent;
-    color: #fff;
+    background: var(--q-surface-2);
+    border: 1px solid var(--q-line);
+    color: var(--q-ink);
     border-radius: var(--q-radius-sm);
-    padding: 10px 14px;
-    margin: 0 0 14px;
+    padding: .5rem .7rem;
+    margin: 0 0 .75rem;
     width: 100%;
     box-sizing: border-box;
-    font-weight: 600;
-    font-size: 0.8125rem;
+    font-weight: 500;
+    font-size: 0.78125rem;
 }
-#nav-filter::placeholder { color: var(--q-rail-faint); }
-#nav-filter:focus { border-color: var(--q-accent); outline: none; box-shadow: none; }
+#nav-filter::placeholder { color: var(--q-faint); }
+#nav-filter:focus {
+    border-color: var(--q-accent);
+    outline: none;
+    box-shadow: var(--q-ring);
+}
 
-#nav-sidebar .module { background: transparent; box-shadow: none; border: none; margin: 0 0 10px; }
-#nav-sidebar caption, #nav-sidebar th[scope="col"] {
+#nav-sidebar .module {
     background: transparent;
-    color: var(--q-rail-faint);
-    font-size: 0.6562rem;
-    font-weight: 800;
-    letter-spacing: .12em;
+    box-shadow: none;
+    border: none;
+    border-radius: 0;
+    margin: 0 0 .35rem;
+    overflow: visible;
+}
+#nav-sidebar caption,
+#nav-sidebar th[scope="col"],
+.q-nav-group > .q-nav-heading {
+    background: transparent;
+    color: var(--q-faint);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: .04em;
     text-transform: uppercase;
     text-align: left;
-    padding: 8px 10px;
+    padding: .55rem .6rem .3rem;
     border: none;
 }
-#nav-sidebar tbody th, #nav-sidebar tbody td { border: none; padding: 2px 0; }
-#nav-sidebar tbody a {
-    display: block;
-    border-radius: var(--q-radius-xs);
-    padding: 0.7rem 0.9rem;
-    color: var(--q-rail-text);
-    font-weight: 600;
+#nav-sidebar tbody th, #nav-sidebar tbody td { border: none; padding: 1px 0; }
+#nav-sidebar tbody a,
+.q-nav-link {
+    display: flex;
+    align-items: center;
+    gap: .55rem;
+    border-radius: var(--q-radius-sm);
+    padding: .45rem .6rem;
+    color: var(--q-ink-soft);
+    font-weight: 500;
+    font-size: 0.8125rem;
+    transition: background-color .12s ease, color .12s ease;
 }
-#nav-sidebar tbody a:hover { background: var(--q-rail-hover); color: #fff; }
-#nav-sidebar .current-model a, #nav-sidebar tr.current-model td a {
-    background: var(--q-rail-hover);
-    color: #fff;
-    box-shadow: inset 3px 0 0 var(--q-accent-bright);
+#nav-sidebar tbody a:hover, .q-nav-link:hover {
+    background: var(--q-surface-3);
+    color: var(--q-ink);
+}
+#nav-sidebar .current-model a,
+#nav-sidebar tr.current-model td a,
+.q-nav-link[aria-current="page"] {
+    background: var(--q-accent-tint);
+    color: var(--q-accent-ink);
+    box-shadow: none;
+    font-weight: 600;
 }
 #nav-sidebar .addlink { display: none; }
 
-.q-side-tools { margin-top: 6px; padding-top: 14px; border-top: 1px solid var(--q-rail-line); }
-.q-side-link {
-    display: block;
-    padding: 9px 14px;
-    border-radius: var(--q-radius-xs);
-    color: var(--q-rail-text);
+/* The icon beside a nav entry. Stroked rather than filled, at the weight of
+   the text it sits beside, so a row does not read as an icon with a label. */
+.q-nav-icon {
+    flex: 0 0 auto;
+    height: 1rem;
+    width: 1rem;
+    color: var(--q-faint);
+}
+.q-nav-link:hover .q-nav-icon { color: var(--q-muted); }
+.q-nav-link[aria-current="page"] .q-nav-icon { color: var(--q-accent); }
+.q-nav-count {
+    margin-left: auto;
+    font-size: .6875rem;
     font-weight: 600;
+    color: var(--q-faint);
+    font-variant-numeric: tabular-nums;
+}
+.q-nav-list { list-style: none; margin: 0; padding: 0; }
+
+.q-side-tools {
+    margin-top: .5rem;
+    padding-top: .65rem;
+    border-top: 1px solid var(--q-line);
+}
+.q-side-link {
+    display: flex;
+    align-items: center;
+    gap: .55rem;
+    padding: .45rem .6rem;
+    border-radius: var(--q-radius-sm);
+    color: var(--q-ink-soft);
+    font-weight: 500;
     font-size: 0.8125rem;
 }
-.q-side-link:hover { background: var(--q-rail-hover); color: #fff; }
+.q-side-link:hover { background: var(--q-surface-3); color: var(--q-ink); }
+.q-side-link svg { height: 1rem; width: 1rem; color: var(--q-faint); flex: 0 0 auto; }
 
 .q-side-user {
     display: flex;
     align-items: center;
-    gap: 10px;
-    margin-top: 12px;
-    padding-top: 14px;
-    border-top: 1px solid var(--q-rail-line);
+    gap: .55rem;
+    margin-top: .65rem;
+    padding: .55rem .5rem;
+    border-radius: var(--q-radius-sm);
+    border: 1px solid var(--q-line);
+    background: var(--q-surface-2);
 }
 .q-avatar {
-    height: 34px;
-    width: 34px;
-    flex: 0 0 34px;
-    border-radius: 999px;
-    background: var(--q-accent-bright);
-    color: var(--q-rail);
-    font-weight: 800;
+    height: 1.9rem;
+    width: 1.9rem;
+    flex: 0 0 1.9rem;
+    border-radius: var(--q-radius-pill);
+    background: var(--q-accent-tint);
+    color: var(--q-accent-ink);
+    font-weight: 700;
+    font-size: .8125rem;
     display: grid;
     place-items: center;
 }
-.q-side-user-meta { min-width: 0; line-height: 1.3; }
-.q-side-user-meta b { display: block; color: #fff; font-size: 0.8125rem; font-weight: 700; }
+.q-side-user-meta { min-width: 0; line-height: 1.35; }
+.q-side-user-meta b {
+    display: block;
+    color: var(--q-ink);
+    font-size: 0.78125rem;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .q-side-user-meta a,
-.q-side-user-meta button { color: var(--q-rail-faint); font-size: 0.7188rem; font-weight: 600; }
+.q-side-user-meta button { color: var(--q-faint); font-size: 0.6875rem; font-weight: 500; }
 .q-side-user-meta a:hover,
-.q-side-user-meta button:hover { color: var(--q-accent-bright); }
-/* The log-out control has to be a form button; it should still read as a link. */
+.q-side-user-meta button:hover { color: var(--q-accent); }
 .q-side-user-meta button {
     background: none; border: 0; padding: 0; cursor: pointer;
     font-family: inherit; text-align: left;
 }
 
 #toggle-nav-sidebar {
-    background: var(--q-rail);
-    color: var(--q-rail-faint);
+    background: var(--q-surface);
+    color: var(--q-faint);
     border: none;
+    border-right: 1px solid var(--q-line);
     align-items: flex-end;
-    padding-bottom: 20px;
-    font-size: 1rem;
+    padding-bottom: 1.25rem;
+    font-size: .875rem;
 }
 #toggle-nav-sidebar:hover, #toggle-nav-sidebar:focus {
-    background: var(--q-rail);
-    color: #fff;
+    background: var(--q-surface-2);
+    color: var(--q-ink);
 }
 
-/* ---- cards ----------------------------------------------------------- */
+
+/* ---- panels ----------------------------------------------------------- */
 .module, .inline-group, #changelist, #changelist-filter {
     background: var(--q-surface);
     border: 1px solid var(--q-line);
     border-radius: var(--q-radius);
     box-shadow: var(--q-shadow);
-    margin-bottom: 18px;
+    margin-bottom: 1rem;
     overflow: hidden;
 }
 .module .module, .inline-group .module, .module fieldset {
@@ -285,96 +524,182 @@ h2 { font-weight: 700; }
 }
 .module h2, .module caption, .inline-group h2, #changelist-filter h2 {
     background: transparent;
-    color: var(--q-stone-500);
-    font-size: 0.6875rem;
-    font-weight: 800;
-    letter-spacing: .1em;
-    text-transform: uppercase;
-    padding: 16px 20px 12px;
-    border-bottom: 1px solid var(--q-line);
+    color: var(--q-ink);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: -.005em;
+    text-transform: none;
+    padding: .9rem 1.1rem .8rem;
+    border-bottom: 1px solid var(--q-line-soft);
 }
 
-/* ---- dashboard ------------------------------------------------------- */
+
+/* ---- dashboard -------------------------------------------------------- */
 .q-section {
     font-size: 0.6875rem;
-    font-weight: 800;
-    letter-spacing: .12em;
+    font-weight: 600;
+    letter-spacing: .05em;
     text-transform: uppercase;
     color: var(--q-faint);
-    margin: 28px 0 12px;
+    margin: 1.75rem 0 .7rem;
 }
-.q-dash > .q-section:first-of-type { margin-top: 14px; }
-.q-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
-.q-stats > div {
+.q-dash > .q-section:first-of-type { margin-top: .5rem; }
+
+.q-hello {
+    font-size: clamp(1.25rem, .8vw + 1rem, 1.55rem);
+    font-weight: 600;
+    letter-spacing: -.022em;
+    margin: .35rem 0 .2rem;
+}
+.q-hello-sub { color: var(--q-muted); margin: 0 0 1.35rem; font-size: .8125rem; }
+
+.q-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+    gap: .7rem;
+}
+.q-stats > * {
+    display: block;
     background: var(--q-surface);
     border: 1px solid var(--q-line);
     border-radius: var(--q-radius);
     box-shadow: var(--q-shadow);
-    padding: 18px 20px;
+    padding: .95rem 1.1rem;
+    color: inherit;
+    transition: border-color .12s ease, transform .12s ease;
 }
+a.q-stat:hover { border-color: var(--q-accent-line); transform: translateY(-1px); }
 .q-stats b {
     display: block;
-    font-size: clamp(1.5rem, 1.2vw + 1.1rem, 2.1rem);
-    font-weight: 800;
+    font-size: clamp(1.4rem, 1vw + 1.05rem, 1.85rem);
+    font-weight: 600;
     letter-spacing: -.03em;
     font-variant-numeric: tabular-nums;
-    line-height: 1.1;
+    line-height: 1.15;
+    color: var(--q-ink);
 }
-.q-stats span { font-size: 0.75rem; font-weight: 600; color: var(--q-muted); }
+.q-stats span { font-size: 0.75rem; font-weight: 500; color: var(--q-muted); }
+/* A figure that is a call to act reads in the accent; the rest are just
+   facts and stay in the ink colour. */
+.q-stat-live b { color: var(--q-warn); }
 
-.q-tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.q-tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: .7rem; }
 .q-tool {
     display: block;
+    position: relative;
     background: var(--q-surface);
     border: 1px solid var(--q-line);
     border-radius: var(--q-radius);
     box-shadow: var(--q-shadow);
-    padding: 18px 20px;
-    transition: box-shadow .15s ease, transform .15s ease, border-color .15s ease;
+    padding: 1rem 1.1rem;
+    color: inherit;
+    transition: border-color .14s ease, box-shadow .14s ease, transform .14s ease;
 }
-.q-tool:hover { box-shadow: var(--q-shadow-lg); transform: translateY(-2px); border-color: var(--q-accent); }
-.q-tool strong { display: block; font-size: 0.9375rem; font-weight: 700; color: var(--q-ink); margin-bottom: 4px; }
-.q-tool span { font-size: 0.7812rem; color: var(--q-muted); line-height: 1.5; }
+.q-tool:hover {
+    border-color: var(--q-accent-line);
+    box-shadow: var(--q-shadow-lg);
+    transform: translateY(-2px);
+}
+.q-tool-icon {
+    display: grid;
+    place-items: center;
+    height: 2rem;
+    width: 2rem;
+    border-radius: var(--q-radius-sm);
+    background: var(--q-accent-tint);
+    color: var(--q-accent);
+    margin-bottom: .7rem;
+}
+.q-tool-icon svg { height: 1.05rem; width: 1.05rem; }
+.q-tool strong {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--q-ink);
+    margin-bottom: .2rem;
+    letter-spacing: -.01em;
+}
+.q-tool span { display: block; font-size: 0.76rem; color: var(--q-muted); line-height: 1.55; }
 
-.q-manage { background: var(--q-surface); border: 1px solid var(--q-line); border-radius: var(--q-radius); box-shadow: var(--q-shadow); }
-.q-manage-row { display: flex; align-items: center; gap: 14px; padding: 14px 20px; border-bottom: 1px solid var(--q-line); }
+.q-manage {
+    background: var(--q-surface);
+    border: 1px solid var(--q-line);
+    border-radius: var(--q-radius);
+    box-shadow: var(--q-shadow);
+    overflow: hidden;
+}
+.q-manage-row {
+    display: flex;
+    align-items: center;
+    gap: .85rem;
+    padding: .75rem 1.1rem;
+    border-bottom: 1px solid var(--q-line-soft);
+}
 .q-manage-row:last-child { border-bottom: none; }
-.q-manage-name { font-weight: 700; color: var(--q-ink); }
+.q-manage-row:hover { background: var(--q-surface-2); }
+.q-manage-name { font-weight: 600; color: var(--q-ink); }
 .q-manage-name:hover { color: var(--q-accent); }
-.q-manage-app { flex: 1; font-size: 0.6875rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--q-faint); }
-.q-manage-add { font-size: 0.7812rem; font-weight: 700; color: var(--q-muted); }
-.q-manage-add:hover { color: var(--q-accent); }
+.q-manage-app {
+    flex: 1;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    color: var(--q-faint);
+}
+.q-manage-add {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--q-muted);
+    border: 1px solid var(--q-line);
+    border-radius: var(--q-radius-pill);
+    padding: .15rem .6rem;
+}
+.q-manage-add:hover { color: var(--q-accent); border-color: var(--q-accent-line); background: var(--q-accent-tint); }
 
+.q-aside { min-width: 0; }
 .q-activity { list-style: none; margin: 0; padding: 0; }
-.q-activity li { padding: 11px 0; border-bottom: 1px solid var(--q-line); font-size: 0.8125rem; }
+.q-activity li {
+    padding: .6rem 0;
+    border-bottom: 1px solid var(--q-line-soft);
+    font-size: 0.8125rem;
+}
 .q-activity li:last-child { border-bottom: none; }
-.q-activity a { color: var(--q-ink); font-weight: 600; }
+.q-activity a { color: var(--q-ink); font-weight: 500; }
 .q-activity a:hover { color: var(--q-accent); }
-.q-activity em { display: block; font-style: normal; font-size: 0.6875rem; font-weight: 600; color: var(--q-faint); }
+.q-activity em {
+    display: block;
+    font-style: normal;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: var(--q-faint);
+}
 .q-empty { color: var(--q-faint); font-size: 0.8125rem; }
 
-/* ---- tables ---------------------------------------------------------- */
-#changelist table { border: none; }
+
+/* ---- tables ----------------------------------------------------------- */
+#changelist table { border: none; border-collapse: separate; border-spacing: 0; }
 #changelist thead th {
-    background: var(--q-surface);
+    background: var(--q-surface-2);
     border-bottom: 1px solid var(--q-line);
-    padding: 1rem 1.25rem;
+    padding: .6rem 1rem;
     font-size: 0.6875rem;
-    font-weight: 800;
-    letter-spacing: .09em;
+    font-weight: 600;
+    letter-spacing: .04em;
     text-transform: uppercase;
-    color: var(--q-stone-500);
+    color: var(--q-muted);
     position: sticky;
-    top: 0;
+    top: var(--q-topbar);
     z-index: 2;
 }
+#changelist thead th a { color: inherit; }
 #changelist tbody td, #changelist tbody th {
-    border-bottom: 1px solid var(--q-line);
-    padding: 0.95rem 1.25rem;
+    border-bottom: 1px solid var(--q-line-soft);
+    padding: .65rem 1rem;
     vertical-align: middle;
+    color: var(--q-ink-soft);
 }
-#changelist tbody tr:hover > * { background: var(--q-stone-50); }
-:root[data-theme="dark"] #changelist tbody tr:hover > * { background: #1a2331; }
+#changelist tbody tr:hover > * { background: var(--q-surface-2); }
 #changelist tbody tr:last-child > * { border-bottom: none; }
 #changelist .row1, #changelist .row2 { background: transparent; }
 #changelist tbody a { color: var(--q-ink); font-weight: 600; }
@@ -386,46 +711,94 @@ h2 { font-weight: 700; }
 #changelist td, #changelist th { overflow-wrap: normal; word-break: normal; }
 #changelist #result_list { width: max-content; min-width: 100%; }
 /* The title is the column people scan, and the one most likely to be long. */
-#changelist tbody th, #changelist th.column-title, #changelist td.field-title {
+#changelist tbody th, #changelist th.column-title, #changelist td.field-title,
+#changelist td.field-display_title {
     min-width: 16rem;
     max-width: 30rem;
     white-space: normal;
 }
-/* Everything else stays on one line and lets the table scroll. */
 #changelist tbody td { white-space: nowrap; }
 .results { overflow-x: auto; }
+
+/* Status pills.
+ *
+ * Applied by admin.js to the columns that hold a state - a review state, a
+ * contribution's status, the quality of a text. A list of a hundred rows is
+ * scanned for the exceptions in it, and a word set in the same grey as every
+ * other word does not answer that. */
+.q-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: .3rem;
+    padding: .1rem .5rem;
+    border-radius: var(--q-radius-pill);
+    border: 1px solid var(--q-line);
+    background: var(--q-surface-3);
+    color: var(--q-ink-soft);
+    font-size: .6875rem;
+    font-weight: 600;
+    line-height: 1.5;
+    white-space: nowrap;
+}
+.q-pill::before {
+    content: "";
+    height: .375rem;
+    width: .375rem;
+    border-radius: var(--q-radius-pill);
+    background: currentColor;
+    opacity: .85;
+}
+.q-pill-good { background: var(--q-accent-tint); border-color: var(--q-accent-line); color: var(--q-accent-ink); }
+.q-pill-wait { background: var(--q-warn-tint); border-color: var(--q-warn-line); color: var(--q-warn); }
+.q-pill-bad { background: var(--q-danger-tint); border-color: var(--q-danger-line); color: var(--q-danger); }
+.q-pill-info { background: var(--q-info-tint); border-color: var(--q-info-line); color: var(--q-ink-soft); }
 
 a.addlink, a.changelink, a.deletelink, a.viewlink {
     background-image: none !important;
     padding-left: 0 !important;
     color: var(--q-muted);
-    font-weight: 600;
+    font-weight: 500;
 }
 a.addlink:hover, a.changelink:hover, a.viewlink:hover { color: var(--q-accent); }
-a.deletelink:hover { color: #dc2626; }
+a.deletelink:hover { color: var(--q-danger); }
 
-/* ---- buttons: emerald primary, bold, generous radius ----------------- */
+
+/* ---- buttons ---------------------------------------------------------- */
 .button, input[type=submit], input[type=button], .submit-row input, a.button {
     background: var(--q-surface);
     color: var(--q-ink);
     border: 1px solid var(--q-line);
     border-radius: var(--q-radius-sm);
-    padding: 0.7rem 1.1rem;
-    font-weight: 700;
-    font-size: 0.8125rem;
-    box-shadow: none;
-    transition: background-color .15s ease, box-shadow .15s ease;
+    padding: .5rem .85rem;
+    font-weight: 600;
+    font-size: 0.78125rem;
+    line-height: 1.35;
+    box-shadow: var(--q-shadow);
+    transition: background-color .12s ease, border-color .12s ease, transform .06s ease;
 }
-.button:hover, input[type=submit]:hover, a.button:hover { background: var(--q-stone-50); }
+.button:hover, input[type=submit]:hover, a.button:hover {
+    background: var(--q-surface-2);
+    border-color: var(--q-faint);
+}
+.button:active, input[type=submit]:active { transform: translateY(1px); }
 .button.default, input[type=submit].default, .submit-row input.default {
     background: var(--q-accent);
     border-color: var(--q-accent);
-    color: #fff;
-    font-weight: 800;
-    box-shadow: var(--q-shadow-lg);
+    color: var(--q-on-accent);
+    font-weight: 600;
+    box-shadow: var(--q-shadow);
 }
-.button.default:hover, input[type=submit].default:hover { background: var(--q-accent-strong); }
-.submit-row a.deletelink { background: #fee2e2; color: #b91c1c; border-radius: var(--q-radius-sm); padding: 0.7rem 1.1rem; }
+.button.default:hover, input[type=submit].default:hover {
+    background: var(--q-accent-hover);
+    border-color: var(--q-accent-hover);
+}
+.submit-row a.deletelink {
+    background: var(--q-danger-tint);
+    border: 1px solid var(--q-danger-line);
+    color: var(--q-danger);
+    border-radius: var(--q-radius-sm);
+    padding: .5rem .85rem;
+}
 
 /* Django floats this row right, which overflows the moment a label is as long
    as "Extract text from a PDF or image". A wrapping flex row keeps the buttons
@@ -434,7 +807,7 @@ a.deletelink:hover { color: #dc2626; }
     display: flex;
     flex-wrap: wrap;
     justify-content: flex-end;
-    gap: .45rem;
+    gap: .4rem;
     float: none;
     margin: 0 0 .75rem;
     padding: 0;
@@ -445,336 +818,304 @@ a.deletelink:hover { color: #dc2626; }
     border: 1px solid var(--q-line);
     color: var(--q-ink);
     border-radius: var(--q-radius-sm);
-    padding: 10px 16px;
-    font-size: 0.7812rem;
-    font-weight: 700;
+    padding: .5rem .85rem;
+    font-size: 0.75rem;
+    font-weight: 600;
     letter-spacing: 0;
     text-transform: none;
-    box-shadow: none;
+    box-shadow: var(--q-shadow);
 }
-.object-tools a:hover { border-color: var(--q-accent); }
+.object-tools a:hover { border-color: var(--q-faint); background: var(--q-surface-2); }
 .object-tools a.addlink {
     background: var(--q-accent);
     border-color: var(--q-accent);
-    color: #fff;
-    font-weight: 800;
-    box-shadow: var(--q-shadow-lg);
+    color: var(--q-on-accent);
+    font-weight: 600;
 }
-.object-tools a.addlink:hover { background: var(--q-accent-strong); }
+.object-tools a.addlink:hover { background: var(--q-accent-hover); border-color: var(--q-accent-hover); }
 
-/* The save bar lays itself out rather than inheriting Django's own floats,
-   which put Delete hard against the panel edge, outside the padding. The
-   saves sit together on the left; Delete is pushed to the far right by an
-   auto margin, so it stays inside the padding and well away from the button
-   someone actually meant to press. */
+/* The save bar follows the form down the page.
+ *
+ * A qasida with its lyrics, transliteration and translation is several
+ * screens long, and Save sat at the bottom of it: every correction to a line
+ * near the top meant scrolling past the whole poem to commit it. Sticky, it
+ * is always one press away, and the blur keeps the text legible underneath.
+ *
+ * It also lays itself out rather than inheriting Django's floats, which put
+ * Delete hard against the panel edge, outside the padding. The saves sit
+ * together on the left; Delete is pushed to the far right by an auto margin,
+ * well away from the button someone actually meant to press. */
 .submit-row {
+    position: sticky;
+    bottom: 0;
+    z-index: 15;
     background: var(--q-surface);
+    background: color-mix(in srgb, var(--q-surface) 92%, transparent);
+    -webkit-backdrop-filter: saturate(1.6) blur(10px);
+    backdrop-filter: saturate(1.6) blur(10px);
     border: 1px solid var(--q-line);
     border-radius: var(--q-radius);
-    box-shadow: var(--q-shadow);
-    padding: 16px 20px;
-    margin-top: 18px;
+    box-shadow: var(--q-shadow-lg);
+    padding: .7rem .9rem;
+    margin-top: 1rem;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: .6rem;
+    gap: .5rem;
 }
 .submit-row input, .submit-row a, .submit-row p { float: none; margin: 0; }
 .submit-row a.deletelink, .submit-row .deletelink-box { margin-left: auto; }
-/* Every control on the row is set to the same box, so they line up. */
 .submit-row input, .submit-row a.deletelink, .submit-row a.closelink {
-    padding: 0.7rem 1.1rem;
-    line-height: 1.15;
+    padding: .5rem .85rem;
+    line-height: 1.35;
     height: auto;
     display: inline-flex;
     align-items: center;
 }
 
-/* ---- forms: tinted fields, thick light border, emerald focus -------- */
+
+/* ---- forms ------------------------------------------------------------ */
 input[type=text], input[type=password], input[type=email], input[type=url],
-input[type=number], input[type=tel], input[type=search], textarea, select, .vTextField {
-    background: var(--q-stone-50);
+input[type=number], input[type=tel], input[type=search], input[type=date],
+input[type=time], textarea, select, .vTextField {
+    background: var(--q-surface);
     color: var(--q-ink);
-    border: 2px solid var(--q-line);
+    border: 1px solid var(--q-line);
     border-radius: var(--q-radius-sm);
-    padding: 0.7rem 0.9rem;
-    font-size: 0.8438rem;
-    font-weight: 600;
+    padding: .5rem .7rem;
+    font-size: 0.8125rem;
+    font-weight: 450;
+    font-family: inherit;
+    transition: border-color .12s ease, box-shadow .12s ease;
 }
-:root[data-theme="dark"] input, :root[data-theme="dark"] textarea, :root[data-theme="dark"] select {
-    background: #0e1520;
-}
+input::placeholder, textarea::placeholder { color: var(--q-faint); }
 input:focus, textarea:focus, select:focus {
     outline: none;
     border-color: var(--q-accent);
-    box-shadow: none;
+    box-shadow: var(--q-ring);
 }
-fieldset { border: none; padding: 4px 0 10px; }
-.form-row { border-bottom: 1px solid var(--q-line); padding: 16px 20px; }
+input[type=checkbox], input[type=radio] { accent-color: var(--q-accent); }
+fieldset { border: none; padding: .2rem 0 .5rem; }
+.form-row { border-bottom: 1px solid var(--q-line-soft); padding: .85rem 1.1rem; }
 .form-row:last-child { border-bottom: none; }
-.aligned label { color: var(--q-stone-500); font-weight: 700; font-size: 0.75rem; letter-spacing: .02em; }
-.help, .helptext { color: var(--q-faint); font-size: 0.75rem; font-weight: 500; }
+.aligned label {
+    color: var(--q-ink-soft);
+    font-weight: 600;
+    font-size: 0.75rem;
+    letter-spacing: 0;
+}
+.help, .helptext, div.help {
+    color: var(--q-faint);
+    font-size: 0.72rem;
+    font-weight: 450;
+    line-height: 1.5;
+}
+.errorlist {
+    list-style: none;
+    margin: 0 0 .4rem;
+    padding: .45rem .7rem;
+    background: var(--q-danger-tint);
+    border: 1px solid var(--q-danger-line);
+    border-radius: var(--q-radius-sm);
+    color: var(--q-danger);
+    font-size: .75rem;
+    font-weight: 500;
+}
+.form-row.errors { background: transparent; }
 
-/* ---- filter sidebar -------------------------------------------------- */
-#changelist-filter { width: 258px; padding-bottom: 8px; }
+
+/* ---- filter rail ------------------------------------------------------ */
+#changelist-filter { width: 16rem; padding-bottom: .4rem; }
 #changelist-filter h3, .q-filter-head {
-    font-size: 0.6562rem;
-    font-weight: 800;
-    letter-spacing: .12em;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: .04em;
     text-transform: uppercase;
     color: var(--q-faint);
-    padding: 15px 18px 6px;
+    padding: .8rem 1rem .35rem;
     margin: 0;
 }
-#changelist-filter ul { padding: 0 12px 12px; margin: 0; list-style: none; }
+#changelist-filter ul { padding: 0 .6rem .6rem; margin: 0; list-style: none; }
 #changelist-filter li a {
     display: block;
     border-radius: var(--q-radius-xs);
-    padding: 8px 12px;
-    color: var(--q-ink);
+    padding: .35rem .6rem;
+    color: var(--q-ink-soft);
+    font-weight: 500;
+    font-size: .78125rem;
+}
+#changelist-filter li a:hover { background: var(--q-surface-3); color: var(--q-ink); }
+#changelist-filter li.selected a {
+    background: var(--q-accent-tint);
+    color: var(--q-accent-ink);
     font-weight: 600;
 }
-#changelist-filter li a:hover { background: var(--q-stone-50); }
-#changelist-filter li.selected a { background: var(--q-accent-tint); color: var(--q-accent-strong); }
 #changelist-filter li.selected { border-left: none; }
 
-.q-find { padding: 4px 16px 16px; }
-.q-find-row { display: block; margin-bottom: 10px; }
-.q-find-row span { display: block; font-size: 0.6875rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--q-faint); margin-bottom: 4px; }
-.q-find-row input { width: 100%; box-sizing: border-box; padding: 9px 12px; font-size: 0.8125rem; }
-.q-find-actions { display: flex; gap: 8px; margin-top: 12px; }
+.q-find { padding: .2rem .9rem .9rem; }
+.q-find-row { display: block; margin-bottom: .55rem; }
+.q-find-row span {
+    display: block;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    color: var(--q-faint);
+    margin-bottom: .2rem;
+}
+.q-find-row input { width: 100%; box-sizing: border-box; padding: .4rem .6rem; font-size: 0.78125rem; }
+.q-find-actions { display: flex; gap: .45rem; margin-top: .65rem; }
 .q-btn-primary {
     flex: 1;
     background: var(--q-accent);
-    color: #fff;
-    border: none;
+    color: var(--q-on-accent);
+    border: 1px solid var(--q-accent);
     border-radius: var(--q-radius-sm);
-    padding: 10px 14px;
-    font-weight: 800;
-    font-size: 0.8125rem;
+    padding: .45rem .7rem;
+    font-weight: 600;
+    font-size: 0.78125rem;
+    font-family: inherit;
 }
-.q-btn-primary:hover { background: var(--q-accent-strong); }
+.q-btn-primary:hover { background: var(--q-accent-hover); border-color: var(--q-accent-hover); }
 .q-btn-quiet {
-    border: 2px solid var(--q-line);
+    border: 1px solid var(--q-line);
     border-radius: var(--q-radius-sm);
-    padding: 9px 14px;
-    font-size: 0.8125rem;
-    font-weight: 700;
+    padding: .45rem .7rem;
+    font-size: 0.78125rem;
+    font-weight: 600;
     color: var(--q-muted);
     text-align: center;
+    background: var(--q-surface);
 }
-.q-btn-quiet:hover { border-color: var(--q-accent); color: var(--q-ink); }
+.q-btn-quiet:hover { border-color: var(--q-faint); color: var(--q-ink); }
 
-/* ---- search + pagination -------------------------------------------- */
-#toolbar { background: transparent; border: none; border-bottom: 1px solid var(--q-line); padding: 16px 20px; }
-#toolbar form #searchbar { border-radius: var(--q-radius-sm); padding: 11px 16px; min-width: min(420px, 56vw); }
-#toolbar form input[type=submit] { margin-left: 8px; }
-.paginator {
-    border-top: 1px solid var(--q-line);
+
+/* ---- search and pagination ------------------------------------------- */
+#toolbar {
     background: transparent;
-    padding: 16px 20px;
-    font-size: 0.7812rem;
-    font-weight: 600;
+    border: none;
+    border-bottom: 1px solid var(--q-line-soft);
+    padding: .8rem 1.1rem;
+}
+#toolbar form { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem; }
+#toolbar form #searchbar {
+    border-radius: var(--q-radius-sm);
+    padding: .5rem .8rem;
+    min-width: min(26rem, 56vw);
+}
+#toolbar form input[type=submit] { margin-left: 0; }
+#toolbar form label { display: inline-flex; align-items: center; }
+/* Django hides the magnifier label; the placeholder does that work instead. */
+#searchbar { background-image: none; }
+
+.paginator {
+    border-top: 1px solid var(--q-line-soft);
+    background: transparent;
+    padding: .75rem 1.1rem;
+    font-size: 0.75rem;
+    font-weight: 500;
     color: var(--q-muted);
 }
-.paginator a, .paginator .this-page { border-radius: var(--q-radius-xs); padding: 7px 12px; margin-right: 4px; font-weight: 700; }
-.paginator a { color: var(--q-muted); }
-.paginator a:hover { background: var(--q-stone-50); }
-.paginator .this-page { background: var(--q-accent-tint); color: var(--q-accent-strong); }
-
-/* ---- messages, inlines ---------------------------------------------- */
-ul.messagelist li {
-    border-radius: var(--q-radius-sm);
-    box-shadow: none;
-    padding: 14px 18px 14px 46px;
-    margin-bottom: 10px;
+.paginator a, .paginator .this-page {
+    border-radius: var(--q-radius-xs);
+    padding: .25rem .55rem;
+    margin-right: .2rem;
     font-weight: 600;
 }
+.paginator a { color: var(--q-muted); }
+.paginator a:hover { background: var(--q-surface-3); color: var(--q-ink); }
+.paginator .this-page { background: var(--q-accent-tint); color: var(--q-accent-ink); }
+
+/* The second set of pagination controls, above the grid. Django's own sit
+   under the table; these are the same markup, so they are given a little air
+   and a rule to sit against rather than styling of their own. */
+.q-paginator-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .45rem;
+    padding: 0 1.1rem .7rem;
+    border-bottom: 1px solid var(--q-line-soft);
+    margin-bottom: .2rem;
+}
+.q-paginator-top .paginator { border: none; padding: 0; margin: 0; background: none; }
+
+/* The action bar above a changelist. */
+#changelist .actions {
+    background: var(--q-surface-2);
+    border-bottom: 1px solid var(--q-line-soft);
+    padding: .6rem 1.1rem;
+    color: var(--q-muted);
+    font-size: .75rem;
+}
+#changelist .actions select { margin-right: .3rem; }
+#changelist .actions .button { padding: .4rem .7rem; }
+
+
+/* ---- messages and inlines -------------------------------------------- */
+ul.messagelist { padding: 0 1.75rem; margin: .9rem 0 0; }
+ul.messagelist li {
+    border-radius: var(--q-radius-sm);
+    border: 1px solid var(--q-accent-line);
+    background: var(--q-accent-tint);
+    color: var(--q-accent-ink);
+    box-shadow: none;
+    padding: .65rem .9rem;
+    margin-bottom: .45rem;
+    font-weight: 500;
+    font-size: .8125rem;
+    background-image: none;
+}
+ul.messagelist li.warning {
+    border-color: var(--q-warn-line); background: var(--q-warn-tint); color: var(--q-warn);
+}
+ul.messagelist li.error {
+    border-color: var(--q-danger-line); background: var(--q-danger-tint); color: var(--q-danger);
+}
+
 .inline-related h3 {
     background: transparent;
-    border-bottom: 1px solid var(--q-line);
-    padding: 12px 20px;
+    border-bottom: 1px solid var(--q-line-soft);
+    padding: .65rem 1.1rem;
     font-size: 0.75rem;
-    font-weight: 800;
-    letter-spacing: .06em;
-    text-transform: uppercase;
-    color: var(--q-stone-500);
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--q-ink-soft);
 }
-.inline-group .tabular td, .inline-group .tabular th { padding: 0.7rem 0.9rem; }
-.q-inline-body { padding-top: 2px; }
+.inline-group .tabular td, .inline-group .tabular th { padding: .5rem .7rem; }
+.q-inline-body { padding-top: .1rem; }
 
-/* ---- collapsible sections ------------------------------------------- */
-.q-collapsible { cursor: pointer; user-select: none; position: relative; padding-right: 34px !important; }
+
+/* ---- collapsible sections -------------------------------------------- */
+.q-collapsible { cursor: pointer; user-select: none; position: relative; padding-right: 2rem !important; }
 .q-collapsible::after {
     content: "";
     position: absolute;
-    right: 16px;
+    right: 1rem;
     top: 50%;
-    width: 6px;
-    height: 6px;
-    border-right: 2px solid currentColor;
-    border-bottom: 2px solid currentColor;
+    width: .35rem;
+    height: .35rem;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
     transform: translateY(-70%) rotate(45deg);
     transition: transform .16s ease;
-    opacity: .5;
+    opacity: .45;
 }
 .q-collapsible.q-collapsed::after { transform: translateY(-50%) rotate(-45deg); }
 .q-collapsible:hover::after { opacity: 1; }
 .q-collapsible:focus-visible { outline: 2px solid var(--q-accent); outline-offset: -2px; }
 
+
 /* Arabic and Urdu need a naskh face and room for the vowel marks. */
 textarea[name="lyrics"], textarea[name="suggested_lyrics"],
 textarea[name="transliteration"], textarea[name="translation"],
-input[name="arabic_title"], #ocr-output {
+input[name="native_title"], #ocr-output {
     font-family: "Noto Naskh Arabic", serif;
     font-size: 1.05rem;
     font-weight: 400;
     line-height: 2.1;
     unicode-bidi: plaintext;
-}
-
-@media (max-width: 1024px) {
-    #changelist-filter { width: auto; }
-    #content { padding: 1rem; }
-    #header { padding: 0 1rem; }
-    div.breadcrumbs { padding: .9rem 1rem 0; }
-    h1 { font-size: clamp(1.25rem, 3vw, 1.5rem); }
-}
-
-/* ---- phones ----------------------------------------------------------
- * Django collapses its own sidebar below 767px. The fixed width and full
- * height set above would stop that working, so they are released here and
- * the rail lays out in the normal flow instead.
- */
-@media (max-width: 767px) {
-    #nav-sidebar {
-        width: auto;
-        min-height: 0;
-        padding: 0 .75rem .75rem;
-    }
-    .q-brand { padding: 1rem .5rem .75rem; }
-
-    /* The top bar has to wrap rather than squash its links onto one line. */
-    #header {
-        height: auto;
-        min-height: 0;
-        padding: .6rem 1rem;
-        flex-wrap: wrap;
-        justify-content: flex-start;
-        gap: .5rem;
-    }
-    #user-tools { width: 100%; text-align: left; line-height: 1.7; }
-
-    #content { padding: .85rem; }
-    div.breadcrumbs { padding: .75rem .85rem 0; }
-
-    /* Panels lose their side margins so the content keeps its width. */
-    .module, .inline-group, #changelist, #changelist-filter { border-radius: .75rem; }
-    .module h2, .module caption, .inline-group h2 { padding: .85rem 1rem .7rem; }
-    .form-row { padding: .85rem 1rem; }
-
-    /* A wide table scrolls inside its own panel rather than the page. */
-    #changelist { overflow: hidden; }
-    .results { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-    #changelist thead th, #changelist tbody td, #changelist tbody th {
-        padding: .7rem .75rem;
-        white-space: nowrap;
-    }
-    /* Narrower measure than the desktop one, so a phone is not scrolled
-       sideways further than it has to be. */
-    #changelist tbody th, #changelist th.column-title, #changelist td.field-title {
-        white-space: normal;
-        min-width: 11rem;
-        max-width: 16rem;
-    }
-
-    /* Stack the label above the field: side-by-side is unreadable at this width. */
-    .aligned label { display: block; width: auto; padding: 0 0 .25rem; float: none; }
-    .aligned .vTextField, .aligned input, .aligned select, .aligned textarea { width: 100%; box-sizing: border-box; }
-
-    /* Action bars wrap instead of overflowing. */
-    /* Left-aligned and full width on a phone, where a right-aligned row of
-       buttons reads as stray. */
-    .object-tools { justify-content: stretch; gap: .4rem; }
-    .object-tools li { flex: 1 1 auto; }
-    .object-tools a { display: block; text-align: center; }
-    .submit-row { gap: .5rem; padding: .85rem 1rem; }
-    /* Full width and stacked on a phone; Delete last, and not nudged away by
-       an auto margin that has nowhere to push to. */
-    .submit-row input, .submit-row a {
-        width: 100%;
-        text-align: center;
-        justify-content: center;
-    }
-    .submit-row a.deletelink, .submit-row .deletelink-box { margin-left: 0; }
-    #changelist-form .actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
-    #toolbar form #searchbar { min-width: 0; width: 100%; }
-    #toolbar { padding: .85rem 1rem; }
-
-    /* Dashboard grids collapse to one column on their own, but the figures
-       should not dominate the screen. */
-    .q-stats { grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr)); gap: .6rem; }
-    .q-stats > div { padding: .85rem 1rem; }
-    .q-manage-row { flex-wrap: wrap; gap: .4rem 1rem; padding: .85rem 1rem; }
-    .q-manage-app { flex-basis: 100%; order: 3; }
-}
-
-/* Nothing should ever make the page itself scroll sideways. */
-html, body { max-width: 100%; overflow-x: hidden; }
-
-
-/* The second set of pagination controls, above the grid. Django's own sit
-   under the table; these are the same markup, so they are given a little air
-   and a rule to sit against instead of new styling of their own. */
-.q-paginator-top {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: .5rem;
-    padding: 0 1.25rem .85rem;
-    border-bottom: 1px solid var(--q-line);
-    margin-bottom: .25rem;
-}
-.q-paginator-top .paginator { border: none; padding: 0; margin: 0; background: none; }
-@media (max-width: 767px) {
-    .q-paginator-top { padding: 0 1rem .7rem; }
-}
-
-
-/* ---- phones, continued -----------------------------------------------
- * These rules only began to apply once this stylesheet was loaded after
- * Django's responsive.css; before that Django's own mobile rules, written
- * for the stock layout rather than this one, won every conflict.
- */
-@media (max-width: 767px) {
-    /* Django's select2 widgets size themselves from an inline style, which
-       overflows a narrow screen. */
-    .select2-container { width: 100% !important; max-width: 100%; }
-    .select2-container .select2-selection--multiple,
-    .select2-container .select2-selection--single { min-height: 2.5rem; }
-    /* The dropdown panel must not sit wider than the viewport. */
-    .select2-dropdown { max-width: calc(100vw - 1.5rem); }
-
-    /* A related-widget wrapper puts the + and pencil beside the field; on a
-       phone they belong under it, or the field is squeezed to nothing. */
-    .related-widget-wrapper { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
-    .related-widget-wrapper > select,
-    .related-widget-wrapper > .select2-container { flex: 1 1 100%; }
-
-    /* Both sets of pagination controls wrap rather than overflow. */
-    .q-paginator-top, .paginator {
-        display: flex; flex-wrap: wrap; align-items: center; gap: .4rem;
-    }
-
-    /* Inline formsets are tables on desktop and unreadable at this width. */
-    .inline-group .tabular td, .inline-group .tabular th { white-space: normal; }
-    .inline-group .tabular { overflow-x: auto; }
-
-    /* The date/time shortcuts stack under their field instead of beside it. */
-    .form-row .datetime input { width: auto; max-width: 100%; }
-
-    /* Nothing may force the page itself sideways. */
-    #content, #content-main, .module, form { max-width: 100%; }
 }
 
 
@@ -790,10 +1131,7 @@ ul.q-tag-choices {
     columns: 4 11rem;
     column-gap: 1.25rem;
 }
-ul.q-tag-choices li {
-    break-inside: avoid;
-    margin: 0 0 .1rem;
-}
+ul.q-tag-choices li { break-inside: avoid; margin: 0 0 .1rem; }
 ul.q-tag-choices label {
     display: flex;
     align-items: center;
@@ -801,29 +1139,265 @@ ul.q-tag-choices label {
     /* A comfortable target to tap, not a 13px line of text. */
     min-height: 2rem;
     padding: .2rem .4rem;
-    border-radius: .4rem;
-    font-size: .8125rem;
-    line-height: 1.3;
+    border-radius: var(--q-radius-xs);
+    font-size: .78125rem;
+    line-height: 1.35;
     cursor: pointer;
 }
-ul.q-tag-choices label:hover { background: var(--q-stone-50); }
+ul.q-tag-choices label:hover { background: var(--q-surface-3); }
 ul.q-tag-choices input[type="checkbox"] {
-    width: 1.05rem;
-    height: 1.05rem;
+    width: 1rem;
+    height: 1rem;
     flex: 0 0 auto;
     margin: 0;
-    accent-color: var(--q-accent);
 }
 /* A chosen tag should be findable at a glance in a column of twenty. */
-ul.q-tag-choices input[type="checkbox"]:checked + span,
 ul.q-tag-choices label:has(input:checked) {
-    color: var(--q-accent-strong);
-    font-weight: 700;
+    color: var(--q-accent-ink);
+    background: var(--q-accent-tint);
+    font-weight: 600;
 }
 
+
+/* ---- laptops and tablets ---------------------------------------------- */
+@media (max-width: 1024px) {
+    #changelist-filter { width: auto; }
+    #content { padding: .75rem 1rem 3rem; }
+    #header { padding: 0 1rem; }
+    div.breadcrumbs { padding: .9rem 1rem .2rem; }
+    ul.messagelist { padding: 0 1rem; }
+}
+
+
+/* ---- phones -----------------------------------------------------------
+ * Django collapses its own sidebar below 767px. The fixed width and full
+ * height set above would stop that working, so they are released here and the
+ * rail lays out in the normal flow instead.
+ */
 @media (max-width: 767px) {
-    /* Two columns on a phone; one would scroll for ever, four would be
+    #nav-sidebar {
+        width: auto;
+        min-height: 0;
+        border-right: none;
+        border-bottom: 1px solid var(--q-line);
+        padding: 0 .75rem .75rem;
+    }
+    .q-brand { padding: .9rem .4rem .7rem; }
+
+    /* The top bar has to wrap rather than squash its links onto one line. */
+    #header {
+        position: static;
+        height: auto;
+        min-height: 0;
+        padding: .5rem .85rem;
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        gap: .4rem;
+    }
+    #user-tools { width: 100%; flex-wrap: wrap; justify-content: flex-start; }
+    .q-topbar-divider { display: none; }
+
+    #content { padding: .7rem .85rem 3rem; }
+    div.breadcrumbs { padding: .7rem .85rem .2rem; }
+    ul.messagelist { padding: 0 .85rem; }
+
+    /* Panels keep their corners but lose their inner padding. */
+    .module, .inline-group, #changelist, #changelist-filter { border-radius: 12px; }
+    .module h2, .module caption, .inline-group h2 { padding: .75rem .9rem .6rem; }
+    .form-row { padding: .75rem .9rem; }
+
+    /* A wide table scrolls inside its own panel rather than the page. */
+    #changelist { overflow: hidden; }
+    .results { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    #changelist thead th { position: static; }
+    #changelist thead th, #changelist tbody td, #changelist tbody th {
+        padding: .55rem .7rem;
+        white-space: nowrap;
+    }
+    /* Narrower measure than the desktop one, so a phone is not scrolled
+       sideways further than it has to be. */
+    #changelist tbody th, #changelist th.column-title, #changelist td.field-title,
+    #changelist td.field-display_title {
+        white-space: normal;
+        min-width: 11rem;
+        max-width: 16rem;
+    }
+
+    /* Stack the label above the field: side-by-side is unreadable at this width. */
+    .aligned label { display: block; width: auto; padding: 0 0 .25rem; float: none; }
+    .aligned .vTextField, .aligned input, .aligned select, .aligned textarea {
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    /* Left-aligned and full width on a phone, where a right-aligned row of
+       buttons reads as stray. */
+    .object-tools { justify-content: stretch; gap: .35rem; }
+    .object-tools li { flex: 1 1 auto; }
+    .object-tools a { display: block; text-align: center; }
+
+    /* The save bar stays sticky - it is worth more on a phone than anywhere -
+       but stacks, with Delete last and not nudged away by an auto margin that
+       has nowhere to push to. */
+    .submit-row { gap: .4rem; padding: .7rem .85rem; }
+    .submit-row input, .submit-row a {
+        width: 100%;
+        text-align: center;
+        justify-content: center;
+    }
+    .submit-row a.deletelink, .submit-row .deletelink-box { margin-left: 0; }
+
+    #changelist-form .actions { display: flex; flex-wrap: wrap; gap: .45rem; align-items: center; }
+    #toolbar form #searchbar { min-width: 0; width: 100%; }
+    #toolbar { padding: .75rem .9rem; }
+
+    .q-stats { grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: .5rem; }
+    .q-stats > * { padding: .75rem .85rem; }
+    .q-manage-row { flex-wrap: wrap; gap: .3rem .85rem; padding: .75rem .9rem; }
+    .q-manage-app { flex-basis: 100%; order: 3; }
+
+    /* Two columns of tag checkboxes; one would scroll for ever, four would be
        unreadable. */
     ul.q-tag-choices { columns: 2 8rem; column-gap: .75rem; }
-    ul.q-tag-choices label { min-height: 2.35rem; font-size: .8438rem; }
+    ul.q-tag-choices label { min-height: 2.35rem; font-size: .8125rem; }
+}
+
+
+/* ---- phones, continued -----------------------------------------------
+ * These rules only apply because this stylesheet is loaded after Django's
+ * responsive.css; before that Django's own mobile rules, written for the
+ * stock layout rather than this one, won every conflict.
+ */
+@media (max-width: 767px) {
+    /* Django's select2 widgets size themselves from an inline style, which
+       overflows a narrow screen. */
+    .select2-container { width: 100% !important; max-width: 100%; }
+    .select2-container .select2-selection--multiple,
+    .select2-container .select2-selection--single { min-height: 2.5rem; }
+    .select2-dropdown { max-width: calc(100vw - 1.5rem); }
+
+    /* A related-widget wrapper puts the + and pencil beside the field; on a
+       phone they belong under it, or the field is squeezed to nothing. */
+    .related-widget-wrapper { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+    .related-widget-wrapper > select,
+    .related-widget-wrapper > .select2-container { flex: 1 1 100%; }
+
+    .q-paginator-top, .paginator {
+        display: flex; flex-wrap: wrap; align-items: center; gap: .35rem;
+    }
+
+    /* Inline formsets are tables on desktop and unreadable at this width. */
+    .inline-group .tabular td, .inline-group .tabular th { white-space: normal; }
+    .inline-group .tabular { overflow-x: auto; }
+
+    .form-row .datetime input { width: auto; max-width: 100%; }
+    #content, #content-main, .module, form { max-width: 100%; }
+}
+
+
+/* Someone who has asked for less movement gets less of it. */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        transition-duration: .01ms !important;
+        animation-duration: .01ms !important;
+    }
+}
+
+
+/* ---- Django's own variables ------------------------------------------
+ * The stock admin exposes its palette as custom properties, and every page
+ * and widget this project has not restyled reads them - the calendar popup,
+ * select2, the related-object windows. Pointing them at the tokens above is
+ * what keeps those consistent instead of leaving islands of Django blue.
+ *
+ * Every theme selector is listed together, at the specificity Django's own
+ * dark_mode.css uses (html[data-theme="dark"]), because a lower one would
+ * lose to it in dark mode. One block is enough for all of them: the values
+ * are --q- tokens, and those already switch with the theme.
+ */
+html[data-theme="light"],
+html[data-theme="dark"],
+html[data-theme="auto"],
+:root {
+    --primary: var(--q-accent);
+    --secondary: var(--q-accent);
+    --accent: var(--q-accent-hover);
+    --primary-fg: var(--q-on-accent);
+
+    --body-fg: var(--q-ink);
+    --body-bg: var(--q-ground);
+    --body-quiet-color: var(--q-muted);
+    --body-loud-color: var(--q-ink);
+
+    --header-color: var(--q-ink);
+    --header-branding-color: var(--q-ink);
+    --header-bg: var(--q-surface);
+    --header-link-color: var(--q-ink);
+
+    --breadcrumbs-fg: var(--q-faint);
+    --breadcrumbs-link-fg: var(--q-muted);
+    --breadcrumbs-bg: transparent;
+
+    --link-fg: var(--q-accent);
+    --link-hover-color: var(--q-accent-hover);
+    --link-selected-fg: var(--q-accent-ink);
+
+    --hairline-color: var(--q-line-soft);
+    --border-color: var(--q-line);
+
+    --error-fg: var(--q-danger);
+
+    --message-success-bg: var(--q-accent-tint);
+    --message-warning-bg: var(--q-warn-tint);
+    --message-error-bg: var(--q-danger-tint);
+
+    --darkened-bg: var(--q-surface-2);
+    --selected-bg: var(--q-surface-3);
+    --selected-row: var(--q-accent-tint);
+
+    --button-fg: var(--q-on-accent);
+    --button-bg: var(--q-accent);
+    --button-hover-bg: var(--q-accent-hover);
+    --default-button-bg: var(--q-accent);
+    --default-button-hover-bg: var(--q-accent-hover);
+    --close-button-bg: var(--q-muted);
+    --close-button-hover-bg: var(--q-ink);
+    --delete-button-bg: var(--q-danger);
+    --delete-button-hover-bg: var(--q-danger);
+
+    --object-tools-fg: var(--q-ink);
+    --object-tools-bg: var(--q-surface);
+    --object-tools-hover-bg: var(--q-surface-2);
+
+    --font-family-primary: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+
+/* ---- odds and ends in the navigation ---------------------------------- */
+
+/* The app heading is a link on the per-app index page and plain text in the
+   rail; both should read as the heading, not as a link to follow. */
+.q-nav-heading a { color: inherit; }
+.q-nav-heading a:hover { color: var(--q-accent); }
+
+/* Add and Change, which only appear on the per-app index page. */
+.q-nav-actions {
+    display: inline-flex;
+    gap: .6rem;
+    padding: 0 .6rem .4rem 2.15rem;
+    font-size: .72rem;
+}
+#nav-sidebar .q-nav-actions { display: none; }
+
+/* The filter box when nothing in the rail matches what was typed. */
+#nav-filter.no-results { border-color: var(--q-danger-line); color: var(--q-danger); }
+
+/* The per-app index page uses this same list, where it is content rather than
+   a rail and wants a panel around it. */
+.app-index .q-nav-group {
+    background: var(--q-surface);
+    border: 1px solid var(--q-line);
+    border-radius: var(--q-radius);
+    box-shadow: var(--q-shadow);
+    padding: .3rem .6rem .5rem;
 }

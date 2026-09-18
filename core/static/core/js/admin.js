@@ -1,9 +1,16 @@
 /*
- * Collapsible sections for the admin.
+ * The admin's behaviour, beyond what Django ships.
  *
- * Django renders the left nav and the filter sidebar as flat lists. This turns
- * each group into a disclosure that remembers whether it was open, so long
- * lists (58 tags, five filter groups) stop pushing everything off-screen.
+ *   - Collapsible groups in the left nav, the filter rail and inline formsets,
+ *     each remembering whether it was open. Django renders them as flat lists,
+ *     and a flat list of 58 tags or five filter groups pushes everything else
+ *     off the screen.
+ *   - The sidebar's own quick filter. Django's version selects rows by
+ *     `th[scope=row] a`, which is the table markup this project replaced with
+ *     a list; its own handler now matches nothing, so this one does the work.
+ *   - Searching a changelist as you type.
+ *   - Status columns drawn as pills rather than as one more grey word.
+ *   - Pressing / to reach the search box.
  */
 (function () {
     'use strict';
@@ -62,12 +69,141 @@
         var sidebar = document.getElementById('nav-sidebar');
         if (!sidebar) return;
         sidebar.querySelectorAll('.module').forEach(function (module, index) {
-            var caption = module.querySelector('caption, th[scope="col"], h2');
-            if (!caption) return;
-            // The rows live in the table body next to the caption.
-            var panel = module.querySelector('tbody') || module.querySelector('ul');
-            var label = (caption.textContent || ('app-' + index)).trim();
-            makeCollapsible(caption, panel, 'nav:' + label, false);
+            var heading = module.querySelector('h2, caption, th[scope="col"]');
+            if (!heading) return;
+            var panel = module.querySelector('ul') || module.querySelector('tbody');
+            var label = (heading.textContent || ('app-' + index)).trim();
+            makeCollapsible(heading, panel, 'nav:' + label, false);
+        });
+    }
+
+    /*
+     * Narrow the sidebar to whatever is typed in it.
+     *
+     * Django's own version of this reads the stock table markup, which the
+     * app_list template here replaces with a list; its handler therefore finds
+     * no rows and does nothing but leave a "no results" class behind, which
+     * this clears. Groups left with nothing showing are hidden too, so
+     * filtering does not leave a column of empty headings.
+     */
+    function setUpNavFilter() {
+        var input = document.getElementById('nav-filter');
+        var sidebar = document.getElementById('nav-sidebar');
+        if (!input || !sidebar) return;
+
+        var groups = Array.prototype.map.call(
+            sidebar.querySelectorAll('.module'), function (group) {
+                return {
+                    node: group,
+                    items: Array.prototype.map.call(
+                        group.querySelectorAll('.q-nav-list > li'), function (item) {
+                            return {node: item, text: (item.textContent || '').toLowerCase()};
+                        }),
+                };
+            });
+        if (!groups.length) return;  // stock table markup: leave Django to it
+
+        function apply() {
+            var needle = (input.value || '').trim().toLowerCase();
+            var anyShown = false;
+            groups.forEach(function (group) {
+                var shown = 0;
+                group.items.forEach(function (item) {
+                    var hit = !needle || item.text.indexOf(needle) !== -1;
+                    item.node.style.display = hit ? '' : 'none';
+                    if (hit) shown += 1;
+                });
+                group.node.style.display = (needle && !shown) ? 'none' : '';
+                anyShown = anyShown || shown > 0;
+            });
+            input.classList.toggle('no-results', Boolean(needle) && !anyShown);
+            try {
+                sessionStorage.setItem('django.admin.navSidebarFilterValue', needle);
+            } catch (e) { /* private mode: the filter simply does not persist */ }
+        }
+
+        input.addEventListener('input', apply);
+        input.addEventListener('keyup', function (event) {
+            if (event.key === 'Escape') {
+                input.value = '';
+                apply();
+            }
+        });
+
+        try {
+            var stored = sessionStorage.getItem('django.admin.navSidebarFilterValue');
+            if (stored) input.value = stored;
+        } catch (e) { /* nothing stored */ }
+        apply();
+    }
+
+    /*
+     * Draw the state columns as pills.
+     *
+     * A changelist of a hundred rows is scanned for the exceptions in it -
+     * what is still pending, what is rejected, which text cannot be trusted -
+     * and a word set in the same grey as every other word does not answer
+     * that. The text is left exactly as Django rendered it; only its
+     * appearance changes, so sorting, filtering and the column headings are
+     * untouched.
+     *
+     * Matched on the value rather than on the column, so a state that is
+     * added later needs nothing here, and a column this does not recognise is
+     * left alone rather than guessed at.
+     */
+    var PILL_COLUMNS = ['review_state', 'status', 'text_quality', 'kind',
+                        'translation_origin', 'topic'];
+    var PILL_TONES = [
+        [/^(approved|accepted|extracted)/i, 'q-pill-good'],
+        [/^(awaiting|waiting|pending)/i, 'q-pill-wait'],
+        [/^(rejected|declined|unreliable)/i, 'q-pill-bad'],
+    ];
+
+    function toneFor(text) {
+        for (var i = 0; i < PILL_TONES.length; i += 1) {
+            if (PILL_TONES[i][0].test(text)) return PILL_TONES[i][1];
+        }
+        return 'q-pill-info';
+    }
+
+    function setUpStatusPills() {
+        var table = document.getElementById('result_list');
+        if (!table) return;
+        PILL_COLUMNS.forEach(function (column) {
+            table.querySelectorAll('td.field-' + column).forEach(function (cell) {
+                // A cell holding a control - list_editable renders a select
+                // here - is left alone; a pill would hide the thing that is
+                // meant to be used.
+                if (cell.querySelector('input, select, textarea, a')) return;
+                var text = (cell.textContent || '').trim();
+                if (!text || text === '-' || text === '\u2014') return;
+                var pill = document.createElement('span');
+                pill.className = 'q-pill ' + toneFor(text);
+                pill.textContent = text;
+                cell.textContent = '';
+                cell.appendChild(pill);
+            });
+        });
+    }
+
+    /*
+     * Press / to reach the search box.
+     *
+     * Only when nothing else is focused, so it never swallows a slash typed
+     * into a field - which on this site means a date, a URL, or a poet whose
+     * name is two names joined with one.
+     */
+    function setUpSearchShortcut() {
+        document.addEventListener('keydown', function (event) {
+            if (event.key !== '/' || event.metaKey || event.ctrlKey || event.altKey) return;
+            var active = document.activeElement;
+            if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' ||
+                           active.tagName === 'SELECT' || active.isContentEditable)) return;
+            var box = document.getElementById('searchbar') || document.getElementById('nav-filter');
+            if (!box) return;
+            event.preventDefault();
+            box.focus();
+            box.select();
         });
     }
 
@@ -168,8 +304,11 @@
 
     document.addEventListener('DOMContentLoaded', function () {
         setUpNavSidebar();
+        setUpNavFilter();
         setUpFilterSidebar();
         setUpFieldsets();
         setUpLiveSearch();
+        setUpStatusPills();
+        setUpSearchShortcut();
     });
 })();

@@ -1,4 +1,4 @@
-from django.contrib import admin
+from django.contrib import admin, messages as django_messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.shortcuts import redirect, render
@@ -6,6 +6,7 @@ from django.urls import path
 from django.db.models import Count, Max
 from django.utils import timezone
 
+from . import notify
 from .admin_filters import MissingDetailFilter, TextSearchPanel
 from .forms import QasidaAdminForm
 from .ocr_tool import OcrUploadForm, run_ocr
@@ -14,9 +15,9 @@ from .tasks import enrich_qasida
 admin.site.site_header = "Qasida Library"
 admin.site.site_title = "Qasida Library"
 admin.site.index_title = "Library administration"
-from .models import (Collection, Dedication, Favourite, Tag, Poet, Qasida,
-                     QasidaImage, QasidaMedia, ReadingHistory, ReaderProfile,
-                     Suggestion, SourceWebsite)
+from .models import (Collection, ContactMessage, Contribution, Dedication,
+                     Favourite, Tag, Poet, Qasida, QasidaImage, QasidaMedia,
+                     ReadingHistory, ReaderProfile, Suggestion, SourceWebsite)
 
 class LibraryAdmin(admin.ModelAdmin):
     """
@@ -128,6 +129,12 @@ class QasidaAdmin(LibraryAdmin):
     # a metre meant scrolling past the languages. The form offers one control
     # per axis instead and folds them back into the single relation on save.
     form = QasidaAdminForm
+    # Named explicitly because LibraryAdmin sets one: with change_list_template
+    # set, Django never looks for admin/core/qasida/change_list.html, so the
+    # Extract text button that template adds was never rendered. That template
+    # now extends the project's own change list, so this keeps the second set
+    # of pagination controls as well.
+    change_list_template = 'admin/core/qasida/change_list.html'
 
     def get_fields(self, request, obj=None):
         """Leave out any tag axis nothing is filed under.
@@ -527,3 +534,120 @@ class PoetAdmin(LibraryAdmin):
     @admin.display(description='Qasidas', ordering='_works')
     def qasida_count(self, obj):
         return obj._works
+
+
+@admin.register(Contribution)
+class ContributionAdmin(LibraryAdmin):
+    """
+    Qasidas readers have asked for, and qasidas readers have sent in.
+
+    The day-to-day queue is the site's own inbox at /contributions/, which
+    shows the verses beside the source and writes a reply to the sender in one
+    press. This exists for what that page is not for: finding an old one,
+    correcting a typed poet's name before publishing, and running a decision
+    over a batch.
+    """
+
+    list_display = ('display_title', 'kind', 'status', 'from_whom', 'language',
+                    'has_text', 'published_as', 'created_at')
+    list_filter = ('status', 'kind', 'created_at')
+    search_fields = ('title', 'native_title', 'poet_name', 'dedication_name',
+                     'lyrics', 'note', 'source_note', 'user__username', 'user__email')
+    list_select_related = ('user', 'published_as')
+    autocomplete_fields = ('user',)
+    readonly_fields = ('created_at', 'reviewed_at', 'reviewed_by')
+    date_hierarchy = 'created_at'
+    actions = ['publish_selected', 'accept_selected', 'decline_selected']
+    fieldsets = (
+        ('What it is', {'fields': ('kind', 'user', 'created_at')}),
+        ('The work', {'fields': ('title', 'native_title', 'poet_name',
+                                 'dedication_name', 'language')}),
+        ('The text', {'fields': ('lyrics', 'transliteration', 'translation')}),
+        ('Where it comes from', {'fields': ('source_url', 'source_note', 'note')}),
+        ('Decision', {'fields': ('status', 'staff_note', 'published_as',
+                                 'reviewed_at', 'reviewed_by')}),
+    )
+
+    @admin.display(description='From', ordering='user__username')
+    def from_whom(self, obj):
+        if not obj.user_id:
+            return 'a deleted account'
+        return f'{obj.user.username} ({obj.user.email})' if obj.user.email else obj.user.username
+
+    @admin.display(description='Text', boolean=True)
+    def has_text(self, obj):
+        return bool(obj.lyrics)
+
+    @admin.action(description="Create a record from each (leaves it awaiting review)")
+    def publish_selected(self, request, queryset):
+        """
+        Turn the selected submissions into qasidas.
+
+        Each new record lands in the review queue rather than on the site, for
+        the same reason a crawled one does: nobody has read it yet. Anything
+        without a text, or already published, is skipped rather than silently
+        producing an empty record.
+        """
+        made, skipped = 0, 0
+        for contribution in queryset:
+            if not contribution.can_publish():
+                skipped += 1
+                continue
+            contribution.publish(by=request.user)
+            notify.contribution_decided(contribution, request)
+            made += 1
+        self.message_user(
+            request,
+            f"Created {made} record(s), each awaiting review. "
+            f"{skipped} had no text to make one from, or already had one.",
+            level=django_messages.WARNING if skipped and not made else django_messages.INFO)
+
+    @admin.action(description="Accept (without creating a record)")
+    def accept_selected(self, request, queryset):
+        for contribution in queryset:
+            contribution.accept(by=request.user)
+            notify.contribution_decided(contribution, request)
+        self.message_user(request, f"Accepted {queryset.count()}, and told each sender.")
+
+    @admin.action(description="Decline")
+    def decline_selected(self, request, queryset):
+        for contribution in queryset:
+            contribution.decline(by=request.user)
+            notify.contribution_decided(contribution, request)
+        self.message_user(request, f"Declined {queryset.count()}, and told each sender.")
+
+
+@admin.register(ContactMessage)
+class ContactMessageAdmin(LibraryAdmin):
+    """
+    What people wrote to the library.
+
+    Stored as well as emailed, so this is the copy that survives a mail rule
+    filing a message somewhere nobody looks. Read-only apart from the "dealt
+    with" tick: nothing here is ours to edit, and a record of a message that
+    has been altered is worth less than no record.
+    """
+
+    list_display = ('created_at', 'topic', 'name', 'email', 'opening', 'is_handled')
+    list_filter = ('is_handled', 'topic', 'created_at')
+    list_editable = ('is_handled',)
+    search_fields = ('name', 'email', 'message')
+    date_hierarchy = 'created_at'
+    ordering = ('is_handled', '-created_at')
+    readonly_fields = ('name', 'email', 'topic', 'message', 'user', 'created_at')
+    actions = ['mark_handled']
+
+    @admin.display(description='Message')
+    def opening(self, obj):
+        text = obj.message.strip().replace('\n', ' ')
+        return f'{text[:90]}…' if len(text) > 90 else text
+
+    def has_add_permission(self, request):
+        # These arrive from the contact form; one typed in here would be a
+        # message nobody sent.
+        return False
+
+    @admin.action(description="Mark as dealt with")
+    def mark_handled(self, request, queryset):
+        count = queryset.update(is_handled=True)
+        self.message_user(request, f"{count} message(s) marked as dealt with.")

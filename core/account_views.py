@@ -23,7 +23,8 @@ from django.views.decorators.http import require_POST
 
 from .forms import (AccountEmailForm, FavouriteNoteForm, ReadingPreferencesForm,
                     RegistrationForm, SignInForm)
-from .models import Favourite, Qasida, ReaderProfile, ReadingHistory, Suggestion
+from .models import (Contribution, Favourite, Qasida, ReaderProfile,
+                     ReadingHistory, Suggestion)
 from .search import normalize
 
 PAGE_SIZE = 24
@@ -280,6 +281,31 @@ def my_corrections(request):
     })
 
 
+@never_cache
+@login_required
+def my_contributions(request):
+    """
+    What this reader has asked for and sent in, and where each one stands.
+
+    The point of the page is the status column. Someone who types out a
+    qasida from a book is doing unpaid work for a library, and the least it
+    owes them is a place that says whether it was read, what became of it,
+    and - once it is up - a link to the thing they helped make.
+    """
+    contributions = (Contribution.objects
+                     .filter(user=request.user)
+                     .select_related('published_as')
+                     .order_by('-created_at'))
+    paginator = Paginator(contributions, PAGE_SIZE)
+    return render(request, 'core/account/contributions.html', {
+        'page_obj': paginator.get_page(request.GET.get('page')),
+        'total': paginator.count,
+        'waiting': contributions.filter(status=Contribution.STATUS_PENDING).count(),
+        'accepted': contributions.filter(status=Contribution.STATUS_ACCEPTED).count(),
+        'tab': 'contributions',
+    })
+
+
 # --------------------------------------------------------------------------
 # Settings
 # --------------------------------------------------------------------------
@@ -313,6 +339,7 @@ def account_settings(request):
         'saved_count': Favourite.objects.filter(user=request.user).count(),
         'history_count': ReadingHistory.objects.filter(user=request.user).count(),
         'corrections_count': Suggestion.objects.filter(user=request.user).count(),
+        'contributions_count': Contribution.objects.filter(user=request.user).count(),
     })
 
 
