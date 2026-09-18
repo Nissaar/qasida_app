@@ -1,5 +1,5 @@
 {% load static %}/* Qasida Library service worker. Bump CACHE_VERSION to invalidate. */
-const CACHE_VERSION = 'qasida-v1';
+const CACHE_VERSION = 'qasida-v2';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const PAGE_CACHE = `${CACHE_VERSION}-pages`;
 const MEDIA_CACHE = `${CACHE_VERSION}-media`;
@@ -16,7 +16,8 @@ const SHELL_ASSETS = [
    than about the library - a saved list, a reading history, an email address.
    These would otherwise be stored on the device and served back offline to
    whoever opens the browser next. */
-const BYPASS = [/^\/admin\//, /^\/suggestions\//, /\/edit\/$/,
+const BYPASS = [/^\/admin\//, /^\/suggestions\//, /^\/contributions\//,
+                /^\/contribute\/(request|submit)\//, /\/edit\/$/,
                 /^\/my\//, /^\/accounts\//];
 
 self.addEventListener('install', (event) => {

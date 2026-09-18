@@ -1,0 +1,110 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Privacy | Qasida Library{% endblock %}
+{% block meta_description %}What the Qasida Library stores about a reader, why, for how long, and what it does not store at all.{% endblock %}
+{% block og_title %}Privacy at the Qasida Library{% endblock %}
+{% block og_description %}What is stored about a reader, why, and for how long.{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl">
+    <p class="eyebrow mb-2">Privacy</p>
+    <h1 class="font-display text-3xl sm:text-4xl text-brand-900 dark:text-brand-100">What this site knows about you</h1>
+    <p class="text-lg text-stone-600 dark:text-stone-300 mt-4 leading-relaxed">
+        Written plainly, because a privacy notice nobody can read protects
+        nobody. The short version: you can read the whole library without an
+        account, and an account exists so that what you save follows you between
+        devices.
+    </p>
+</div>
+
+<div class="max-w-3xl grid gap-6 mt-8">
+    <section class="card p-6">
+        <h2 class="font-display text-xl text-brand-900 dark:text-brand-100 mb-3">Reading without an account</h2>
+        <ul class="text-sm text-stone-600 dark:text-stone-300 leading-relaxed space-y-2 list-disc pl-5">
+            <li>No account, no tracking cookie, and no advertising or analytics scripts of any kind.</li>
+            <li>The server writes an ordinary access log &mdash; the page asked for, the time, the address it was asked from &mdash; which is what any web server does and what makes it possible to tell a fault from an attack.</li>
+            <li>Whether you prefer the light or dark theme is kept in your own browser and never sent anywhere.</li>
+            <li>Pages you have opened are stored in your browser's cache so they can be read again without a signal. Clearing your browser data removes them.</li>
+        </ul>
+    </section>
+
+    <section class="card p-6">
+        <h2 class="font-display text-xl text-brand-900 dark:text-brand-100 mb-3">If you open an account</h2>
+        <p class="text-sm text-stone-600 dark:text-stone-300 leading-relaxed mb-3">
+            An account holds a username, an email address, and a password that is
+            stored only as a hash &mdash; nobody here can read it, including us.
+            The email address is used to sign in and to reset the password, and to
+            reply to you if you write in. It is never sold, shared or added to a
+            mailing list.
+        </p>
+        <p class="text-sm text-stone-600 dark:text-stone-300 leading-relaxed mb-3">Signed in, the site also keeps:</p>
+        <ul class="text-sm text-stone-600 dark:text-stone-300 leading-relaxed space-y-2 list-disc pl-5">
+            <li><strong class="font-medium">What you saved</strong>, with any note you wrote against it. The notes are yours; nothing shows them to anyone else.</li>
+            <li><strong class="font-medium">What you have read recently</strong>, so you can find your way back to it. It is capped at a fixed number of entries, the oldest falling off, and you can clear the whole of it in one press from <a href="{% url 'my_history' %}" class="text-brand-700 dark:text-brand-300 hover:underline">Recently read</a>.</li>
+            <li><strong class="font-medium">How you like verse laid out</strong> &mdash; text size, whether to show the transliteration and translation.</li>
+            <li><strong class="font-medium">Corrections and contributions you sent</strong>, so you can see what became of them.</li>
+        </ul>
+        <p class="text-sm text-stone-600 dark:text-stone-300 leading-relaxed mt-3">
+            Editors see counts, never contents: how many works an account has
+            saved, not which ones. There is no page in the administration of this
+            site that lists one person's shelf or reading history.
+        </p>
+    </section>
+
+    <section class="card p-6">
+        <h2 class="font-display text-xl text-brand-900 dark:text-brand-100 mb-3">Closing an account</h2>
+        <p class="text-sm text-stone-600 dark:text-stone-300 leading-relaxed">
+            <a href="{% url 'account_settings' %}" class="text-brand-700 dark:text-brand-300 hover:underline">Settings</a>
+            has a way out that needs your password and then deletes the account,
+            what you saved, your reading history and your preferences. Two things
+            survive it, both detached from your name: corrections that were already
+            applied to a text, and texts you contributed that are now part of the
+            library. Those have stopped being facts about you and become part of
+            the record of where the library's contents came from.
+        </p>
+    </section>
+
+    <section class="card p-6">
+        <h2 class="font-display text-xl text-brand-900 dark:text-brand-100 mb-3">Writing in</h2>
+        <p class="text-sm text-stone-600 dark:text-stone-300 leading-relaxed">
+            A message sent from the <a href="{% url 'contact' %}" class="text-brand-700 dark:text-brand-300 hover:underline">contact form</a>
+            is stored here and emailed to the library's address so it is not lost
+            if mail fails. It carries whatever you put in it: your name, your email
+            address, and what you wrote. A correction sent from a qasida page works
+            the same way. Both are kept while they are useful and are used for
+            nothing but answering you and fixing the text.
+        </p>
+    </section>
+
+    <section class="card p-6">
+        <h2 class="font-display text-xl text-brand-900 dark:text-brand-100 mb-3">Other people's servers</h2>
+        <ul class="text-sm text-stone-600 dark:text-stone-300 leading-relaxed space-y-2 list-disc pl-5">
+            <li><strong class="font-medium">Fonts and styling</strong> are fetched from Google's font service and a public code CDN, which means those services see that a browser at your address asked for a file. No page tells them which qasida you are reading.</li>
+            <li><strong class="font-medium">Recordings</strong> are embedded from YouTube, and a page carrying one is a page YouTube knows you opened, under whatever terms your own YouTube session has. A work with no recording loads nothing from them.</li>
+            <li><strong class="font-medium">Mail</strong> &mdash; password resets, replies, notifications &mdash; passes through an email provider, as all email does.</li>
+            <li><strong class="font-medium">Scans and text</strong> are served from this site's own server. Nothing about your reading is sent to a third party.</li>
+        </ul>
+    </section>
+
+    <section class="card p-6">
+        <h2 class="font-display text-xl text-brand-900 dark:text-brand-100 mb-3">Cookies</h2>
+        <p class="text-sm text-stone-600 dark:text-stone-300 leading-relaxed">
+            Two, both necessary and neither for tracking: one that keeps you signed
+            in, and one that protects forms from being submitted by another site on
+            your behalf. If you do not tick "keep me signed in", the first lasts
+            only until you close the browser. There is nothing to consent to,
+            which is why there is no banner asking you to.
+        </p>
+    </section>
+
+    <section class="card p-6">
+        <h2 class="font-display text-xl text-brand-900 dark:text-brand-100 mb-3">Asking, correcting, or being forgotten</h2>
+        <p class="text-sm text-stone-600 dark:text-stone-300 leading-relaxed">
+            Write to <a href="mailto:{{ contact_email }}" class="text-brand-700 dark:text-brand-300 hover:underline">{{ contact_email }}</a>
+            for a copy of what is held about you, to have something corrected, or
+            to have it removed. Closing your account does most of it immediately,
+            without having to ask anyone.
+        </p>
+    </section>
+</div>
+{% endblock %}

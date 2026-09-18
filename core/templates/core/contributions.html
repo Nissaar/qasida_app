@@ -1,0 +1,141 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Contributions | Qasida Library{% endblock %}
+{% block robots %}<meta name="robots" content="noindex">{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-3 mb-5">
+    <div>
+        <h1 class="text-2xl font-bold tracking-tight">Contributions</h1>
+        <p class="text-sm text-stone-500 dark:text-stone-400 mt-0.5">
+            {% if waiting_count %}{{ waiting_count }} waiting to be read{% else %}Nothing waiting{% endif %}
+        </p>
+    </div>
+    <div class="flex items-center gap-2">
+        {% if waiting_count %}<span class="badge-warn">{{ waiting_count }} pending</span>{% endif %}
+        <a href="{% url 'suggestion_inbox' %}" class="btn-ghost py-1.5 px-3 text-xs">Corrections inbox</a>
+    </div>
+</div>
+
+{% for contribution in waiting %}
+<article class="card p-5 mb-4">
+    <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+        <div class="min-w-0">
+            <h2 dir="auto" class="font-semibold text-lg">{{ contribution.display_title }}</h2>
+            <p class="text-xs text-stone-500 dark:text-stone-400 mt-0.5">
+                {% if contribution.is_submission %}Submission{% else %}Request{% endif %}
+                from {{ contribution.user.username|default:"a deleted account" }}{% if contribution.user.email %} &lt;{{ contribution.user.email }}&gt;{% endif %}
+                &middot; {{ contribution.created_at|date:"j M Y, H:i" }}
+            </p>
+        </div>
+        {% if contribution.is_submission %}
+        <span class="chip">{{ contribution.lyrics|wordcount }} words of text</span>
+        {% endif %}
+    </div>
+
+    <dl class="grid gap-x-6 gap-y-2 sm:grid-cols-2 text-sm mb-4">
+        {% if contribution.native_title %}
+        <div><dt class="eyebrow">In its own script</dt><dd dir="rtl" lang="ar" class="font-naskh text-base">{{ contribution.native_title }}</dd></div>
+        {% endif %}
+        {% if contribution.poet_name %}
+        <div><dt class="eyebrow">Poet</dt><dd dir="auto">{{ contribution.poet_name }}</dd></div>
+        {% endif %}
+        {% if contribution.dedication_name %}
+        <div><dt class="eyebrow">In praise of</dt><dd dir="auto">{{ contribution.dedication_name }}</dd></div>
+        {% endif %}
+        {% if contribution.language %}
+        <div><dt class="eyebrow">Language</dt><dd>{{ contribution.language }}</dd></div>
+        {% endif %}
+        {% if contribution.source_url %}
+        <div class="sm:col-span-2"><dt class="eyebrow">Source link</dt>
+            <dd><a href="{{ contribution.source_url }}" rel="nofollow noopener" target="_blank" class="text-brand-700 dark:text-brand-300 hover:underline break-all">{{ contribution.source_url }}</a></dd></div>
+        {% endif %}
+    </dl>
+
+    {% if contribution.source_note %}
+    <div class="rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 p-3 mb-3">
+        <p class="eyebrow mb-1">Where it comes from</p>
+        <p dir="auto" class="text-sm whitespace-pre-line">{{ contribution.source_note }}</p>
+    </div>
+    {% endif %}
+
+    {% if contribution.note %}
+    <div class="rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-900 p-3 mb-3">
+        <p class="eyebrow mb-1">In their words</p>
+        <p dir="auto" class="text-sm text-amber-900 dark:text-amber-100 whitespace-pre-line">{{ contribution.note }}</p>
+    </div>
+    {% endif %}
+
+    {% if contribution.lyrics %}
+    <details class="mb-3 rounded-xl border border-stone-200 dark:border-stone-800" open>
+        <summary class="cursor-pointer text-sm font-medium text-stone-600 dark:text-stone-300 px-3 py-2">The verses</summary>
+        <div dir="auto" class="px-3 pb-3 text-base whitespace-pre-line font-naskh leading-loose max-h-80 overflow-y-auto thin-scroll">{{ contribution.lyrics }}</div>
+    </details>
+    {% endif %}
+    {% if contribution.transliteration %}
+    <details class="mb-3 rounded-xl border border-stone-200 dark:border-stone-800">
+        <summary class="cursor-pointer text-sm font-medium text-stone-600 dark:text-stone-300 px-3 py-2">Transliteration</summary>
+        <div class="px-3 pb-3 text-sm whitespace-pre-line leading-loose max-h-60 overflow-y-auto thin-scroll">{{ contribution.transliteration }}</div>
+    </details>
+    {% endif %}
+    {% if contribution.translation %}
+    <details class="mb-3 rounded-xl border border-stone-200 dark:border-stone-800">
+        <summary class="cursor-pointer text-sm font-medium text-stone-600 dark:text-stone-300 px-3 py-2">Translation</summary>
+        <div class="px-3 pb-3 text-sm whitespace-pre-line leading-loose max-h-60 overflow-y-auto thin-scroll">{{ contribution.translation }}</div>
+    </details>
+    {% endif %}
+
+    {% comment %}
+    One form, three buttons. The note is written once and goes with whichever
+    decision is pressed, because an editor declining something has a reason and
+    this is the only place it can be written down for the person who sent it.
+    {% endcomment %}
+    <form method="post" class="border-t border-stone-100 dark:border-stone-800 pt-4 grid gap-3">
+        {% csrf_token %}
+        <input type="hidden" name="contribution" value="{{ contribution.pk }}">
+        <label class="block">
+            <span class="eyebrow block mb-1">A word back to them (emailed, and shown on their page)</span>
+            <textarea name="staff_note" rows="2" dir="auto" class="input"
+                      placeholder="Why this was or was not taken, or what was done with it."></textarea>
+        </label>
+        <div class="flex flex-wrap gap-2">
+            {% if contribution.can_publish %}
+            <button type="submit" name="action" value="publish" class="btn-primary">Create a record from this</button>
+            {% endif %}
+            <button type="submit" name="action" value="accept" class="btn-ghost">Accept without creating one</button>
+            <button type="submit" name="action" value="decline" class="btn-quiet">Decline</button>
+        </div>
+    </form>
+</article>
+{% empty %}
+<div class="card p-10 text-center">
+    <p class="text-4xl mb-3" aria-hidden="true">&#128220;</p>
+    <h2 class="font-semibold text-lg">Nothing waiting</h2>
+    <p class="text-sm text-stone-500 dark:text-stone-400 mt-1 max-w-md mx-auto">
+        Readers can ask for a qasida or send one in from the
+        <a href="{% url 'contribute' %}" class="text-brand-700 dark:text-brand-300 hover:underline">contribute page</a>.
+        Whatever arrives appears here.
+    </p>
+</div>
+{% endfor %}
+
+{% if decided %}
+<h2 class="eyebrow mt-10 mb-3">Recently decided</h2>
+<div class="card divide-y divide-stone-100 dark:divide-stone-800">
+    {% for contribution in decided %}
+    <div class="p-4 flex flex-wrap items-center justify-between gap-2 text-sm">
+        <span dir="auto" class="font-medium">
+            {% if contribution.published_as %}
+            <a href="{{ contribution.published_as.get_absolute_url }}" class="text-brand-800 dark:text-brand-200 hover:underline">{{ contribution.display_title }}</a>
+            {% else %}{{ contribution.display_title }}{% endif %}
+        </span>
+        <span class="text-stone-500 dark:text-stone-400">
+            {{ contribution.get_status_display }}
+            {% if contribution.reviewed_by %}by {{ contribution.reviewed_by.username }}{% endif %}
+            &middot; {{ contribution.reviewed_at|date:"j M Y" }}
+        </span>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

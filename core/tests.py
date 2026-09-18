@@ -17,8 +17,9 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from .models import (Dedication, Favourite, Poet, Qasida, QasidaImage,
-                     ReaderProfile, ReadingHistory, Suggestion, Tag)
+from .models import (ContactMessage, Contribution, Dedication, Favourite,
+                     Poet, Qasida, QasidaImage, ReaderProfile, ReadingHistory,
+                     Suggestion, Tag)
 
 User = get_user_model()
 
@@ -723,7 +724,8 @@ class RenderedOutputTest(TestCase):
 
     def test_public_pages_are_clean(self):
         for name in ('home', 'browse', 'search', 'poets', 'categories',
-                     'collections', 'login', 'register', 'password_reset'):
+                     'collections', 'login', 'register', 'password_reset',
+                     'about', 'contact', 'privacy', 'contribute'):
             self.assert_clean(self.client.get(reverse(name)), name)
 
     def test_the_qasida_page_is_clean(self):
@@ -737,7 +739,8 @@ class RenderedOutputTest(TestCase):
     def test_account_pages_are_clean(self):
         self.client.force_login(self.user)
         for name in ('my_library', 'my_history', 'my_corrections',
-                     'account_settings', 'delete_account'):
+                     'my_contributions', 'account_settings', 'delete_account',
+                     'request_qasida', 'submit_qasida'):
             self.assert_clean(self.client.get(reverse(name)), name)
 
     def test_admin_pages_are_clean(self):
@@ -745,7 +748,11 @@ class RenderedOutputTest(TestCase):
         staff = User.objects.create_superuser('root', 'root@example.com', GOOD_PASSWORD)
         self.client.force_login(staff)
         for path in ('/admin/', '/admin/core/qasida/', '/admin/auth/user/',
-                     '/admin/core/collection/', '/admin/core/suggestion/'):
+                     '/admin/core/collection/', '/admin/core/suggestion/',
+                     '/admin/core/contribution/', '/admin/core/contactmessage/',
+                     # The per-app index, which renders the navigation list as
+                     # content rather than as a rail.
+                     '/admin/core/'):
             self.assert_clean(self.client.get(path), path)
 
 
@@ -2569,3 +2576,365 @@ class DiscoverabilityTest(TestCase):
         self.assertIn('og:title', body)
         self.assertIn('og:description', body)
         self.assertIn('og:url', body)
+
+
+# Notifications are only sent when somebody is configured to receive them, and
+# the counters live in the cache. Both are pinned here so these tests do not
+# depend on what a deployment's environment or a shared Redis happens to hold.
+NOTIFY = {'LIBRARY_NOTIFY_EMAILS': ['editors@example.com'],
+          'DEFAULT_FROM_EMAIL': 'no-reply@example.com',
+          'CONTACT_EMAIL': 'contact@example.com'}
+
+
+@override_settings(**NOTIFY, CACHES=LOCAL_CACHE)
+class StaticPageTest(TestCase):
+    """The pages that are about the library rather than about a work in it."""
+
+    def setUp(self):
+        cache.clear()
+        make_qasida()
+
+    def test_about_renders(self):
+        response = self.client.get(reverse('about'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Where the texts come from')
+
+    def test_privacy_renders(self):
+        response = self.client.get(reverse('privacy'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'What this site knows about you')
+
+    def test_contact_renders(self):
+        response = self.client.get(reverse('contact'))
+        self.assertEqual(response.status_code, 200)
+
+    def test_the_footer_prints_the_address_on_every_page(self):
+        """Someone with a manuscript to offer should not have to hunt for it."""
+        for name in ('home', 'browse', 'about', 'privacy'):
+            with self.subTest(page=name):
+                self.assertContains(self.client.get(reverse(name)), 'contact@example.com')
+
+    def test_the_new_pages_are_in_the_sitemap(self):
+        body = self.client.get('/sitemap.xml').content.decode()
+        for path in ('/about/', '/contact/', '/privacy/', '/contribute/'):
+            self.assertIn(path, body)
+
+    def test_the_contribution_forms_are_not_in_the_sitemap(self):
+        """Both need an account, so a crawler sent there collects a sign-in page."""
+        body = self.client.get('/sitemap.xml').content.decode()
+        self.assertNotIn('/contribute/submit/', body)
+
+
+@override_settings(**NOTIFY, CACHES=LOCAL_CACHE)
+class ContactFormTest(TestCase):
+    def setUp(self):
+        cache.clear()
+        mail.outbox = []
+        self.payload = {
+            'name': 'Amina',
+            'email': 'amina@example.com',
+            'topic': 'general',
+            'message': 'Do you hold the Burdah in Sindhi?',
+        }
+
+    def test_a_message_is_stored_and_sent_on(self):
+        response = self.client.post(reverse('contact'), self.payload, follow=True)
+        self.assertEqual(response.status_code, 200)
+        message = ContactMessage.objects.get()
+        self.assertEqual(message.email, 'amina@example.com')
+        self.assertFalse(message.is_handled)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ['editors@example.com'])
+
+    def test_the_reply_goes_back_to_the_sender_not_to_us(self):
+        """
+        Sent from our own domain, because a relay will refuse a message
+        claiming to come from the sender's - but pressing reply must still
+        write to them.
+        """
+        self.client.post(reverse('contact'), self.payload)
+        sent = mail.outbox[0]
+        self.assertEqual(sent.from_email, 'no-reply@example.com')
+        self.assertEqual(sent.reply_to, ['amina@example.com'])
+
+    def test_the_message_survives_the_mail_server_being_down(self):
+        with override_settings(
+                EMAIL_BACKEND='django.core.mail.backends.smtp.EmailBackend',
+                EMAIL_HOST='127.0.0.1', EMAIL_PORT=1, EMAIL_TIMEOUT=1):
+            response = self.client.post(reverse('contact'), self.payload, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ContactMessage.objects.count(), 1)
+
+    def test_a_signed_in_sender_is_recognised(self):
+        User.objects.create_user('amina', 'amina@example.com', GOOD_PASSWORD)
+        self.client.login(username='amina', password=GOOD_PASSWORD)
+        self.client.post(reverse('contact'), self.payload)
+        self.assertEqual(ContactMessage.objects.get().user.username, 'amina')
+
+    def test_the_honeypot_refuses_a_bot(self):
+        payload = {**self.payload, 'website': 'http://spam.example.com'}
+        self.client.post(reverse('contact'), payload)
+        self.assertEqual(ContactMessage.objects.count(), 0)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_a_message_with_nothing_in_it_is_refused(self):
+        self.client.post(reverse('contact'), {**self.payload, 'message': 'hi'})
+        self.assertEqual(ContactMessage.objects.count(), 0)
+
+    def test_the_form_stops_accepting_after_a_burst(self):
+        for _ in range(10):
+            self.client.post(reverse('contact'), self.payload)
+        self.assertEqual(ContactMessage.objects.count(), 6)
+
+
+@override_settings(**NOTIFY, CACHES=LOCAL_CACHE)
+class ContributionTest(TestCase):
+    def setUp(self):
+        cache.clear()
+        mail.outbox = []
+        self.reader = User.objects.create_user('sakina', 'sakina@example.com', GOOD_PASSWORD)
+        self.client.login(username='sakina', password=GOOD_PASSWORD)
+
+    # -- getting in -------------------------------------------------------
+
+    def test_both_forms_need_an_account(self):
+        self.client.logout()
+        for name in ('request_qasida', 'submit_qasida', 'my_contributions'):
+            with self.subTest(page=name):
+                response = self.client.get(reverse(name))
+                self.assertEqual(response.status_code, 302)
+                self.assertIn('/accounts/login/', response['Location'])
+
+    def test_the_contribute_page_is_open_to_anyone(self):
+        self.client.logout()
+        self.assertEqual(self.client.get(reverse('contribute')).status_code, 200)
+
+    # -- requesting -------------------------------------------------------
+
+    def test_a_request_is_recorded_against_the_account(self):
+        self.client.post(reverse('request_qasida'), {
+            'title': 'Qasida Burda',
+            'poet_name': 'Al-Busiri',
+            'source_note': 'My teacher recites it at mawlid.',
+        })
+        contribution = Contribution.objects.get()
+        self.assertEqual(contribution.kind, Contribution.KIND_REQUEST)
+        self.assertEqual(contribution.user, self.reader)
+        self.assertEqual(contribution.status, Contribution.STATUS_PENDING)
+
+    def test_a_request_with_no_title_in_either_script_is_refused(self):
+        self.client.post(reverse('request_qasida'), {'poet_name': 'Al-Busiri'})
+        self.assertEqual(Contribution.objects.count(), 0)
+
+    def test_a_title_in_its_own_script_alone_is_enough(self):
+        """A reader who knows it only in Arabic should not have to invent one."""
+        self.client.post(reverse('request_qasida'), {'native_title': 'قصيدة البردة'})
+        self.assertEqual(Contribution.objects.count(), 1)
+
+    # -- submitting -------------------------------------------------------
+
+    def submit(self, **overrides):
+        payload = {
+            'title': 'A New Qasida',
+            'language': 'Arabic',
+            'lyrics': 'First line\r\nSecond line',
+            'source_note': 'Copied from a printed dīwān, page 41.',
+        }
+        payload.update(overrides)
+        return self.client.post(reverse('submit_qasida'), payload)
+
+    def test_a_submission_is_recorded_with_its_text(self):
+        self.submit()
+        contribution = Contribution.objects.get()
+        self.assertEqual(contribution.kind, Contribution.KIND_SUBMISSION)
+        self.assertTrue(contribution.is_submission)
+        # Browsers post CRLF where the database holds LF.
+        self.assertEqual(contribution.lyrics, 'First line\nSecond line')
+
+    def test_a_submission_without_the_verses_is_refused(self):
+        self.submit(lyrics='   ')
+        self.assertEqual(Contribution.objects.count(), 0)
+
+    def test_an_editor_is_told_when_something_arrives(self):
+        self.submit()
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ['editors@example.com'])
+        self.assertIn('A New Qasida', mail.outbox[0].subject)
+        # Pressing reply writes to the contributor.
+        self.assertEqual(mail.outbox[0].reply_to, ['sakina@example.com'])
+
+    def test_nothing_is_lost_when_nobody_is_configured_to_be_told(self):
+        with override_settings(LIBRARY_NOTIFY_EMAILS=[]):
+            self.submit()
+        self.assertEqual(Contribution.objects.count(), 1)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_the_submission_survives_the_mail_server_being_down(self):
+        with override_settings(
+                EMAIL_BACKEND='django.core.mail.backends.smtp.EmailBackend',
+                EMAIL_HOST='127.0.0.1', EMAIL_PORT=1, EMAIL_TIMEOUT=1):
+            response = self.submit()
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Contribution.objects.count(), 1)
+
+    def test_a_reader_sees_only_their_own(self):
+        Contribution.objects.create(kind=Contribution.KIND_REQUEST,
+                                    title='Mine', user=self.reader)
+        other = User.objects.create_user('other', 'other@example.com', GOOD_PASSWORD)
+        Contribution.objects.create(kind=Contribution.KIND_REQUEST,
+                                    title='Theirs', user=other)
+        page = self.client.get(reverse('my_contributions'))
+        self.assertContains(page, 'Mine')
+        self.assertNotContains(page, 'Theirs')
+
+    def test_the_form_stops_accepting_after_a_flood(self):
+        for index in range(25):
+            self.submit(title=f'Qasida {index}')
+        self.assertEqual(Contribution.objects.count(), 20)
+
+
+@override_settings(**NOTIFY, CACHES=LOCAL_CACHE)
+class ContributionReviewTest(TestCase):
+    """What an editor does with a contribution, and what the sender is told."""
+
+    def setUp(self):
+        cache.clear()
+        self.editor = User.objects.create_user('editor', 'editor@example.com',
+                                               GOOD_PASSWORD, is_staff=True,
+                                               is_superuser=True)
+        self.reader = User.objects.create_user('sakina', 'sakina@example.com',
+                                               GOOD_PASSWORD)
+        self.contribution = Contribution.objects.create(
+            kind=Contribution.KIND_SUBMISSION,
+            user=self.reader,
+            title='A New Qasida',
+            poet_name='Al-Busiri',
+            dedication_name='The Prophet',
+            language='Arabic',
+            lyrics='First line\nSecond line',
+            translation='A rendering of the meaning.',
+        )
+        mail.outbox = []
+
+    def test_the_inbox_is_staff_only(self):
+        self.client.login(username='sakina', password=GOOD_PASSWORD)
+        response = self.client.get(reverse('contribution_inbox'))
+        self.assertEqual(response.status_code, 302)
+
+    def test_the_inbox_lists_what_is_waiting(self):
+        self.client.login(username='editor', password=GOOD_PASSWORD)
+        self.assertContains(self.client.get(reverse('contribution_inbox')), 'A New Qasida')
+
+    def test_publishing_makes_a_record_that_is_not_yet_public(self):
+        """
+        Reader-sent text passes the same review gate as crawled text.
+
+        The point of the gate is that nothing outside the library is served
+        until a person has read it, and a text typed in by a reader is no
+        different in that respect from a text a crawler found.
+        """
+        qasida = self.contribution.publish(by=self.editor)
+        self.assertEqual(qasida.review_state, Qasida.REVIEW_PENDING)
+        self.assertEqual(self.client.get(qasida.get_absolute_url()).status_code, 404)
+
+    def test_publishing_carries_the_details_across(self):
+        qasida = self.contribution.publish(by=self.editor)
+        self.assertEqual(qasida.title, 'A New Qasida')
+        self.assertEqual(qasida.author.name, 'Al-Busiri')
+        self.assertEqual(qasida.dedicated_to.name, 'The Prophet')
+        self.assertEqual(qasida.lyrics, 'First line\nSecond line')
+        # A reader's translation is not the machine's, and the page must not
+        # warn that it might be.
+        self.assertEqual(qasida.translation_origin, Qasida.TRANSLATION_READER)
+
+    def test_publishing_records_the_decision(self):
+        self.contribution.publish(by=self.editor)
+        self.contribution.refresh_from_db()
+        self.assertEqual(self.contribution.status, Contribution.STATUS_ACCEPTED)
+        self.assertEqual(self.contribution.reviewed_by, self.editor)
+        self.assertIsNotNone(self.contribution.published_as)
+        self.assertIsNotNone(self.contribution.reviewed_at)
+
+    def test_publishing_twice_does_not_make_two_records(self):
+        first = self.contribution.publish(by=self.editor)
+        second = self.contribution.publish(by=self.editor)
+        self.assertEqual(first.pk, second.pk)
+        self.assertEqual(Qasida.objects.count(), 1)
+
+    def test_a_request_has_nothing_to_publish(self):
+        request = Contribution.objects.create(kind=Contribution.KIND_REQUEST,
+                                              title='Something missing',
+                                              user=self.reader)
+        self.assertFalse(request.can_publish())
+        self.assertIsNone(request.publish(by=self.editor))
+        self.assertEqual(Qasida.objects.count(), 0)
+
+    def test_the_inbox_creates_a_record_and_opens_it(self):
+        self.client.login(username='editor', password=GOOD_PASSWORD)
+        response = self.client.post(reverse('contribution_inbox'), {
+            'contribution': self.contribution.pk,
+            'action': 'publish',
+        })
+        self.contribution.refresh_from_db()
+        self.assertIsNotNone(self.contribution.published_as)
+        # Straight to the record, so the editor reads it through and approves
+        # it having read it.
+        self.assertIn('/edit/', response['Location'])
+
+    def test_declining_says_why_and_tells_them(self):
+        self.client.login(username='editor', password=GOOD_PASSWORD)
+        self.client.post(reverse('contribution_inbox'), {
+            'contribution': self.contribution.pk,
+            'action': 'decline',
+            'staff_note': 'We already hold this one, under another title.',
+        })
+        self.contribution.refresh_from_db()
+        self.assertEqual(self.contribution.status, Contribution.STATUS_DECLINED)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ['sakina@example.com'])
+        self.assertIn('another title', mail.outbox[0].body)
+
+    def test_the_reply_is_shown_to_the_contributor(self):
+        self.contribution.decline(by=self.editor, note='Not this time, sorry.')
+        self.client.login(username='sakina', password=GOOD_PASSWORD)
+        self.assertContains(self.client.get(reverse('my_contributions')),
+                            'Not this time, sorry.')
+
+    def test_a_deleted_account_does_not_take_the_text_with_it(self):
+        """
+        A text someone brought has become part of the library's record of
+        where its contents came from.
+        """
+        self.reader.delete()
+        self.contribution.refresh_from_db()
+        self.assertIsNone(self.contribution.user)
+        self.assertEqual(self.contribution.lyrics, 'First line\nSecond line')
+
+
+@override_settings(**NOTIFY)
+class SuggestionNotificationTest(TestCase):
+    """A correction that nobody is told about waits for somebody to look."""
+
+    def setUp(self):
+        self.qasida = make_qasida(title='Existing')
+        mail.outbox = []
+
+    def test_an_editor_is_told_about_a_correction(self):
+        self.client.post(self.qasida.get_absolute_url(), {
+            'email': 'reader@example.com',
+            'note': 'The third line is missing a word.',
+        })
+        self.assertEqual(Suggestion.objects.count(), 1)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ['editors@example.com'])
+        self.assertEqual(mail.outbox[0].reply_to, ['reader@example.com'])
+
+    def test_a_correction_is_kept_even_if_the_mail_fails(self):
+        with override_settings(
+                EMAIL_BACKEND='django.core.mail.backends.smtp.EmailBackend',
+                EMAIL_HOST='127.0.0.1', EMAIL_PORT=1, EMAIL_TIMEOUT=1):
+            self.client.post(self.qasida.get_absolute_url(), {
+                'email': 'reader@example.com',
+                'note': 'The third line is missing a word.',
+            })
+        self.assertEqual(Suggestion.objects.count(), 1)

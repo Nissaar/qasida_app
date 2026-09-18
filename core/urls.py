@@ -51,6 +51,19 @@ urlpatterns = [
     path('qasida/<slug:slug>/favourite/', account_views.toggle_favourite, name='toggle_favourite'),
     path('suggestions/', views.suggestion_inbox, name='suggestion_inbox'),
 
+    # The pages that are about the library rather than about a work in it.
+    path('about/', views.about, name='about'),
+    path('privacy/', views.privacy, name='privacy'),
+    path('contact/', views.contact, name='contact'),
+
+    # Asking for a work, and sending one in. Both forms need an account: a
+    # contribution is something an editor will want to write back about, and
+    # a contributor is owed a page that says what became of theirs.
+    path('contribute/', views.contribute, name='contribute'),
+    path('contribute/request/', views.request_qasida, name='request_qasida'),
+    path('contribute/submit/', views.submit_qasida, name='submit_qasida'),
+    path('contributions/', views.contribution_inbox, name='contribution_inbox'),
+
     # Accounts. Django's own views handle the password flows, given this
     # project's forms and templates. Two things here are deliberate. The url
     # names are the ones Django reverses internally, so renaming one breaks the
@@ -101,6 +114,7 @@ urlpatterns = [
     path('my/history/', account_views.my_history, name='my_history'),
     path('my/history/clear/', account_views.clear_history, name='clear_history'),
     path('my/corrections/', account_views.my_corrections, name='my_corrections'),
+    path('my/contributions/', account_views.my_contributions, name='my_contributions'),
     path('my/settings/', account_views.account_settings, name='account_settings'),
     path('my/settings/delete/', account_views.delete_account, name='delete_account'),
     path('my/saved/<int:pk>/note/', account_views.favourite_note, name='favourite_note'),

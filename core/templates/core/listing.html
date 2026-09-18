@@ -90,7 +90,12 @@ still followed.
             <p class="text-sm text-stone-500 dark:text-stone-400 mt-1 max-w-sm mx-auto">
                 No work matches this combination. Try removing a filter, or search the whole library.
             </p>
-            <a href="{% url 'browse' %}" class="btn-primary mt-5">Browse all {{ library_total }}</a>
+            <div class="flex flex-wrap justify-center gap-2 mt-5">
+                <a href="{% url 'browse' %}" class="btn-primary">Browse all {{ library_total }}</a>
+                {% comment %} The moment someone learns the library does not hold what
+                   they came for is the moment to offer to go and find it. {% endcomment %}
+                <a href="{% url 'request_qasida' %}" class="btn-ghost">Ask us to add it</a>
+            </div>
             {% endif %}
         </div>
         {% endif %}

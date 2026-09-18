@@ -1,0 +1,102 @@
+{% extends 'core/base.html' %}
+
+{% block title %}About | Qasida Library{% endblock %}
+{% block meta_description %}What the Qasida Library holds, where its texts come from, how they are checked, and how to help.{% endblock %}
+{% block og_title %}About the Qasida Library{% endblock %}
+{% block og_description %}Where the texts come from, how they are checked, and how to help.{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl">
+    <p class="eyebrow mb-2">About</p>
+    <h1 class="font-display text-3xl sm:text-4xl text-brand-900 dark:text-brand-100">A reading library of devotional poetry</h1>
+    <p class="text-lg text-stone-600 dark:text-stone-300 mt-4 leading-relaxed">
+        Naats, qasidas, madih and manqabat, gathered from the places they are
+        already published and put somewhere they can be searched, read on a
+        phone, and kept when there is no signal.
+    </p>
+</div>
+
+<div class="grid gap-3 grid-cols-2 lg:grid-cols-4 mt-8 mb-10">
+    <div class="stat"><span class="stat-value">{{ library_total }}</span><span class="stat-label">works</span></div>
+    <div class="stat"><span class="stat-value">{{ poet_count }}</span><span class="stat-label">poets</span></div>
+    <div class="stat"><span class="stat-value">{{ transliterated_count }}</span><span class="stat-label">transliterated</span></div>
+    <div class="stat"><span class="stat-value">{{ translated_count }}</span><span class="stat-label">translated</span></div>
+</div>
+
+<div class="max-w-3xl grid gap-6">
+    <section class="card p-6">
+        <h2 class="font-display text-xl text-brand-900 dark:text-brand-100 mb-2">Where the texts come from</h2>
+        <p class="text-sm text-stone-600 dark:text-stone-300 leading-relaxed">
+            Almost nothing here was written for this site. The texts are collected
+            from sites that already publish them, and from scanned pages of books
+            and pamphlets, and each work records where it was taken from.
+            {% if sources %}The library currently reads from
+            {% for source in sources %}<a href="{{ source.url }}" rel="nofollow noopener" target="_blank" class="text-brand-700 dark:text-brand-300 hover:underline">{{ source.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}.{% endif %}
+        </p>
+        <p class="text-sm text-stone-600 dark:text-stone-300 leading-relaxed mt-3">
+            If something here is yours and you would rather it were not, write and
+            it will be taken down. That is not a formality &mdash; see
+            <a href="{% url 'contact' %}" class="text-brand-700 dark:text-brand-300 hover:underline">the contact page</a>.
+        </p>
+    </section>
+
+    <section class="card p-6">
+        <h2 class="font-display text-xl text-brand-900 dark:text-brand-100 mb-2">How much to trust a text</h2>
+        <p class="text-sm text-stone-600 dark:text-stone-300 leading-relaxed">
+            A good deal of this was read off images by machine, and machines
+            misread Arabic script in ways a reader would not. So each work says
+            what kind of text it carries: extracted cleanly, reconstructed, or
+            unreliable enough that the scan is the thing to read. Nothing goes on
+            the site until a person has looked at it, and a translation produced
+            by machine is labelled as one.
+        </p>
+        <p class="text-sm text-stone-600 dark:text-stone-300 leading-relaxed mt-3">
+            Where a work is held as scanned pages, the scan is not decoration. It
+            is what the text was read off, and the only record worth anything
+            where the reading is doubtful.
+        </p>
+    </section>
+
+    <section class="card p-6">
+        <h2 class="font-display text-xl text-brand-900 dark:text-brand-100 mb-2">How to help</h2>
+        <p class="text-sm text-stone-600 dark:text-stone-300 leading-relaxed mb-4">
+            Three things, in rising order of how much they are worth: correct a
+            line that is wrong, ask for a work that is missing, or send one in.
+        </p>
+        <div class="grid gap-2 sm:grid-cols-3">
+            <a href="{% url 'browse' %}" class="panel-item">
+                <span class="block font-medium text-sm">Correct a text</span>
+                <span class="tile-count">Every qasida page takes corrections</span>
+            </a>
+            <a href="{% url 'request_qasida' %}" class="panel-item">
+                <span class="block font-medium text-sm">Request a qasida</span>
+                <span class="tile-count">Tell us what is missing</span>
+            </a>
+            <a href="{% url 'submit_qasida' %}" class="panel-item">
+                <span class="block font-medium text-sm">Submit a qasida</span>
+                <span class="tile-count">Send in a text you have</span>
+            </a>
+        </div>
+    </section>
+
+    <section class="card p-6">
+        <h2 class="font-display text-xl text-brand-900 dark:text-brand-100 mb-2">Reading it offline</h2>
+        <p class="text-sm text-stone-600 dark:text-stone-300 leading-relaxed">
+            The site installs as an app and keeps what you have already opened, so
+            a gathering in a basement with no signal is not a reason to be without
+            the text. Any work can also be downloaded as a PDF, with or without
+            its transliteration, translation and scans.
+        </p>
+    </section>
+
+    <section class="card p-6">
+        <h2 class="font-display text-xl text-brand-900 dark:text-brand-100 mb-2">Getting in touch</h2>
+        <p class="text-sm text-stone-600 dark:text-stone-300 leading-relaxed">
+            Write to <a href="mailto:{{ contact_email }}" class="text-brand-700 dark:text-brand-300 hover:underline">{{ contact_email }}</a>,
+            or use <a href="{% url 'contact' %}" class="text-brand-700 dark:text-brand-300 hover:underline">the form</a>.
+            What the site stores about you is set out on the
+            <a href="{% url 'privacy' %}" class="text-brand-700 dark:text-brand-300 hover:underline">privacy page</a>.
+        </p>
+    </section>
+</div>
+{% endblock %}

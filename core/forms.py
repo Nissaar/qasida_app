@@ -4,7 +4,8 @@ from django.contrib.auth.forms import (AuthenticationForm, PasswordChangeForm,
                                        PasswordResetForm, SetPasswordForm,
                                        UserCreationForm)
 
-from .models import Dedication, Favourite, Poet, Qasida, ReaderProfile, Tag
+from .models import (ContactMessage, Contribution, Dedication, Favourite,
+                     Poet, Qasida, ReaderProfile, Tag)
 
 # The shell defines .input as a Tailwind component class, so widgets reuse it
 # instead of restating utilities (and inheriting dark mode for free).
@@ -351,3 +352,185 @@ class QasidaAdminForm(forms.ModelForm):
 
         untouched = list(self.instance.tags.exclude(category__in=offered))
         self.instance.tags.set(chosen + untouched)
+
+
+class ContributionForm(StyledFormMixin, forms.ModelForm):
+    """
+    What is common to asking for a work and sending one in.
+
+    One form class per kind rather than one with fields switched on and off:
+    the two are asked different questions, and a form that renders eleven
+    fields of which four apply is how a submission form ends up abandoned
+    halfway. `kind` is set by the view, never posted, so a request cannot be
+    turned into a submission by editing the page.
+    """
+
+    kind = None
+
+    class Meta:
+        model = Contribution
+        fields = ()
+        widgets = {
+            'title': forms.TextInput(attrs={'class': INPUT_CLASS, 'dir': 'auto'}),
+            'native_title': forms.TextInput(attrs={'class': INPUT_CLASS, 'dir': 'rtl'}),
+            'poet_name': forms.TextInput(attrs={'class': INPUT_CLASS, 'dir': 'auto'}),
+            'dedication_name': forms.TextInput(attrs={'class': INPUT_CLASS, 'dir': 'auto'}),
+            'language': forms.TextInput(attrs={
+                'class': INPUT_CLASS, 'placeholder': 'Arabic, Urdu, Persian…',
+                'list': 'known-languages'}),
+            'source_url': forms.URLInput(attrs={
+                'class': INPUT_CLASS, 'placeholder': 'https://…'}),
+            'source_note': forms.Textarea(attrs={
+                'class': INPUT_CLASS, 'rows': 3,
+                'placeholder': 'A book, a recording, a gathering you heard it at…'}),
+            'note': forms.Textarea(attrs={'class': INPUT_CLASS, 'rows': 3}),
+        }
+
+    def clean(self):
+        cleaned = super().clean()
+        # Something has to name the work, or there is nothing for an editor to
+        # go on. Either script will do: a reader who knows it only in Arabic
+        # should not have to invent a Latin title.
+        if not (cleaned.get('title') or '').strip() and not (cleaned.get('native_title') or '').strip():
+            raise forms.ValidationError(
+                "Give the qasida a title, in either script, so it can be told "
+                "apart from the others.")
+        return cleaned
+
+    def save(self, commit=True, user=None):
+        contribution = super().save(commit=False)
+        contribution.kind = self.kind
+        if user is not None and user.is_authenticated:
+            contribution.user = user
+        if commit:
+            contribution.save()
+        return contribution
+
+
+class QasidaRequestForm(ContributionForm):
+    """Asking the library to find and add a work."""
+
+    kind = Contribution.KIND_REQUEST
+
+    class Meta(ContributionForm.Meta):
+        fields = ('title', 'native_title', 'poet_name', 'dedication_name',
+                  'language', 'source_url', 'source_note', 'note')
+        labels = {
+            'title': 'Title, in Latin letters',
+            'native_title': 'Title in its own script',
+            'source_url': 'A link to it, if you have one',
+            'source_note': 'Where you came across it',
+            'note': 'Anything else we should know',
+        }
+        help_texts = {
+            'title': 'However you have seen it written. A rough spelling is fine.',
+            'source_note': 'The more of this there is, the likelier it is to be found.',
+        }
+
+
+class QasidaSubmissionForm(ContributionForm):
+    """Sending in a text, for an editor to read and publish."""
+
+    kind = Contribution.KIND_SUBMISSION
+
+    class Meta(ContributionForm.Meta):
+        fields = ('title', 'native_title', 'poet_name', 'dedication_name',
+                  'language', 'lyrics', 'transliteration', 'translation',
+                  'source_url', 'source_note', 'note')
+        widgets = {
+            **ContributionForm.Meta.widgets,
+            'lyrics': forms.Textarea(attrs={
+                'class': INPUT_CLASS + ' font-naskh leading-loose',
+                'rows': 16, 'dir': 'auto'}),
+            'transliteration': forms.Textarea(attrs={
+                'class': INPUT_CLASS + ' leading-loose', 'rows': 10, 'dir': 'ltr'}),
+            'translation': forms.Textarea(attrs={
+                'class': INPUT_CLASS + ' leading-loose', 'rows': 10, 'dir': 'ltr'}),
+        }
+        labels = {
+            'title': 'Title, in Latin letters',
+            'native_title': 'Title in its own script',
+            'lyrics': 'The verses',
+            'transliteration': 'Transliteration',
+            'translation': 'English translation',
+            'source_url': 'Where it was published, if online',
+            'source_note': 'Where this text comes from',
+            'note': 'Anything else we should know',
+        }
+        help_texts = {
+            'lyrics': 'One verse to a line, with a blank line between stanzas.',
+            'transliteration': 'Optional. Leave it empty and the library will '
+                               'produce one, which an editor then checks.',
+            'translation': 'Optional, and only if it is yours or you know it is '
+                           'free to republish.',
+            'source_note': 'A book and page, a recording, whom you had it from. '
+                           'This is what lets an editor check the text.',
+        }
+
+    def clean_lyrics(self):
+        # Browsers post CRLF where the database holds LF; normalised here so a
+        # text is stored the way every other text in the library is.
+        lyrics = (self.cleaned_data.get('lyrics') or '')
+        lyrics = lyrics.replace('\r\n', '\n').replace('\r', '\n').strip()
+        if not lyrics:
+            raise forms.ValidationError(
+                "A submission needs the verses themselves. If you are asking "
+                "for a qasida rather than sending one, use the request form.")
+        return lyrics
+
+
+class ContactForm(StyledFormMixin, forms.ModelForm):
+    """
+    Writing to the library.
+
+    Open to anyone, signed in or not: the people most likely to have something
+    worth saying about a text - the family that owns the manuscript, the
+    publisher who holds the rights - are exactly the people who have no
+    account here.
+    """
+
+    # A honeypot. Nothing points at it and nobody can see it, so anything in
+    # it was typed by a script filling in every field it found. Cheaper and
+    # quieter than a CAPTCHA, which taxes every human to stop some robots.
+    website = forms.CharField(required=False, widget=forms.HiddenInput,
+                              label='Leave this empty')
+
+    class Meta:
+        model = ContactMessage
+        fields = ('name', 'email', 'topic', 'message')
+        widgets = {
+            'name': forms.TextInput(attrs={'class': INPUT_CLASS, 'autocomplete': 'name'}),
+            'email': forms.EmailInput(attrs={'class': INPUT_CLASS, 'autocomplete': 'email'}),
+            'topic': forms.Select(attrs={'class': INPUT_CLASS}),
+            'message': forms.Textarea(attrs={'class': INPUT_CLASS, 'rows': 8, 'dir': 'auto'}),
+        }
+        labels = {
+            'name': 'Your name',
+            'email': 'Your email address',
+            'topic': 'What this is about',
+            'message': 'Your message',
+        }
+        help_texts = {
+            'email': 'Only used to reply to you.',
+        }
+
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Someone already signed in has told us both of these once.
+        if user is not None and user.is_authenticated:
+            self.fields['name'].initial = self.fields['name'].initial or user.username
+            self.fields['email'].initial = self.fields['email'].initial or user.email
+
+    def clean_message(self):
+        message = (self.cleaned_data.get('message') or '').strip()
+        if len(message) < 10:
+            raise forms.ValidationError(
+                "Please say a little more - there is nothing here to reply to.")
+        return message
+
+    def clean(self):
+        cleaned = super().clean()
+        if (cleaned.get('website') or '').strip():
+            # Refused without saying which field gave it away.
+            raise forms.ValidationError("That message could not be sent. Please try again.")
+        return cleaned

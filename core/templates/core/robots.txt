@@ -12,6 +12,9 @@ Disallow: /admin/
 Disallow: /accounts/
 Disallow: /my/
 Disallow: /suggestions/
+Disallow: /contributions/
+Disallow: /contribute/request/
+Disallow: /contribute/submit/
 Disallow: /search/
 Disallow: /random/
 Disallow: /*/edit/

@@ -114,6 +114,7 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "core.context_processors.library_stats",
+                "core.context_processors.site_contact",
             ],
         },
     },
@@ -302,6 +303,35 @@ SERVER_EMAIL = DEFAULT_FROM_EMAIL
 
 # How long a password reset link stays usable.
 PASSWORD_RESET_TIMEOUT = 60 * 60 * 3
+
+
+# The address readers write to.
+#
+# Printed in the footer and on the contact page, and used as the Reply-To on
+# anything the library sends back, so it has to be an address someone reads -
+# not the no-reply sender above. Receiving mail at it is a matter of MX
+# records rather than of anything in this file: see .env.prod.example.
+CONTACT_EMAIL = os.environ.get("DJANGO_CONTACT_EMAIL", "contact@qasidalibrary.com")
+
+# Who is told when a reader asks for a work, sends one in, corrects a text or
+# writes to the library. Defaults to the contact address; set it to a list to
+# reach several editors, or to nothing at all to switch the notifications off
+# without touching the forms, which keep working and keep their records.
+LIBRARY_NOTIFY_EMAILS = [
+    address.strip()
+    for address in os.environ.get("DJANGO_NOTIFY_EMAILS", CONTACT_EMAIL).split(",")
+    if address.strip()
+]
+
+# Prepended to the subject of everything this site sends, so a mailbox can
+# file it. Django's own EMAIL_SUBJECT_PREFIX is left alone: it applies to
+# error mail sent to ADMINS, which is a different stream.
+EMAIL_SUBJECT_PREFIX_SITE = os.environ.get(
+    "DJANGO_EMAIL_SUBJECT_PREFIX", "[Qasida Library] ")
+
+# Only used to build links in mail sent outside a request, which nothing does
+# yet; inside one the host the request arrived on is used instead.
+SITE_URL = os.environ.get("DJANGO_SITE_URL", "")
 
 
 # Cache
