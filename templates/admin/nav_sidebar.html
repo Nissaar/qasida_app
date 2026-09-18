@@ -1,28 +1,45 @@
 {% load i18n static %}
 <button class="sticky toggle-nav-sidebar" id="toggle-nav-sidebar" aria-label="{% translate 'Toggle navigation' %}"></button>
 <nav class="sticky" id="nav-sidebar" aria-label="{% translate 'Sidebar' %}">
-    {# The brand sits in the sidebar rather than a top bar, as in JewelMS. #}
+    {% comment %} The brand sits in the rail rather than in a top bar, which is
+       then free to carry only what is about the person using the admin. {% endcomment %}
     <div class="q-brand">
         <a href="{% url 'admin:index' %}" class="q-brand-mark">
             <img src="{% static 'core/img/favicon-32.png' %}" alt="" width="26" height="26">
-            <span>QASIDA</span>
+            <span>Qasida
+                <small>{% translate 'Library administration' %}</small>
+            </span>
         </a>
     </div>
 
     <input type="search" id="nav-filter"
-           placeholder="{% translate 'Start typing to filter…' %}"
+           placeholder="{% translate 'Filter…' %}"
            aria-label="{% translate 'Filter navigation items' %}">
 
     {% include 'admin/app_list.html' with app_list=available_apps show_changelinks=False %}
 
     <div class="q-side-tools">
-        <a class="q-side-link" href="{% url 'admin:core_qasida_ocr_tool' %}">{% translate 'Extract text' %}</a>
-        <a class="q-side-link" href="/">{% translate 'View the site' %}</a>
+        <a class="q-side-link" href="{% url 'admin:core_qasida_ocr_tool' %}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h6M7 13h10M7 17h4"/></svg>
+            {% translate 'Extract text' %}
+        </a>
+        <a class="q-side-link" href="{% url 'contribution_inbox' %}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 13h4l1.5 3h5L16 13h4"/><path d="M4 13 6.5 5h11L20 13v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1Z"/></svg>
+            {% translate 'Contributions inbox' %}
+        </a>
+        <a class="q-side-link" href="{% url 'suggestion_inbox' %}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 15a2 2 0 0 1-2 2H8l-4 3V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2Z"/></svg>
+            {% translate 'Corrections inbox' %}
+        </a>
+        <a class="q-side-link" href="/">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
+            {% translate 'View the site' %}
+        </a>
     </div>
 
     {% if user.is_authenticated %}
     <div class="q-side-user">
-        <span class="q-avatar">{{ user.get_username|slice:":1"|upper }}</span>
+        <span class="q-avatar" aria-hidden="true">{{ user.get_username|slice:":1"|upper }}</span>
         <span class="q-side-user-meta">
             <b>{{ user.get_username }}</b>
             {# Django 5 refuses to log out on a GET, so this has to be a post. #}
