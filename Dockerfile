@@ -17,9 +17,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         tesseract-ocr-fas \
     && rm -rf /var/lib/apt/lists/*
 
-# Install dependencies
+# Install dependencies.
+#
+# Torch is installed first, and from the CPU index, on purpose. Nothing here
+# asks for it directly: argostranslate needs stanza for sentence segmentation,
+# stanza requires torch, and on Linux pip resolves that to the CUDA build -
+# dragging in cudnn, nccl, cusparselt, nvshmem and triton, about 1.7GB of GPU
+# runtime that a CPU-only server can never execute. Satisfying the requirement
+# with the CPU wheel first means the resolver never reaches for the CUDA one.
+# Translation is unaffected: it was always running on the CPU.
 COPY requirements.txt /app/
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir -r requirements.txt
 
 # Install the Argos translation models at build time so translation works
 # offline and identically in every container. Each package is ~100MB.
