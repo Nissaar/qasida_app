@@ -4,6 +4,7 @@ from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 from django.utils.text import slugify
 
+from .dedup import build_signature
 from .search import build_document
 from .youtube import extract_youtube_id
 
@@ -279,7 +280,11 @@ class Qasida(models.Model):
         help_text="Who the qasida is addressed to or written in praise of. "
                   "Choose one, or add a new one with the + button.")
     language = models.CharField(max_length=50, blank=True)
-    lyrics = models.TextField()
+    # Optional, because a work legitimately arrives without it: a source that
+    # publishes only a romanisation, or only photographed pages. Requiring it
+    # would mean an editor could not save a tag on such a record without first
+    # inventing an original text for it.
+    lyrics = models.TextField(blank=True)
     # Latin-script rendering of the same verses, where the source publishes one.
     # Blank-line structure is kept aligned with `lyrics` so the two can be shown
     # stanza by stanza.
@@ -352,9 +357,17 @@ class Qasida(models.Model):
     # still use an index.
     search_text = models.TextField(blank=True, editable=False)
 
+    # A folded, bounded copy of the poem's opening, used to recognise the same
+    # work arriving from a second source. Kept separate from search_text
+    # because that one deliberately includes the title and the poet, which are
+    # the fields that vary most between sites publishing the same poem.
+    dedup_signature = models.TextField(blank=True, editable=False)
+
     class Meta:
         indexes = [
             GinIndex(name='qasida_search_trgm', fields=['search_text'],
+                     opclasses=['gin_trgm_ops']),
+            GinIndex(name='qasida_dedup_trgm', fields=['dedup_signature'],
                      opclasses=['gin_trgm_ops']),
         ]
 
@@ -443,9 +456,14 @@ class Qasida(models.Model):
         self.search_text = build_document(
             self.title, self.native_title, poet, dedication,
             self.lyrics, self.transliteration, self.translation)
+        # The original script identifies a work better than a romanisation, so
+        # it is preferred; a source that publishes only a transliteration still
+        # gets a signature rather than being left unmatchable.
+        self.dedup_signature = build_signature(self.lyrics, self.transliteration)
         update_fields = kwargs.get('update_fields')
         if update_fields:
-            kwargs['update_fields'] = list(set(update_fields) | {'search_text'})
+            kwargs['update_fields'] = list(
+                set(update_fields) | {'search_text', 'dedup_signature'})
         super().save(*args, **kwargs)
 
         # A row with no title in Latin script needs its id to build a slug, so
@@ -631,6 +649,64 @@ class Suggestion(models.Model):
     def __str__(self):
         return f"Suggestion for {self.qasida} by {self.email}"
 
+class DuplicateLink(models.Model):
+    """
+    Two works that read like the same poem, waiting on an editor's ruling.
+
+    Both rows are kept and both stay usable. The second copy is frequently the
+    better one - fuller, vocalised, carrying a translation - and just as often
+    the two turn out to be genuinely different poems that open on the same
+    formula, which this repertoire does constantly. Neither outcome can be
+    decided mechanically, so nothing is merged or hidden: this only says "these
+    two are worth looking at together".
+    """
+
+    MATCH_OPENING = 'opening'
+    MATCH_FUZZY = 'fuzzy'
+    MATCH_CHOICES = [
+        (MATCH_OPENING, 'Identical opening'),
+        (MATCH_FUZZY, 'Similar opening'),
+    ]
+
+    STATE_PENDING = 'pending'
+    STATE_DUPLICATE = 'duplicate'
+    STATE_DISTINCT = 'distinct'
+    STATE_CHOICES = [
+        (STATE_PENDING, 'Not yet reviewed'),
+        (STATE_DUPLICATE, 'Confirmed duplicate'),
+        (STATE_DISTINCT, 'Different works'),
+    ]
+
+    # The pair is unordered, so it is always stored lowest id first. That way
+    # one pair is one row, rather than the same pair being recorded twice from
+    # either end.
+    first = models.ForeignKey(Qasida, on_delete=models.CASCADE,
+                              related_name='duplicate_links_as_first')
+    second = models.ForeignKey(Qasida, on_delete=models.CASCADE,
+                               related_name='duplicate_links_as_second')
+    score = models.FloatField(default=0,
+                              help_text="How alike the two openings are, 0 to 1.")
+    matched_on = models.CharField(max_length=8, choices=MATCH_CHOICES,
+                                  default=MATCH_FUZZY)
+    state = models.CharField(max_length=9, choices=STATE_CHOICES,
+                             default=STATE_PENDING, db_index=True)
+    note = models.CharField(max_length=280, blank=True,
+                            help_text="Why you ruled the way you did.")
+    created_at = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        # Unreviewed first, and within those the likeliest pairs at the top.
+        ordering = ('state', '-score', '-created_at')
+        constraints = [
+            models.UniqueConstraint(fields=('first', 'second'),
+                                    name='unique_duplicate_pair'),
+        ]
+
+    def __str__(self):
+        return f"{self.first} / {self.second} ({self.score:.2f})"
+
+
 class SourceWebsite(models.Model):
     name = models.CharField(max_length=200)
     url = models.URLField(max_length=500, unique=True)
@@ -643,7 +719,8 @@ class SourceWebsite(models.Model):
             ('damas', 'Damas Nur (WordPress)'),
             ('midhah', 'Midhah lyrics (Next.js, JSON-LD)'),
             ('generic', 'Generic (JSON-LD, else densest text block)'),
-            ('wayback', 'Internet Archive snapshots of a blocked site')
+            ('wayback', 'Internet Archive snapshots of a blocked site'),
+            ('wordpress_api', 'WordPress REST API (wp-json)')
         ],
         default='mynaatbook'
     )

@@ -34,6 +34,15 @@ DEFAULT_SOURCES = [
         'is_active': True,
     },
     {
+        # Publishes romanised Urdu rather than the Arabic-script original, so
+        # its texts are stored as transliterations and carry
+        # needs-original-script until an original is paired with them.
+        'url': 'https://islamiclyrics.net/',
+        'name': 'Islamic Lyrics',
+        'parser_type': 'wordpress_api',
+        'is_active': True,
+    },
+    {
         # Sits behind a Vercel challenge that answers every path with a 429,
         # robots.txt included, so the live site cannot be read. Imported from
         # Internet Archive snapshots instead.

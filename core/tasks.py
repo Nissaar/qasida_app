@@ -49,6 +49,11 @@ SCAN_ONLY_TAG = 'lyrics-in-images'
 # and reviewed rather than quietly served as if it were correct.
 UNRELIABLE_TEXT_TAG = 'text-needs-review'
 
+# Tag applied when a source publishes only a romanised text and the original
+# script is missing. These are the rows worth pairing with an Arabic or Urdu
+# copy from another source, so they need to be findable as a group.
+NO_ORIGINAL_TAG = 'needs-original-script'
+
 # Boilerplate the embedded document viewer leaves in the HTML.
 VIEWER_CHROME = (
     'Loading...', 'Taking too long?', 'Reload document',
@@ -1500,6 +1505,183 @@ def scrape_wayback(website, limit=None, refresh=False):
           f"{stats['fetch_errors']} fetch errors, {stats['extract_errors']} extract errors.")
 
 
+# --- WordPress REST API source ----------------------------------------------
+
+# A WordPress install that leaves its REST API open hands back the post body
+# without the theme wrapped around it: no navigation, sidebar, share widget or
+# related-posts block to strip, and the taxonomy arrives as ids that resolve to
+# names. That is worth preferring over reading the rendered page.
+WP_PAGE_SIZE = 100
+
+# Site furniture that some installs leave inside the body itself.
+WP_JUNK_RE = re.compile(
+    r'^(download|share this|related posts?|subscribe|follow us|read more)\b', re.I)
+
+
+def _wp_get(root, path, **params):
+    """
+    One collection from a WordPress REST API, or None once the pages run out.
+
+    WordPress answers a page number past the last one with a 400 rather than an
+    empty list, so that status is asked for rather than raised on: it is how the
+    paging loops below know they have finished.
+    """
+    query = '&'.join(f'{key}={value}' for key, value in params.items())
+    response = polite_get(f"{root}/wp-json/wp/v2/{path}?{query}",
+                          timeout=60, allow=(400,))
+    if response.status_code == 400:
+        return None
+    return response.json()
+
+
+def _wp_terms(root, taxonomy):
+    """{id: name} for one taxonomy, read once rather than per post."""
+    terms, page = {}, 1
+    while True:
+        batch = _wp_get(root, taxonomy, per_page=WP_PAGE_SIZE, page=page)
+        if not batch:
+            return terms
+        for term in batch:
+            terms[term['id']] = _clean_title(term.get('name', ''))
+        if len(batch) < WP_PAGE_SIZE:
+            return terms
+        page += 1
+
+
+def _wp_body(rendered, title):
+    """
+    The verse from a REST content field, with its line structure intact.
+
+    A lyric's line breaks live in <br>, which get_text alone throws away, so
+    those become newlines first. Blank lines are collapsed to one rather than
+    dropped, because the gap between stanzas is part of the poem. The post also
+    repeats its own title as a heading ("<title> Lyrics"), which is already held
+    in the title field and would otherwise open every text.
+    """
+    soup = BeautifulSoup(rendered or '', 'html.parser')
+    for junk in soup.select('script, style, iframe, ins, .sharedaddy, .jp-relatedposts'):
+        junk.decompose()
+
+    wanted = {title.strip().lower(), f'{title.strip().lower()} lyrics'}
+    for heading in soup.find_all(['h1', 'h2', 'h3']):
+        if _clean_title(heading.get_text()).lower() in wanted:
+            heading.decompose()
+
+    for line_break in soup.find_all('br'):
+        line_break.replace_with('\n')
+
+    lines, pending_break = [], False
+    for raw in soup.get_text('\n').split('\n'):
+        line = raw.strip()
+        if not line:
+            pending_break = bool(lines)
+            continue
+        if WP_JUNK_RE.match(line):
+            continue
+        if pending_break:
+            lines.append('')
+            pending_break = False
+        lines.append(line)
+    return '\n'.join(lines).strip()
+
+
+def scrape_wordpress_api(website, limit=None):
+    """
+    Scraper for any WordPress site that leaves its REST API open.
+
+    This source publishes romanised Urdu rather than the Arabic-script
+    original, so the text is stored as a transliteration and `lyrics` is left
+    empty for an original-script copy to be paired with later. Storing Latin
+    text as the lyrics would put it where the naskh and nastaliq faces and the
+    right-to-left styling expect Arabic script.
+
+    Everything lands pending, like every other crawled source: nothing here is
+    published until a person has read it.
+    """
+    parts = urlsplit(website.url)
+    root = f"{parts.scheme}://{parts.netloc}"
+    print(f"Scraping WordPress API: {root}")
+
+    categories = _wp_terms(root, 'categories')
+    print(f"Vocabulary: {len(categories)} categories.")
+
+    # The URLs already held, in one query rather than one per post: this runs
+    # over hundreds of candidates and is re-run to resume.
+    known = set(Qasida.objects.filter(source_site=website)
+                .values_list('source_url', flat=True))
+
+    # So the whole source can be found, filtered and withdrawn as one group.
+    source_tag = slugify(website.name)
+
+    stats = Counter()
+    page = 1
+    while True:
+        if limit is not None and stats['saved'] >= limit:
+            print(f"Stopping at the {limit}-post limit for this pass.")
+            break
+        try:
+            posts = _wp_get(root, 'posts', per_page=WP_PAGE_SIZE, page=page)
+        except RateLimited:
+            raise  # let run_crawlers park this source for the next run
+        except Exception as e:
+            stats['errors'] += 1
+            print(f"  page {page} failed ({type(e).__name__})")
+            break
+        if not posts:
+            break
+
+        for post in posts:
+            if limit is not None and stats['saved'] >= limit:
+                break
+            link = post.get('link') or ''
+            if not link:
+                stats['no_link'] += 1
+                continue
+            if link in known:
+                stats['already_present'] += 1
+                continue
+
+            title = _clean_title((post.get('title') or {}).get('rendered', ''))
+            body = _wp_body((post.get('content') or {}).get('rendered', ''), title)
+            if not body:
+                stats['no_text'] += 1
+                print(f"  SKIP (no text): {link}")
+                continue
+
+            name, native_title, author = split_title(title)
+            qasida = Qasida.objects.create(
+                title=name or 'Untitled',
+                native_title=native_title,
+                # The site credits performers rather than poets, and a
+                # performer is not the author, so this is left for a reviewer
+                # rather than guessed from the URL.
+                author=Poet.named(author),
+                language='Urdu',
+                lyrics='',
+                transliteration=body,
+                source_url=link,
+                source_site=website,
+            )
+
+            tag_names = ['urdu', 'transliterated', NO_ORIGINAL_TAG, source_tag]
+            tag_names += [slugify(categories[cid])
+                          for cid in post.get('categories') or []
+                          if cid in categories]
+            _add_tags(qasida, tag_names)
+
+            known.add(link)
+            stats['saved'] += 1
+
+        if len(posts) < WP_PAGE_SIZE:
+            break
+        page += 1
+
+    print(f"{website.name} done: {stats['saved']} saved, "
+          f"{stats['already_present']} already present, "
+          f"{stats['no_text']} without text, {stats['no_link']} without a link, "
+          f"{stats['errors']} errors.")
+
+
 @shared_task
 def enrich_qasida(qasida_id, overwrite=False):
     """
@@ -1533,6 +1715,7 @@ def run_crawlers():
         'midhah': scrape_midhah,
         'generic': scrape_generic,
         'wayback': scrape_wayback,
+        'wordpress_api': scrape_wordpress_api,
     }
 
     for website in active_websites:
@@ -1551,5 +1734,19 @@ def run_crawlers():
             print(f"Giving up on {website.name} for this run: {e}")
         except Exception as e:
             print(f"{website.name} failed ({type(e).__name__}): {e}")
+
+    # Sources overlap heavily - the same poem is published by several of these
+    # sites - so the pass that brings new work in is also the moment new
+    # duplicates appear. Filing them here means they are waiting in the admin
+    # rather than being found by a reader. Nothing is merged: each pair is left
+    # for a person, and a pair already ruled on is not raised again.
+    from .dedup import scan
+
+    try:
+        filed = scan()
+        print(f"Duplicate scan filed {filed} new pair(s) for review.")
+    except Exception as e:
+        # A failed scan must not lose a successful crawl.
+        print(f"Duplicate scan failed ({type(e).__name__}): {e}")
 
     print("Crawler task finished.")

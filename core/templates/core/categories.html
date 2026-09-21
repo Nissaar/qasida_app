@@ -14,7 +14,7 @@
     <h2 class="eyebrow mb-3">Language</h2>
     <div class="flex flex-wrap gap-2">
         {% for entry in languages %}
-        <a href="{% url 'browse' %}?lang={{ entry.language|urlencode }}" class="chip">
+        <a href="{% url 'lyrics' %}?lang={{ entry.language|urlencode }}" class="chip">
             {{ entry.language }} <span class="opacity-50 tabular-nums">{{ entry.n }}</span>
         </a>
         {% endfor %}
@@ -26,7 +26,7 @@
     <h2 class="eyebrow mb-3">{{ group.label }}</h2>
     <div class="flex flex-wrap gap-2">
         {% for tag in group.items %}
-        <a href="{% url 'browse' %}?tag={{ tag.name|urlencode }}" class="chip">
+        <a href="{% url 'lyrics' %}?tag={{ tag.name|urlencode }}" class="chip">
             {{ tag.label }} <span class="opacity-50 tabular-nums">{{ tag.n }}</span>
         </a>
         {% endfor %}

@@ -323,8 +323,10 @@ def home(request):
     })
 
 
-def browse(request):
-    return _listing(request, 'Browse all qasidas')
+def lyrics(request):
+    # Served at /lyrics/ because that is the word people search for; /browse/
+    # redirects here permanently rather than serving the same listing twice.
+    return _listing(request, 'Qasida, Naat and Nasheed Lyrics')
 
 
 def search(request):
@@ -490,7 +492,7 @@ def random_qasida(request):
             .values_list('slug', flat=True)
             .first())
     if pick is None:
-        return redirect('browse')
+        return redirect('lyrics')
     return redirect('qasida_detail', slug=pick)
 
 

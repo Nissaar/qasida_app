@@ -2,9 +2,10 @@ from django.contrib import admin, messages as django_messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.shortcuts import redirect, render
-from django.urls import path
+from django.urls import path, reverse
 from django.db.models import Count, Max
 from django.utils import timezone
+from django.utils.html import format_html
 
 from . import notify
 from .admin_filters import MissingDetailFilter, TextSearchPanel
@@ -16,8 +17,9 @@ admin.site.site_header = "Qasida Library"
 admin.site.site_title = "Qasida Library"
 admin.site.index_title = "Library administration"
 from .models import (Collection, ContactMessage, Contribution, Dedication,
-                     Favourite, Tag, Poet, Qasida, QasidaImage, QasidaMedia,
-                     ReadingHistory, ReaderProfile, Suggestion, SourceWebsite)
+                     DuplicateLink, Favourite, Tag, Poet, Qasida, QasidaImage,
+                     QasidaMedia, ReadingHistory, ReaderProfile, Suggestion,
+                     SourceWebsite)
 
 class LibraryAdmin(admin.ModelAdmin):
     """
@@ -297,6 +299,111 @@ class QasidaAdmin(LibraryAdmin):
         count = queryset.update(review_state=Qasida.REVIEW_REJECTED,
                                 reviewed_at=timezone.now())
         self.message_user(request, f"{count} qasida(s) rejected.")
+
+@admin.register(DuplicateLink)
+class DuplicateLinkAdmin(LibraryAdmin):
+    """
+    Pairs that read like the same poem, waiting on a ruling.
+
+    Both copies are shown with what each actually carries - original script,
+    transliteration, translation, how long the text runs, which site it came
+    from - because that is what the choice turns on. Ruling records the
+    judgement and nothing else: no row is merged, hidden or deleted, so a wrong
+    call costs nothing and can be put back.
+    """
+
+    list_display = ('likeness', 'one_copy', 'the_other', 'matched_on', 'state',
+                    'created_at')
+    list_filter = ('state', 'matched_on')
+    search_fields = ('first__title', 'second__title',
+                     'first__native_title', 'second__native_title')
+    actions = ('mark_duplicate', 'mark_distinct', 'reopen')
+    readonly_fields = ('comparison', 'score', 'matched_on', 'created_at',
+                       'reviewed_at')
+    fields = ('comparison', 'state', 'note', 'score', 'matched_on',
+              'created_at', 'reviewed_at')
+
+    def get_queryset(self, request):
+        # Four related rows are read for every line of this list, so they are
+        # fetched with it rather than one query at a time.
+        return (super().get_queryset(request)
+                .select_related('first', 'first__source_site',
+                                'second', 'second__source_site'))
+
+    @staticmethod
+    def _layers(work):
+        """Which of the three layers this copy actually holds."""
+        present = []
+        if (work.lyrics or '').strip():
+            present.append('original')
+        if (work.transliteration or '').strip():
+            present.append('transliteration')
+        if (work.translation or '').strip():
+            present.append('translation')
+        return ', '.join(present) or 'no text'
+
+    def _heading(self, work):
+        return format_html(
+            '<a href="{}"><strong>{}</strong></a><br>'
+            '<small>{} &middot; {} &middot; {} characters</small>',
+            reverse('admin:core_qasida_change', args=[work.pk]),
+            work.title or f'#{work.pk}',
+            work.source_site.name if work.source_site_id else 'source unknown',
+            self._layers(work),
+            len((work.lyrics or work.transliteration or '').strip()),
+        )
+
+    @admin.display(description='Likeness', ordering='score')
+    def likeness(self, obj):
+        return f'{obj.score:.0%}'
+
+    @admin.display(description='One copy')
+    def one_copy(self, obj):
+        return self._heading(obj.first)
+
+    @admin.display(description='The other')
+    def the_other(self, obj):
+        return self._heading(obj.second)
+
+    @admin.display(description='The two copies, side by side')
+    def comparison(self, obj):
+        return format_html(
+            '<div style="display:flex;gap:1.5rem;align-items:flex-start">{}{}</div>',
+            self._panel(obj.first), self._panel(obj.second))
+
+    def _panel(self, work):
+        return format_html(
+            '<div style="flex:1;min-width:0">{}'
+            '<pre style="white-space:pre-wrap;font-family:inherit;max-height:26rem;'
+            'overflow:auto;margin:.5rem 0 0;padding:.5rem;'
+            'border:1px solid rgba(0,0,0,.12);border-radius:.5rem">{}</pre></div>',
+            self._heading(work),
+            (work.lyrics or work.transliteration or '').strip())
+
+    def _rule(self, request, queryset, state, message):
+        updated = queryset.update(state=state, reviewed_at=timezone.now())
+        self.message_user(request, f'{updated} {message}',
+                          django_messages.SUCCESS)
+
+    @admin.action(description='These are the same poem')
+    def mark_duplicate(self, request, queryset):
+        self._rule(request, queryset, DuplicateLink.STATE_DUPLICATE,
+                   'pair(s) recorded as duplicates. Nothing was deleted - open '
+                   'either work to merge the two or remove one yourself.')
+
+    @admin.action(description='These are different poems')
+    def mark_distinct(self, request, queryset):
+        self._rule(request, queryset, DuplicateLink.STATE_DISTINCT,
+                   'pair(s) recorded as different works; they will not be '
+                   'raised again.')
+
+    @admin.action(description='Put back for review')
+    def reopen(self, request, queryset):
+        updated = queryset.update(state=DuplicateLink.STATE_PENDING,
+                                  reviewed_at=None)
+        self.message_user(request, f'{updated} pair(s) back in the queue.',
+                          django_messages.SUCCESS)
+
 
 @admin.register(Suggestion)
 class SuggestionAdmin(LibraryAdmin):

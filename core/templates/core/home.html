@@ -26,9 +26,9 @@
 
     <div class="mt-7 flex flex-wrap justify-center items-center gap-2">
         <div class="pill-group">
-            <a href="{% url 'browse' %}" class="pill pill-on">All {{ library_total }}</a>
+            <a href="{% url 'lyrics' %}" class="pill pill-on">All {{ library_total }}</a>
             {% for entry in languages %}
-            <a href="{% url 'browse' %}?lang={{ entry.language|urlencode }}" class="pill">{{ entry.language }} <span class="opacity-60 tabular-nums">{{ entry.n }}</span></a>
+            <a href="{% url 'lyrics' %}?lang={{ entry.language|urlencode }}" class="pill">{{ entry.language }} <span class="opacity-60 tabular-nums">{{ entry.n }}</span></a>
             {% endfor %}
         </div>
         <a href="{% url 'random_qasida' %}" class="btn-ghost rounded-full">
@@ -189,7 +189,7 @@
         </div>
         <div class="panel-body sm:grid-cols-2">
             {% for tag in forms|slice:":6" %}
-            <a href="{% url 'browse' %}?tag={{ tag.name|urlencode }}" class="panel-item">
+            <a href="{% url 'lyrics' %}?tag={{ tag.name|urlencode }}" class="panel-item">
                 <span class="block text-sm font-medium">{{ tag.label }}</span>
                 <span class="tile-count">{{ tag.n }} work{{ tag.n|pluralize }}</span>
             </a>
@@ -231,7 +231,7 @@
     </div>
     <div class="flex flex-wrap gap-2">
         {% for tag in maqamat %}
-        <a href="{% url 'browse' %}?tag={{ tag.name|urlencode }}" class="chip">{{ tag.label }} <span class="opacity-50 tabular-nums">{{ tag.n }}</span></a>
+        <a href="{% url 'lyrics' %}?tag={{ tag.name|urlencode }}" class="chip">{{ tag.label }} <span class="opacity-50 tabular-nums">{{ tag.n }}</span></a>
         {% endfor %}
     </div>
 </section>
@@ -244,7 +244,7 @@
             <h2 class="section-title">In {{ group.language }}</h2>
             <p class="text-sm text-stone-500 dark:text-stone-400 mt-0.5">Substantial works, cleanly extracted</p>
         </div>
-        <a href="{% url 'browse' %}?lang={{ group.language|urlencode }}" class="view-all">All {{ group.total }} &rarr;</a>
+        <a href="{% url 'lyrics' %}?lang={{ group.language|urlencode }}" class="view-all">All {{ group.total }} &rarr;</a>
     </div>
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {% for qasida in group.works %}{% include 'core/_qasida_card.html' %}{% endfor %}
@@ -261,7 +261,7 @@
                 {{ transliterated_count }} works carry a Latin transliteration beside the original.
             </p>
         </div>
-        <a href="{% url 'browse' %}?tag=transliterated" class="btn-primary mt-4 sm:mt-0 shrink-0">Show them</a>
+        <a href="{% url 'lyrics' %}?tag=transliterated" class="btn-primary mt-4 sm:mt-0 shrink-0">Show them</a>
     </div>
 </section>
 {% endif %}

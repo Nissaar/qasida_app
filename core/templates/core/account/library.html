@@ -67,7 +67,7 @@
         {% else %}Press <span class="font-medium">Save</span> on any qasida and it will be waiting here,
         on every device you sign in from.{% endif %}
     </p>
-    <a href="{% if query %}{% url 'my_library' %}{% else %}{% url 'browse' %}{% endif %}" class="btn-primary mt-6">
+    <a href="{% if query %}{% url 'my_library' %}{% else %}{% url 'lyrics' %}{% endif %}" class="btn-primary mt-6">
         {% if query %}Show everything saved{% else %}Browse the library{% endif %}</a>
 </div>
 {% endif %}

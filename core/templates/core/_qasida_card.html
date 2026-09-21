@@ -62,7 +62,7 @@
         {% if qasida.tags.all %}
         <div class="flex flex-wrap gap-1.5 mt-3">
             {% for tag in qasida.tags.all|slice:":3" %}
-            <a href="{% url 'browse' %}?tag={{ tag.name|urlencode }}" class="chip above-stretch">{{ tag.label }}</a>
+            <a href="{% url 'lyrics' %}?tag={{ tag.name|urlencode }}" class="chip above-stretch">{{ tag.label }}</a>
             {% endfor %}
         </div>
         {% endif %}

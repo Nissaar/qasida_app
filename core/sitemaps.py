@@ -84,7 +84,7 @@ class StaticSitemap(Sitemap):
     def items(self):
         # The contribution forms are deliberately absent: both need an account,
         # so a crawler sent there collects a sign-in page wearing their titles.
-        return ['home', 'browse', 'poets', 'dedications', 'collections',
+        return ['home', 'lyrics', 'poets', 'dedications', 'collections',
                 'categories', 'about', 'contribute', 'contact', 'privacy']
 
     def location(self, name):

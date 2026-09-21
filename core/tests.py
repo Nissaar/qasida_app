@@ -723,7 +723,7 @@ class RenderedOutputTest(TestCase):
             self.assertNotIn(leak, body, f'{where} is showing raw template syntax')
 
     def test_public_pages_are_clean(self):
-        for name in ('home', 'browse', 'search', 'poets', 'categories',
+        for name in ('home', 'lyrics', 'search', 'poets', 'categories',
                      'collections', 'login', 'register', 'password_reset',
                      'about', 'contact', 'privacy', 'contribute'):
             self.assert_clean(self.client.get(reverse(name)), name)
@@ -1534,7 +1534,7 @@ class ReferrerPolicyTest(TestCase):
                          'recording on the site fails with error 153')
 
     def test_the_header_is_actually_sent(self):
-        response = self.client.get(reverse('browse'))
+        response = self.client.get(reverse('lyrics'))
         self.assertNotIn(response.headers.get('Referrer-Policy'),
                          self.SILENT_ACROSS_ORIGINS)
 
@@ -1543,7 +1543,7 @@ class ReferrerPolicyTest(TestCase):
         YouTube may learn the domain; it has no business knowing which qasida
         someone is reading, and nothing should leak over plain HTTP.
         """
-        response = self.client.get(reverse('browse'))
+        response = self.client.get(reverse('lyrics'))
         self.assertEqual(response.headers.get('Referrer-Policy'),
                          'strict-origin-when-cross-origin')
 
@@ -1742,13 +1742,13 @@ class ClickableCardTest(TestCase):
 
     def test_the_card_carries_a_stretched_link(self):
         make_qasida(title='Reachable')
-        body = self.client.get(reverse('browse')).content.decode()
+        body = self.client.get(reverse('lyrics')).content.decode()
         self.assertIn('class="stretched', body)
 
     def test_the_tags_stay_separately_clickable(self):
         work = make_qasida(title='Reachable')
         work.tags.add(Tag.objects.create(name='naat'))
-        body = self.client.get(reverse('browse')).content.decode()
+        body = self.client.get(reverse('lyrics')).content.decode()
         self.assertIn('above-stretch', body)
 
 
@@ -2434,7 +2434,7 @@ class DedicationBrowsingTest(TestCase):
                          ['First', 'Second'])
 
     def test_the_rail_offers_it_as_a_filter(self):
-        response = self.client.get(reverse('browse'))
+        response = self.client.get(reverse('lyrics'))
         names = [d.name for d in response.context['all_dedications']]
         self.assertIn('The Prophet', names)
 
@@ -2549,10 +2549,21 @@ class DiscoverabilityTest(TestCase):
         self.assertRedirects(response, self.approved.get_absolute_url(),
                              status_code=301)
 
+    def test_the_old_listing_address_redirects_to_the_lyrics_page(self):
+        """The listing moved to the word people actually search for."""
+        response = self.client.get('/browse/')
+        self.assertRedirects(response, reverse('lyrics'), status_code=301)
+
+    def test_the_old_listing_address_keeps_the_filters(self):
+        """A filtered link already shared should still land on those results."""
+        response = self.client.get('/browse/', {'lang': 'Urdu'})
+        self.assertRedirects(response, f"{reverse('lyrics')}?lang=Urdu",
+                             status_code=301)
+
     # ---- keeping the thin pages out --------------------------------------
 
     def test_an_unfiltered_listing_is_offered_for_indexing(self):
-        body = self.client.get(reverse('browse')).content.decode()
+        body = self.client.get(reverse('lyrics')).content.decode()
         self.assertNotIn('noindex', body)
 
     def test_a_filtered_listing_is_not(self):
@@ -2560,7 +2571,7 @@ class DiscoverabilityTest(TestCase):
         With tags combining freely there are more filter combinations than
         works, and each is near-identical to the pages it lists.
         """
-        body = self.client.get(reverse('browse'), {'lang': 'Urdu'}).content.decode()
+        body = self.client.get(reverse('lyrics'), {'lang': 'Urdu'}).content.decode()
         self.assertIn('noindex,follow', body)
 
     def test_structured_data_is_valid_and_carries_no_verse(self):
@@ -2615,7 +2626,7 @@ class StaticPageTest(TestCase):
 
     def test_the_footer_prints_the_address_on_every_page(self):
         """Someone with a manuscript to offer should not have to hunt for it."""
-        for name in ('home', 'browse', 'about', 'privacy'):
+        for name in ('home', 'lyrics', 'about', 'privacy'):
             with self.subTest(page=name):
                 self.assertContains(self.client.get(reverse(name)), 'contact@example.com')
 

@@ -1,7 +1,7 @@
 {% extends 'core/base.html' %}
 
 {% block title %}{{ heading }}{% if author_filter %} - {{ author_filter }}{% endif %} | Qasida Library{% endblock %}
-{% block meta_description %}{% if author_filter %}Qasidas by {{ author_filter }}.{% elif dedication_filter %}Qasidas in praise of {{ dedication_filter }}.{% else %}Browse {{ total }} naats, qasidas and manqabat with transliterations and translations.{% endif %}{% endblock %}
+{% block meta_description %}{% if author_filter %}Qasida and naat lyrics by {{ author_filter }}.{% elif dedication_filter %}Qasida and naat lyrics in praise of {{ dedication_filter }}.{% else %}Lyrics for {{ total }} naats, qasidas, madih and manqabat in Arabic and Urdu, with transliterations and translations.{% endif %}{% endblock %}
 {% comment %}
 Every combination of filters is a page, and with tags now combining freely
 there are more combinations than works. They are near-identical to each other
@@ -21,7 +21,7 @@ still followed.
         </p>
     </div>
     {% if has_filters %}
-    <a href="{% url 'browse' %}" class="btn-ghost">Clear filters</a>
+    <a href="{% url 'lyrics' %}" class="btn-ghost">Clear filters</a>
     {% endif %}
 </div>
 
@@ -91,7 +91,7 @@ still followed.
                 No work matches this combination. Try removing a filter, or search the whole library.
             </p>
             <div class="flex flex-wrap justify-center gap-2 mt-5">
-                <a href="{% url 'browse' %}" class="btn-primary">Browse all {{ library_total }}</a>
+                <a href="{% url 'lyrics' %}" class="btn-primary">Browse all {{ library_total }}</a>
                 {% comment %} The moment someone learns the library does not hold what
                    they came for is the moment to offer to go and find it. {% endcomment %}
                 <a href="{% url 'request_qasida' %}" class="btn-ghost">Ask us to add it</a>

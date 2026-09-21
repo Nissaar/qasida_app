@@ -20,4 +20,24 @@ Disallow: /random/
 Disallow: /*/edit/
 Disallow: /*/download/
 
+# Filtered listings. Every combination of facets is a different URL over the
+# same works, so a crawler left to follow them spends its budget on thousands
+# of near-identical pages instead of the works themselves. They already carry
+# noindex; this stops them being fetched at all. Pagination is deliberately
+# left crawlable, because following it is one way the works are found.
+Disallow: /lyrics/?*q=
+Disallow: /lyrics/?*lang=
+Disallow: /lyrics/?*tag=
+Disallow: /lyrics/?*author=
+Disallow: /lyrics/?*dedication=
+
+# The same combinations under the listing's former address, which redirects
+# here. Blocked in their own right so the thousands already crawled are not
+# fetched again only to be redirected.
+Disallow: /browse/?*q=
+Disallow: /browse/?*lang=
+Disallow: /browse/?*tag=
+Disallow: /browse/?*author=
+Disallow: /browse/?*dedication=
+
 Sitemap: {{ request.scheme }}://{{ request.get_host }}/sitemap.xml

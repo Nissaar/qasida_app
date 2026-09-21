@@ -1,7 +1,7 @@
 from django.contrib.auth import views as auth_views
 from django.contrib.sitemaps.views import sitemap
 from django.urls import path
-from django.views.generic import TemplateView
+from django.views.generic import RedirectView, TemplateView
 
 from . import account_views, views
 from .sitemaps import SITEMAPS
@@ -24,7 +24,12 @@ urlpatterns = [
          name='django.contrib.sitemaps.views.sitemap'),
     path('robots.txt', TemplateView.as_view(
         template_name='core/robots.txt', content_type='text/plain'), name='robots'),
-    path('browse/', views.browse, name='browse'),
+    path('lyrics/', views.lyrics, name='lyrics'),
+    # The listing was served here first, so the address is already indexed and
+    # shared. It stays working as a permanent redirect rather than being served
+    # twice under two URLs; query_string carries any filters across.
+    path('browse/', RedirectView.as_view(pattern_name='lyrics', permanent=True,
+                                         query_string=True), name='browse'),
     path('poets/', views.poets, name='poets'),
     path('categories/', views.categories, name='categories'),
     path('dedications/', views.dedications, name='dedications'),
