@@ -148,6 +148,50 @@
         img, svg, video, iframe, table { max-width: 100%; }
         .prose-lyrics:dir(rtl) { text-align: right; }
         [dir="auto"] { unicode-bidi: plaintext; }
+
+        /* A stanza and its layers, centred on one axis. These texts are set
+           this way in print: the verse, its romanisation and its rendering
+           stacked under one another and centred, so a couplet reads as one
+           thing rather than as three parallel columns. The cap on the verse
+           and the right-alignment RTL would otherwise take are both lifted
+           here, which is why these override rather than sit beside them. */
+        .stanza { text-align: center; }
+        .stanza .prose-lyrics,
+        .stanza .prose-lyrics:dir(rtl) {
+            max-width: none;
+            margin-inline: auto;
+            text-align: center;
+        }
+
+        /* Reading mode: the verse, and nothing else.
+           Everything that is not the poem is put away rather than restyled,
+           so what is left reads like a page of a book. The exit button is
+           fixed and appears only here, because in this state there is no
+           chrome left to put it in. */
+        #reading-exit { display: none; }
+        body.reading-mode #reading-exit { display: inline-flex; }
+        body.reading-mode > header,
+        body.reading-mode > footer,
+        body.reading-mode > nav,
+        body.reading-mode #install-banner,
+        body.reading-mode main > nav,
+        body.reading-mode #lyrics-toolbar,
+        body.reading-mode #qasida-layout > aside,
+        body.reading-mode #qasida-main > *:not(#lyrics) { display: none !important; }
+        body.reading-mode #qasida-layout { display: block; }
+        body.reading-mode main {
+            max-width: 48rem;
+            padding-top: 2rem;
+            padding-bottom: 4rem;
+        }
+        /* The panel becomes the page: no card, no rules between stanzas. */
+        body.reading-mode #lyrics,
+        body.reading-mode #lyrics .stanza {
+            background: transparent;
+            border: none;
+            box-shadow: none;
+        }
+        body.reading-mode #lyrics { padding: 0; }
         /* Tailwind's utilities layer overrides Preflight's [hidden] rule for any
            element carrying a display class (flex, grid, block). Without this the
            hidden attribute silently does nothing. */
