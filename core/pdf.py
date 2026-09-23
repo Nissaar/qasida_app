@@ -56,6 +56,23 @@ def font_path():
     return Path(getattr(settings, 'QASIDA_PDF_FONT', DEFAULT_FONT))
 
 
+def bold_font_path():
+    """
+    The bold cut sitting beside the regular one, when the family ships it.
+
+    Found by name rather than configured separately, because it lives in the
+    same directory and that directory is already the archive the story reads
+    from. None when there is no such file: a deployment pointing at some other
+    font should not have a bold weight declared that MuPDF would then have to
+    invent.
+    """
+    regular = font_path()
+    if '-Regular' not in regular.name:
+        return None
+    candidate = regular.with_name(regular.name.replace('-Regular', '-Bold'))
+    return candidate if candidate.is_file() else None
+
+
 def site_base():
     """
     Where this library lives, without a trailing slash.
@@ -84,9 +101,19 @@ def _direction(text):
     return 'rtl' if ARABIC_SCRIPT_RE.search(text or '') else 'ltr'
 
 
-def _block(text, css_class):
-    """One block of verse, escaped, with its line breaks kept."""
+def _block(text, css_class, number=None):
+    """
+    One block of verse, escaped, with its line breaks kept.
+
+    `number` prefixes the stanza's place in the poem. It is put on the
+    rendering rather than on the verse: the original is what the eye goes to
+    first and a numeral in front of it interrupts the line, while on the
+    translation it gives a reader working between the layers a way to keep
+    their place.
+    """
     body = escape(text.strip()).replace('\n', '<br/>')
+    if number is not None:
+        body = f'<span class="num">{number}.</span> {body}'
     return f'<div class="{css_class}" dir="{_direction(text)}">{body}</div>'
 
 
@@ -120,18 +147,24 @@ def _document_html(qasida, layers):
 
     rows = stanza_rows(qasida)
     paired = set()
-    label_layers = len(wanted) > 1
-    for row in rows:
+    # No per-layer captions here any more. Repeating "Transliteration" and
+    # "Translation" over every stanza of a long poem says the same thing
+    # dozens of times, and the three layers are already told apart by how they
+    # are set - the verse large, its romanisation smaller beneath, the
+    # rendering smaller still and numbered. The captions stay on a layer that
+    # could not be paired, below, where there is nothing else to identify it.
+    for index, row in enumerate(rows, start=1):
         stanza = []
         for name in wanted:
-            key, heading = LAYERS[name]
+            key, _heading = LAYERS[name]
             text = row.get(key) or ''
             if not text.strip():
                 continue
             paired.add(name)
-            if heading and label_layers:
-                stanza.append(f'<p class="layer">{escape(heading)}</p>')
-            stanza.append(_block(text, 'verse' if name == 'original' else name))
+            stanza.append(_block(
+                text,
+                'verse' if name == 'original' else name,
+                number=index if name == 'translation' else None))
         if stanza:
             parts.append('<div class="stanza">' + ''.join(stanza) + '</div>')
 
@@ -163,31 +196,44 @@ def _document_html(qasida, layers):
     return '<div class="doc">' + ''.join(parts) + '</div>'
 
 
-def _stylesheet(family):
+def _stylesheet(family, has_bold=False):
     """
     Page styling.
 
     Verse is set larger and more openly than prose: vocalised Arabic carries
     marks above and below every letter, and at a normal body size and leading
     they collide.
+
+    The romanisation is set bold to hold its own between the verse above it
+    and the rendering below, but only where a real bold cut was found. Asking
+    for a weight the family does not have leaves MuPDF to invent one, which
+    looks worse than the regular weight it replaces.
     """
+    latin_weight = 'font-weight: bold;' if has_bold else ''
     return f"""
     * {{ font-family: {family}; }}
-    .doc {{ font-size: 11px; color: #1c1917; }}
+    /* Centred throughout, the way these texts are set in print and the way
+       the site shows them: the verse, its romanisation and its rendering
+       stacked on one axis so a stanza reads as one thing. */
+    .doc {{ font-size: 11px; color: #1c1917; text-align: center; }}
     h1 {{ font-size: 19px; margin: 0 0 2px 0; }}
     h2 {{ font-size: 17px; margin: 0 0 2px 0; font-weight: normal; }}
-    h3 {{ font-size: 13px; margin: 14px 0 4px 0; }}
+    h3 {{ font-size: 13px; margin: 16px 0 4px 0; }}
     .masthead {{ font-size: 8px; letter-spacing: 1.2px; text-transform: uppercase;
                  color: #047857; margin: 0 0 6px 0; }}
     .byline {{ font-size: 11px; margin: 2px 0 0 0; }}
     .meta {{ font-size: 9px; color: #57534e; margin: 2px 0 0 0; }}
-    .titleblock {{ margin-bottom: 16px; }}
-    .stanza {{ margin-bottom: 14px; }}
+    .titleblock {{ margin-bottom: 20px; }}
+    .stanza {{ margin-bottom: 18px; }}
     .layer {{ font-size: 8px; color: #78716c; margin: 6px 0 1px 0; }}
     .verse {{ font-size: 15px; line-height: 2.0; margin: 0; }}
-    .latin {{ font-size: 11px; line-height: 1.7; color: #57534e; margin: 0; }}
-    .translation {{ font-size: 11px; line-height: 1.7; color: #44403c; margin: 0; }}
-    .notes {{ font-size: 8px; color: #78716c; margin-top: 18px; }}
+    .latin {{ font-size: 10.5px; line-height: 1.7; color: #44403c; margin: 5px 0 0 0;
+              {latin_weight} }}
+    .translation {{ font-size: 10.5px; line-height: 1.7; color: #57534e; margin: 5px 0 0 0; }}
+    .num {{ color: #a8a29e; }}
+    /* The colophon is reference matter rather than verse, and a centred
+       ragged block of URLs is harder to read than a left-aligned one. */
+    .notes {{ font-size: 8px; color: #78716c; margin-top: 20px; text-align: left; }}
     .notes p {{ margin: 0 0 2px 0; }}
     """
 
@@ -199,8 +245,12 @@ def build_pdf(qasida, layers, include_scans=True):
     path = font_path()
     if path.is_file():
         family = 'qasidafont'
-        css = (f'@font-face {{ font-family: {family}; src: url({path.name}); }}'
-               + _stylesheet(family))
+        faces = f'@font-face {{ font-family: {family}; src: url({path.name}); }}'
+        bold = bold_font_path()
+        if bold:
+            faces += (f'@font-face {{ font-family: {family}; '
+                      f'src: url({bold.name}); font-weight: bold; }}')
+        css = faces + _stylesheet(family, has_bold=bool(bold))
         archive = pymupdf.Archive(str(path.parent))
     else:
         # MuPDF substitutes from its own fallback fonts, which still shape
