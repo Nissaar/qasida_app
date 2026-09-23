@@ -21,6 +21,7 @@ good source to copy and paste from.
 import io
 import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from django.conf import settings
 from django.utils.html import escape
@@ -40,8 +41,36 @@ MARGIN = 56          # points; a shade over 19mm
 FOOTER_SPACE = 34
 
 
+SITE_NAME = "Qasida Library"
+# Used when nothing is configured, so a PDF built in development still carries
+# an address rather than a blank.
+DEFAULT_SITE_HOST = "www.qasidalibrary.com"
+
+# The green the site is set in, as a PDF colour.
+BRAND_RGB = (0.016, 0.471, 0.341)
+RULE_RGB = (0.85, 0.83, 0.81)
+FOOTER_RGB = (0.47, 0.44, 0.42)
+
+
 def font_path():
     return Path(getattr(settings, 'QASIDA_PDF_FONT', DEFAULT_FONT))
+
+
+def site_base():
+    """
+    Where this library lives, without a trailing slash.
+
+    Taken from SITE_URL where it is set, so a deployment cannot hand out PDFs
+    pointing at somebody else's domain, and falling back to the public address
+    rather than printing nothing at all.
+    """
+    configured = (getattr(settings, 'SITE_URL', '') or '').strip().rstrip('/')
+    return configured or f'https://{DEFAULT_SITE_HOST}'
+
+
+def site_host():
+    """Just the host, which is what reads well in a footer."""
+    return urlsplit(site_base()).netloc or DEFAULT_SITE_HOST
 
 
 def _direction(text):
@@ -69,6 +98,9 @@ def _document_html(qasida, layers):
         wanted = ['original']
 
     parts = ['<div class="titleblock">']
+    # A masthead above the title: a page printed and passed on by itself should
+    # still say what collection it came out of.
+    parts.append(f'<p class="masthead">{escape(SITE_NAME)}</p>')
     parts.append(f'<h1 dir="{_direction(qasida.title)}">{escape(qasida.title or "Untitled")}</h1>')
     if qasida.native_title:
         parts.append(f'<h2 dir="rtl">{escape(qasida.native_title)}</h2>')
@@ -115,6 +147,10 @@ def _document_html(qasida, layers):
             parts.append(_block(whole, name))
 
     notes = []
+    # The library's own address for this work comes first: a printed sheet
+    # that has travelled needs a way back to the record it was taken from,
+    # where any correction since will have landed.
+    notes.append(f'Read online at {escape(site_base() + qasida.get_absolute_url())}')
     if qasida.source_url:
         notes.append(f'Source: {escape(qasida.source_url)}')
     if qasida.translation and qasida.translation_origin == 'machine':
@@ -141,6 +177,8 @@ def _stylesheet(family):
     h1 {{ font-size: 19px; margin: 0 0 2px 0; }}
     h2 {{ font-size: 17px; margin: 0 0 2px 0; font-weight: normal; }}
     h3 {{ font-size: 13px; margin: 14px 0 4px 0; }}
+    .masthead {{ font-size: 8px; letter-spacing: 1.2px; text-transform: uppercase;
+                 color: #047857; margin: 0 0 6px 0; }}
     .byline {{ font-size: 11px; margin: 2px 0 0 0; }}
     .meta {{ font-size: 9px; color: #57534e; margin: 2px 0 0 0; }}
     .titleblock {{ margin-bottom: 16px; }}
@@ -254,14 +292,22 @@ def _add_footers(doc):
     import pymupdf
 
     total = doc.page_count
+    host = site_host()
     for number, page in enumerate(doc, start=1):
         y = page.rect.height - MARGIN + 12
-        page.insert_text((MARGIN, y), "Qasida Library", fontname="helv",
-                         fontsize=7, color=(0.47, 0.44, 0.42))
-        label = f"{number} / {total}"
+        # A hairline across the foot, so the text block has a bottom edge
+        # rather than the footer floating loose in the margin.
+        page.draw_line(pymupdf.Point(MARGIN, y - 9),
+                       pymupdf.Point(page.rect.width - MARGIN, y - 9),
+                       color=RULE_RGB, width=0.4)
+        # The address in the library's own green, on every page: a sheet that
+        # gets photocopied or forwarded still says where it came from.
+        page.insert_text((MARGIN, y), host, fontname="hebo",
+                         fontsize=7, color=BRAND_RGB)
+        label = f"{SITE_NAME}  ·  {number} / {total}"
         width = pymupdf.get_text_length(label, fontname="helv", fontsize=7)
         page.insert_text((page.rect.width - MARGIN - width, y), label,
-                         fontname="helv", fontsize=7, color=(0.47, 0.44, 0.42))
+                         fontname="helv", fontsize=7, color=FOOTER_RGB)
 
 
 def filename_for(qasida, layers):
