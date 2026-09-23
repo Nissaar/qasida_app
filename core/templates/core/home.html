@@ -157,6 +157,33 @@
 </section>
 {% endif %}
 
+{% comment %}
+High on the page, directly under whichever greeting the reader was given.
+Someone returning wants to know what has arrived since they were last here,
+and asking them to scroll past every way of browsing to find out makes the
+answer easy to miss. The curated ways in - poets, forms, maqamat, languages -
+still follow, because they are what serves a reader who has not been here
+before and has no idea what to ask for.
+
+It also puts the newest works within a few links of the top of the most
+heavily crawled page on the site, rather than leaving their discovery to the
+sitemap alone.
+{% endcomment %}
+{% if recent %}
+<section class="mb-12">
+    <div class="section-head">
+        <div>
+            <h2 class="section-title">Recently added</h2>
+            <p class="text-sm text-stone-500 dark:text-stone-400 mt-0.5">The latest texts to be checked and published</p>
+        </div>
+        <a href="{% url 'lyrics' %}" class="view-all">All {{ library_total }} &rarr;</a>
+    </div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {% for qasida in recent %}{% include 'core/_qasida_card.html' %}{% endfor %}
+    </div>
+</section>
+{% endif %}
+
 {# Two panels side by side, each grouping its tiles behind one header. #}
 <section class="grid gap-4 lg:grid-cols-2 mb-12">
     {% if poets %}
@@ -251,29 +278,6 @@
     </div>
 </section>
 {% endfor %}
-
-{% comment %}
-Last of the ways in, and deliberately so. When a work was added says nothing
-about whether it is worth reading, so this sits under the poets, forms,
-maqamat and languages rather than displacing them. It earns its place twice
-over: a reader who has been here before wants to know what has arrived since,
-and a crawler reaching the home page finds the newest works linked from it
-instead of waiting to be told by the sitemap.
-{% endcomment %}
-{% if recent %}
-<section class="mb-12">
-    <div class="section-head">
-        <div>
-            <h2 class="section-title">Recently added</h2>
-            <p class="text-sm text-stone-500 dark:text-stone-400 mt-0.5">The latest texts to be checked and published</p>
-        </div>
-        <a href="{% url 'lyrics' %}" class="view-all">All {{ library_total }} &rarr;</a>
-    </div>
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {% for qasida in recent %}{% include 'core/_qasida_card.html' %}{% endfor %}
-    </div>
-</section>
-{% endif %}
 
 {% if transliterated_count %}
 <section class="band">
