@@ -320,8 +320,16 @@ class DuplicateLinkAdmin(LibraryAdmin):
     actions = ('mark_duplicate', 'mark_distinct', 'reopen')
     readonly_fields = ('comparison', 'score', 'matched_on', 'created_at',
                        'reviewed_at')
-    fields = ('comparison', 'state', 'note', 'score', 'matched_on',
-              'created_at', 'reviewed_at')
+    # The two copies come first and fill the width, because reading them
+    # against each other is the whole job; the ruling sits under them, and how
+    # the pair was found is folded away until someone wants to know.
+    fieldsets = (
+        (None, {'fields': ('comparison',), 'classes': ('q-dup-fieldset',)}),
+        ('Your ruling', {'fields': ('state', 'note')}),
+        ('How this pair was found',
+         {'fields': ('score', 'matched_on', 'created_at', 'reviewed_at'),
+          'classes': ('collapse',)}),
+    )
 
     def get_queryset(self, request):
         # Four related rows are read for every line of this list, so they are
@@ -365,20 +373,40 @@ class DuplicateLinkAdmin(LibraryAdmin):
     def the_other(self, obj):
         return self._heading(obj.second)
 
-    @admin.display(description='The two copies, side by side')
+    @admin.display(description='')
     def comparison(self, obj):
         return format_html(
-            '<div style="display:flex;gap:1.5rem;align-items:flex-start">{}{}</div>',
+            '<div class="q-dup-compare">{}{}</div>',
             self._panel(obj.first), self._panel(obj.second))
 
-    def _panel(self, work):
+    @staticmethod
+    def _panel(work):
+        """
+        One copy, as a half of the screen.
+
+        Which layer is being shown is named rather than left to be inferred:
+        with one source publishing only a romanisation, two panels can look
+        unalike simply because they are not the same layer, which is not a
+        reason to call them different poems. `dir="auto"` lets the browser set
+        the direction from the text itself, so an Arabic copy reads
+        right-to-left beside a Latin one without either being mislabelled.
+        """
+        text = (work.lyrics or '').strip()
+        layer = 'Original script'
+        if not text:
+            text = (work.transliteration or '').strip()
+            layer = 'Transliteration (no original held)'
+
         return format_html(
-            '<div style="flex:1;min-width:0">{}'
-            '<pre style="white-space:pre-wrap;font-family:inherit;max-height:26rem;'
-            'overflow:auto;margin:.5rem 0 0;padding:.5rem;'
-            'border:1px solid rgba(0,0,0,.12);border-radius:.5rem">{}</pre></div>',
-            self._heading(work),
-            (work.lyrics or work.transliteration or '').strip())
+            '<div class="q-dup-side">'
+            '<div class="q-dup-head"><a href="{}"><strong>{}</strong></a>'
+            '<span class="q-dup-meta">{} &middot; {} characters</span>'
+            '<span class="q-dup-layer">{}</span></div>'
+            '<div class="q-dup-text q-rtl" dir="auto">{}</div></div>',
+            reverse('admin:core_qasida_change', args=[work.pk]),
+            work.title or f'#{work.pk}',
+            work.source_site.name if work.source_site_id else 'source unknown',
+            len(text), layer, text)
 
     def _rule(self, request, queryset, state, message):
         updated = queryset.update(state=state, reviewed_at=timezone.now())

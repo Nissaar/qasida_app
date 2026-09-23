@@ -1473,3 +1473,83 @@ html[data-theme="auto"],
     box-shadow: var(--q-shadow);
     padding: .3rem .6rem .5rem;
 }
+
+
+/* ---- reviewing a suspected duplicate -----------------------------------
+ * Two copies of what may be one poem, each taking half the screen, because
+ * the judgement is made by reading one against the other rather than by
+ * scrolling between them. The pair fills the width of the form: Django's
+ * change form puts a readonly field in a narrow column beside its label,
+ * which is the one shape this particular field must not have.
+ */
+.q-dup-fieldset .form-row { display: block; padding: 0; }
+.q-dup-fieldset .form-row > div { max-width: none; width: 100%; }
+/* The field is deliberately unlabelled - two titled panels say what it is. */
+.q-dup-fieldset label { display: none; }
+.q-dup-fieldset .readonly { padding: 0; width: 100%; }
+
+.q-dup-compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    align-items: start;
+}
+
+.q-dup-side {
+    min-width: 0;          /* a grid child will not shrink below its text */
+    border: 1px solid var(--q-line);
+    border-radius: var(--q-radius);
+    background: var(--q-surface);
+    overflow: hidden;
+}
+
+.q-dup-head {
+    display: flex;
+    flex-direction: column;
+    gap: .15rem;
+    padding: .7rem .9rem;
+    border-bottom: 1px solid var(--q-line-soft);
+    background: var(--q-surface-2);
+    position: sticky;
+    top: 0;
+}
+
+.q-dup-meta { font-size: .8rem; color: var(--q-muted); }
+
+/* Which layer is on show. Two panels can differ simply by being a different
+   layer of the same poem, which is not a reason to call them two poems. */
+.q-dup-layer {
+    font-size: .75rem;
+    color: var(--q-accent-ink);
+    background: var(--q-accent-tint);
+    border: 1px solid var(--q-accent-line);
+    border-radius: 999px;
+    padding: .05rem .5rem;
+    align-self: flex-start;
+}
+
+.q-dup-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;   /* scraped text carries very long runs */
+    max-height: 65vh;
+    overflow-y: auto;
+    padding: .8rem .9rem;
+    margin: 0;
+}
+
+/* Arabic and Urdu, set to match the verse fields on a qasida. plaintext
+   bidi lets each paragraph take its direction from its own first letter,
+   so a romanised copy sits beside an Arabic one without either being
+   forced the wrong way round. */
+.q-rtl {
+    font-family: "Noto Naskh Arabic", serif;
+    font-size: 1.05rem;
+    line-height: 2.1;
+    unicode-bidi: plaintext;
+}
+
+/* Side by side stops helping once each half is too narrow to hold a line. */
+@media (max-width: 900px) {
+    .q-dup-compare { grid-template-columns: 1fr; }
+    .q-dup-text { max-height: 40vh; }
+}
