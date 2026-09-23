@@ -6,7 +6,7 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db.models import Count, Q
-from django.db.models.functions import Length
+from django.db.models.functions import Coalesce, Length
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
@@ -257,6 +257,7 @@ HOME_FORM_COUNT = 10
 HOME_MAQAM_COUNT = 8
 HOME_FEATURED_PER_LANGUAGE = 3
 HOME_PERSONAL_COUNT = 4
+HOME_RECENT_COUNT = 6
 
 
 def _top_poets(scope, limit):
@@ -283,6 +284,22 @@ def _featured(scope, language, limit):
             .prefetch_related('tags', 'images')
             .annotate(length=Length('lyrics'))
             .order_by('-length')[:limit])
+
+
+def _recently_added(scope, limit):
+    """
+    The works most recently made readable.
+
+    Ordered by when a work was approved, not when it was fetched: a text can
+    sit pending for months, and the day a crawler happened to find it says
+    nothing to a reader. created_at is the fallback for rows approved before
+    that was recorded - the same pair the sitemap calls last-modified, so the
+    two cannot disagree about what counts as new.
+    """
+    return (scope.select_related('author', 'dedicated_to')
+            .prefetch_related('tags', 'images')
+            .annotate(published=Coalesce('reviewed_at', 'created_at'))
+            .order_by('-published')[:limit])
 
 
 def home(request):
@@ -318,6 +335,7 @@ def home(request):
         'forms': _tags_in_group(scope, Tag.CATEGORY_FORM, HOME_FORM_COUNT),
         'maqamat': _tags_in_group(scope, Tag.CATEGORY_MAQAM, HOME_MAQAM_COUNT),
         'featured_groups': featured,
+        'recent': _recently_added(scope, HOME_RECENT_COUNT),
         'transliterated_count': scope.exclude(transliteration='').count(),
         **personal,
     })

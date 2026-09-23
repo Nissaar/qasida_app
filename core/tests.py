@@ -8,6 +8,7 @@ reached or changed by anyone else.
 """
 
 import re
+from datetime import timedelta
 from pathlib import Path
 
 from django.conf import settings
@@ -16,6 +17,7 @@ from django.core import mail
 from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from .models import (ContactMessage, Contribution, Dedication, Favourite,
                      Poet, Qasida, QasidaImage, ReaderProfile, ReadingHistory,
@@ -627,6 +629,31 @@ class LandingPageTest(TestCase):
         response = self.client.get(reverse('home'))
         self.assertContains(response, 'Welcome back, reader')
         self.assertNotContains(response, 'Save what you find')
+
+    def test_what_arrived_lately_is_offered(self):
+        self.assertContains(self.client.get(reverse('home')), 'Recently added')
+
+    def test_recent_means_lately_approved_not_lately_fetched(self):
+        """
+        A text can sit pending for months before anyone reads it, so the day a
+        crawler happened to find it says nothing about when it became readable.
+        Ordering on approval is what stops a batch crawled last year from
+        arriving as though it were new.
+        """
+        now = timezone.now()
+        long_ago = make_qasida(title='Approved Long Ago',
+                               reviewed_at=now - timedelta(days=40))
+        just_now = make_qasida(title='Approved Today', reviewed_at=now)
+
+        recent = list(self.client.get(reverse('home')).context['recent'])
+        self.assertLess(recent.index(just_now), recent.index(long_ago))
+
+    def test_a_work_still_waiting_on_review_is_not_announced(self):
+        """The review gate holds here as everywhere else."""
+        pending = make_qasida(title='Not Checked Yet',
+                              review_state=Qasida.REVIEW_PENDING)
+        response = self.client.get(reverse('home'))
+        self.assertNotIn(pending, response.context['recent'])
 
 
 class AdminUserManagementTest(TestCase):
