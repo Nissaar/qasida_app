@@ -1,3 +1,5 @@
+import uuid
+
 from django.conf import settings
 from django.contrib.postgres.indexes import GinIndex
 from django.db import IntegrityError, models, transaction
@@ -414,6 +416,15 @@ class Qasida(models.Model):
         """This work's language as a tag a browser understands."""
         return language_code(self.language)
 
+    def _slug_base(self):
+        """The readable part of the slug, or '' when nothing Latin is to hand."""
+        base = slugify(self.title or '')
+        if not base and self.transliteration:
+            first_line = next(
+                (line for line in self.transliteration.splitlines() if line.strip()), '')
+            base = slugify(first_line)
+        return base[:200]
+
     def build_slug(self):
         """
         A readable, unique URL fragment for this work.
@@ -421,14 +432,7 @@ class Qasida(models.Model):
         Falls back through the transliteration and finally the id, because a
         title in Arabic or Urdu script slugifies to nothing.
         """
-        base = slugify(self.title or '')
-        if not base and self.transliteration:
-            first_line = next(
-                (line for line in self.transliteration.splitlines() if line.strip()), '')
-            base = slugify(first_line)
-        if not base:
-            base = f'qasida-{self.pk}' if self.pk else 'qasida'
-        base = base[:200]
+        base = self._slug_base() or (f'qasida-{self.pk}' if self.pk else 'qasida')
 
         candidate = base
         suffix = 2
@@ -460,17 +464,56 @@ class Qasida(models.Model):
         # it is preferred; a source that publishes only a transliteration still
         # gets a signature rather than being left unmatchable.
         self.dedup_signature = build_signature(self.lyrics, self.transliteration)
+        extra_fields = {'search_text', 'dedup_signature'}
+
+        # The slug is settled before the row is written. It used to be filled
+        # in by a second statement after an insert with slug='', and the column
+        # is unique: a crash between the two, or two workers creating at once,
+        # left a row holding '' for good, after which every new work collided
+        # with it and the crawlers stopped importing anything.
+        generated = needs_id = False
+        if not self.slug:
+            generated = True
+            # A work with no Latin title is named after its id, which does not
+            # exist yet. It is written under a placeholder that cannot collide
+            # and renamed once the id is known, in the same transaction.
+            needs_id = not self.pk and not self._slug_base()
+            self.slug = f'qasida-new-{uuid.uuid4().hex}' if needs_id else self.build_slug()
+            extra_fields.add('slug')
+
         update_fields = kwargs.get('update_fields')
         if update_fields:
-            kwargs['update_fields'] = list(
-                set(update_fields) | {'search_text', 'dedup_signature'})
-        super().save(*args, **kwargs)
+            kwargs['update_fields'] = list(set(update_fields) | extra_fields)
 
-        # A row with no title in Latin script needs its id to build a slug, so
-        # this runs after the first save rather than before it.
-        if not self.slug:
-            self.slug = self.build_slug()
-            super().save(update_fields=['slug'])
+        with transaction.atomic():
+            self._save_claiming_slug(generated, *args, **kwargs)
+            if needs_id:
+                self.slug = self.build_slug()
+                super().save(update_fields=['slug'])
+
+    # How many times a generated slug is recomputed after another writer took
+    # it first. Two is already a coincidence; five is only a backstop.
+    SLUG_ATTEMPTS = 5
+
+    def _save_claiming_slug(self, generated, *args, **kwargs):
+        """
+        Save, taking a fresh slug if another writer claimed ours meanwhile.
+
+        build_slug checks for a free name and the insert takes it, and a
+        second worker can take the same name in between. Only a slug this
+        method generated is retried: one an editor typed is theirs to change.
+        """
+        for attempt in range(self.SLUG_ATTEMPTS):
+            try:
+                with transaction.atomic():
+                    super().save(*args, **kwargs)
+                return
+            except IntegrityError:
+                clashed = (Qasida.objects.exclude(pk=self.pk)
+                           .filter(slug=self.slug).exists())
+                if not (generated and clashed) or attempt == self.SLUG_ATTEMPTS - 1:
+                    raise
+                self.slug = self.build_slug()
 
     def __str__(self):
         return self.title or f"Qasida {self.id}"

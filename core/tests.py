@@ -71,6 +71,32 @@ class QasidaModelTest(TestCase):
     def test_slug_is_built_from_the_title(self):
         self.assertEqual(self.qasida.slug, 'test-qasida')
 
+    def test_a_title_in_arabic_script_is_named_after_its_id(self):
+        work = make_qasida(title='بردة المديح')
+        self.assertEqual(work.slug, f'qasida-{work.pk}')
+
+    def test_a_row_left_with_no_slug_does_not_block_new_works(self):
+        """The failure the old two-step save could leave behind."""
+        Qasida.objects.filter(pk=self.qasida.pk).update(slug='')
+        work = make_qasida(title='بردة المديح')
+        self.assertEqual(work.slug, f'qasida-{work.pk}')
+        self.assertEqual(make_qasida(title='Another').slug, 'another')
+
+    def test_a_slug_taken_meanwhile_is_replaced_rather_than_failing(self):
+        """Two workers can both see a name as free before either inserts it."""
+        from unittest import mock
+        real = Qasida.build_slug
+        calls = []
+
+        def racing(work):
+            calls.append(1)
+            # The first answer is the name another writer has just taken.
+            return 'test-qasida' if len(calls) == 1 else real(work)
+
+        with mock.patch.object(Qasida, 'build_slug', racing):
+            work = make_qasida(title='Test Qasida')
+        self.assertEqual(work.slug, 'test-qasida-2')
+
     def test_suggestion_creation(self):
         suggestion = Suggestion.objects.create(
             qasida=self.qasida, email='test@example.com',
