@@ -1,6 +1,11 @@
 {% comment %}
 Renders any form in the site's own styling. Checkboxes put their label after
 the control, which is the only layout difference between field types here.
+
+Django marks each control aria-describedby="<id>_helptext <id>_error" and
+aria-invalid when it has errors; the ids below are what those point at, so a
+screen reader announces the hint and the error with the field rather than
+leaving them as text somewhere else on the page.
 {% endcomment %}
 {% if form.non_field_errors %}
 <div class="rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/60 px-4 py-3 text-sm text-red-800 dark:text-red-200">
@@ -15,17 +20,21 @@ the control, which is the only layout difference between field types here.
         {{ field }}
         <span>
             <span class="font-medium">{{ field.label }}</span>
-            {% if field.help_text %}<span class="block text-stone-500 dark:text-stone-400 text-xs mt-0.5">{{ field.help_text|safe }}</span>{% endif %}
+            {% if field.help_text %}<span id="{{ field.auto_id }}_helptext" class="block text-stone-500 dark:text-stone-400 text-xs mt-0.5">{{ field.help_text|safe }}</span>{% endif %}
         </span>
     </label>
     {% else %}
     <label for="{{ field.id_for_label }}" class="block text-sm font-medium mb-1">{{ field.label }}</label>
     {{ field }}
-    {% if field.help_text %}<p class="text-xs text-stone-500 dark:text-stone-400 mt-1 leading-relaxed">{{ field.help_text|safe }}</p>{% endif %}
+    {% if field.help_text %}<p id="{{ field.auto_id }}_helptext" class="text-xs text-stone-500 dark:text-stone-400 mt-1 leading-relaxed">{{ field.help_text|safe }}</p>{% endif %}
     {% endif %}
-    {% for error in field.errors %}
-    <p class="text-xs text-red-700 dark:text-red-300 mt-1">{{ error }}</p>
-    {% endfor %}
+    {% if field.errors %}
+    <div id="{{ field.auto_id }}_error">
+        {% for error in field.errors %}
+        <p class="text-xs text-red-700 dark:text-red-300 mt-1">{{ error }}</p>
+        {% endfor %}
+    </div>
+    {% endif %}
 </div>
 {% endif %}
 {% endfor %}

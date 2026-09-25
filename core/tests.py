@@ -3795,3 +3795,17 @@ class EmailVerificationTest(TestCase):
         from . import notify
         self.assertFalse(notify.contribution_decided(contribution))
         self.assertEqual(mail.outbox, [])
+
+
+class FormAccessibilityTest(TestCase):
+    def test_every_described_by_reference_points_at_something(self):
+        page = self.client.post(reverse('register'), {
+            'username': 'has@sign', 'email': 'bad', 'password1': 'x', 'password2': 'y',
+        }).content.decode()
+        references = set()
+        for value in re.findall(r'aria-describedby="([^"]+)"', page):
+            references.update(value.split())
+        self.assertTrue(references)
+        for ref in references:
+            self.assertIn(f'id="{ref}"', page, f'{ref} is referenced but not on the page')
+        self.assertIn('aria-invalid="true"', page)
