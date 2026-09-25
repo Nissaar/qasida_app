@@ -22,8 +22,23 @@
             <h2 class="font-display text-lg text-brand-900 dark:text-brand-100">Sign-in details</h2>
             <p class="text-sm text-stone-500 dark:text-stone-400 mt-1 mb-5">
                 Your username is <span class="font-medium text-stone-700 dark:text-stone-200">{{ user.username }}</span>.
-                You can sign in with it or with your address.
+                You can sign in with it{% if email_verified %} or with your address{% endif %}.
             </p>
+            {% if not email_verified or profile.pending_email %}
+            <div class="rounded-lg bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 text-sm p-3 mb-5" role="status">
+                {% if profile.pending_email %}
+                <p>Waiting for you to confirm <span class="font-medium">{{ profile.pending_email }}</span>.
+                Until then this account keeps {{ user.email }}.</p>
+                {% else %}
+                <p><span class="font-medium">{{ user.email }}</span> is not confirmed yet, so you
+                cannot sign in with it and the library will not write to it.</p>
+                {% endif %}
+                <form method="post" action="{% url 'resend_verification' %}" class="mt-2">
+                    {% csrf_token %}
+                    <button type="submit" class="underline">Send the link again</button>
+                </form>
+            </div>
+            {% endif %}
             <form method="post" class="space-y-4">
                 {% csrf_token %}
                 {% include 'core/_form.html' with form=email_form %}

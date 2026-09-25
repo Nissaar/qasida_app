@@ -1015,6 +1015,16 @@ class ReaderProfile(models.Model):
         default=True, help_text="Show the translation beside the original.")
     lyrics_size = models.CharField(max_length=2, choices=SIZE_CHOICES, default=SIZE_MEDIUM,
                                    help_text="How large the verse itself is set.")
+    # Whether the account's address has been shown to belong to its owner.
+    # True by default: every account that existed before this, and any made
+    # by staff or createsuperuser, is taken as vouched for. Only an account a
+    # stranger opens through the sign-up form starts unconfirmed.
+    email_verified = models.BooleanField(
+        default=True, help_text="The owner has confirmed the address is theirs.")
+    # A new address asked for but not yet confirmed. The account keeps its
+    # current one until the link sent here is followed.
+    pending_email = models.EmailField(
+        blank=True, help_text="An address change waiting to be confirmed.")
 
     @classmethod
     def for_user(cls, user):

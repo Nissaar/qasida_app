@@ -587,7 +587,14 @@ class AccountSettingsTest(TestCase):
         self.assertIn(reverse('login'), response['Location'])
 
     def test_changing_the_email_address(self):
+        """The new address takes effect once the link sent to it is followed."""
         self.client.post(self.url, {'save_email': '1', 'email': 'moved@example.com'})
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, 'reader@example.com')
+        self.assertEqual(mail.outbox[-1].to, ['moved@example.com'])
+
+        link = re.search(r'https?://\S+/accounts/verify/\S+/', mail.outbox[-1].body).group(0)
+        self.client.get(link)
         self.user.refresh_from_db()
         self.assertEqual(self.user.email, 'moved@example.com')
 
@@ -3707,3 +3714,84 @@ class AddToCollectionTest(TestCase):
         newcomer.refresh_from_db()
         self.assertEqual(first.collection_position, 1)
         self.assertEqual((newcomer.collection_id, newcomer.collection_position), (burdah.pk, 2))
+
+
+class EmailVerificationTest(TestCase):
+    """An address counts only once its owner has shown it is theirs."""
+
+    def register(self, username='newreader', email='new@example.com'):
+        return self.client.post(reverse('register'), {
+            'username': username, 'email': email,
+            'password1': GOOD_PASSWORD, 'password2': GOOD_PASSWORD})
+
+    def link_in(self, message):
+        return re.search(r'https?://\S+/accounts/verify/\S+/', message.body).group(0)
+
+    def test_signing_up_sends_a_link_and_the_address_waits_for_it(self):
+        from .verification import is_verified
+        self.register()
+        user = User.objects.get(username='newreader')
+        self.assertFalse(is_verified(user))
+        self.assertEqual(mail.outbox[-1].to, ['new@example.com'])
+        self.client.get(self.link_in(mail.outbox[-1]))
+        self.assertTrue(is_verified(user))
+
+    def test_an_unconfirmed_address_does_not_sign_in_but_the_username_does(self):
+        self.register()
+        self.client.logout()
+        self.assertFalse(self.client.login(username='new@example.com', password=GOOD_PASSWORD))
+        self.assertTrue(self.client.login(username='newreader', password=GOOD_PASSWORD))
+
+    def test_an_unconfirmed_address_does_not_lock_its_owner_out(self):
+        self.register(username='squatter', email='owner@example.com')
+        self.client.logout()
+        self.register(username='owner', email='owner@example.com')
+        self.assertTrue(User.objects.filter(username='owner').exists())
+
+    def test_an_address_confirmed_elsewhere_is_not_handed_to_a_second_account(self):
+        from .verification import TAKEN, confirm, make_token
+        self.register(username='squatter', email='owner@example.com')
+        squatter = User.objects.get(username='squatter')
+        self.client.logout()
+        User.objects.create_user('owner', 'owner@example.com', GOOD_PASSWORD)
+        self.assertEqual(confirm(make_token(squatter, 'owner@example.com'))[1], TAKEN)
+
+    def test_an_old_link_confirms_nothing_once_the_address_moved_on(self):
+        from .verification import INVALID, confirm, make_token
+        user = User.objects.create_user('reader', 'now@example.com', GOOD_PASSWORD)
+        self.assertEqual(confirm(make_token(user, 'before@example.com'))[1], INVALID)
+        self.assertEqual(confirm('not-a-token')[1], INVALID)
+
+    def test_existing_accounts_count_as_confirmed(self):
+        from .models import ReaderProfile
+        from .verification import is_verified
+        user = User.objects.create_user('old', 'old@example.com', GOOD_PASSWORD)
+        self.assertTrue(is_verified(user))
+        ReaderProfile.for_user(user)  # a profile made later changes nothing
+        self.assertTrue(is_verified(user))
+        self.assertTrue(self.client.login(username='old@example.com', password=GOOD_PASSWORD))
+
+    def test_a_password_reset_confirms_the_address(self):
+        from .verification import is_verified
+        self.register()
+        self.client.logout()
+        mail.outbox = []
+        self.client.post(reverse('password_reset'), {'email': 'new@example.com'})
+        link = re.search(r'https?://\S+/accounts/reset/\S+/', mail.outbox[-1].body).group(0)
+        form_page = self.client.get(link, follow=True)
+        self.client.post(form_page.redirect_chain[-1][0], {
+            'new_password1': 'Another-8-Teapot', 'new_password2': 'Another-8-Teapot'})
+        self.assertTrue(is_verified(User.objects.get(username='newreader')))
+
+    @override_settings(LIBRARY_NOTIFY_EMAILS=['editors@example.com'])
+    def test_an_editor_reply_is_not_sent_to_an_unconfirmed_address(self):
+        self.register()
+        user = User.objects.get(username='newreader')
+        contribution = Contribution.objects.create(
+            kind=Contribution.KIND_REQUEST, title='Something', user=user)
+        mail.outbox = []
+        editor = User.objects.create_user('editor', 'e@example.com', GOOD_PASSWORD, is_staff=True)
+        contribution.decline(by=editor)
+        from . import notify
+        self.assertFalse(notify.contribution_decided(contribution))
+        self.assertEqual(mail.outbox, [])

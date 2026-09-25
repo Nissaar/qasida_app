@@ -153,8 +153,11 @@ class RegistrationForm(StyledFormMixin, UserCreationForm):
         return username
 
     def clean_email(self):
+        from .verification import confirmed_holders
         email = get_user_model().objects.normalize_email(self.cleaned_data['email'].strip())
-        if get_user_model()._default_manager.filter(email__iexact=email).exists():
+        # Only a confirmed address is taken. One someone typed onto their
+        # account without owning it must not lock its real owner out.
+        if confirmed_holders(email).exists():
             raise forms.ValidationError(
                 "There is already an account with that email address. "
                 "You can sign in, or reset the password.")
@@ -226,10 +229,8 @@ class AccountEmailForm(StyledFormMixin, forms.ModelForm):
         email = get_user_model().objects.normalize_email(self.cleaned_data['email'].strip())
         if not email:
             raise forms.ValidationError("An email address is needed to recover the account.")
-        clash = (get_user_model()._default_manager
-                 .filter(email__iexact=email)
-                 .exclude(pk=self.instance.pk))
-        if clash.exists():
+        from .verification import confirmed_holders
+        if confirmed_holders(email).exclude(pk=self.instance.pk).exists():
             raise forms.ValidationError("Another account already uses that address.")
         return email
 

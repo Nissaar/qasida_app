@@ -104,7 +104,7 @@ urlpatterns = [
              template_name='core/account/password_reset_sent.html'),
          name='password_reset_done'),
     path('accounts/reset/<uidb64>/<token>/',
-         auth_views.PasswordResetConfirmView.as_view(
+         account_views.VerifyingPasswordResetConfirmView.as_view(
              form_class=StyledSetPasswordForm,
              template_name='core/account/password_reset_confirm.html',
              success_url='/accounts/reset/done/'),
@@ -122,5 +122,8 @@ urlpatterns = [
     path('my/contributions/', account_views.my_contributions, name='my_contributions'),
     path('my/settings/', account_views.account_settings, name='account_settings'),
     path('my/settings/delete/', account_views.delete_account, name='delete_account'),
+    path('my/settings/verify/resend/', account_views.resend_verification,
+         name='resend_verification'),
+    path('accounts/verify/<str:token>/', account_views.verify_email, name='verify_email'),
     path('my/saved/<int:pk>/note/', account_views.favourite_note, name='favourite_note'),
 ]
