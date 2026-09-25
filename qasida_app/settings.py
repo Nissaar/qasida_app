@@ -27,11 +27,27 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-default-key-do-not-use-in-prod")
-
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("DJANGO_DEBUG", "") == "True"
+
+# SECURITY WARNING: keep the secret key used in production secret!
+#
+# The key signs sessions, password-reset links and CSRF tokens. A fallback is
+# only allowed while debugging: a production container that silently started
+# with a key printed in a public repository would let anyone forge a session
+# for any account, and nothing about the site would look wrong.
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "")
+# The placeholder in .env.prod.example counts as unset: copying the example
+# without editing it is the likeliest way to end up here.
+if SECRET_KEY == "replace-me":
+    SECRET_KEY = ""
+if not SECRET_KEY:
+    if not DEBUG:
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY is not set. Generate one with "
+            "`python -c 'import secrets; print(secrets.token_urlsafe(50))'` "
+            "and put it in .env, or set DJANGO_DEBUG=True for local work.")
+    SECRET_KEY = "django-insecure-development-only"
 
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 

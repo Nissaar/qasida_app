@@ -29,6 +29,7 @@ services:
     volumes:
       - .:/app
     environment:
+      - DJANGO_SECRET_KEY=development-only-not-secret
       - DB_NAME=qasida_db
       - DB_USER=qasida_user
       - DB_PASSWORD=qasida_password
@@ -49,6 +50,7 @@ services:
     volumes:
       - .:/app
     environment:
+      - DJANGO_SECRET_KEY=development-only-not-secret
       - DB_NAME=qasida_db
       - DB_USER=qasida_user
       - DB_PASSWORD=qasida_password
@@ -69,6 +71,7 @@ services:
     volumes:
       - .:/app
     environment:
+      - DJANGO_SECRET_KEY=development-only-not-secret
       - DB_NAME=qasida_db
       - DB_USER=qasida_user
       - DB_PASSWORD=qasida_password
