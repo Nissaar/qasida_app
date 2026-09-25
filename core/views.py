@@ -12,7 +12,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 
 from . import notify, throttle
 from .forms import (ContactForm, QasidaForm, QasidaRequestForm,
-                    QasidaSubmissionForm)
+                    QasidaSubmissionForm, SuggestionForm)
 from .models import (Collection, Contribution, Dedication, Favourite, Poet,
                      Qasida, ReadingHistory, SourceWebsite, Suggestion, Tag)
 from .export import LAYERS, available_layers
@@ -393,7 +393,9 @@ def qasida_by_id(request, pk):
     Links to /qasida/<id>/ are already out in the world and cached by the
     service worker, so they redirect permanently to the slug instead of 404ing.
     """
-    qasida = get_object_or_404(Qasida, pk=pk)
+    # Through the review gate like every other way in: an unapproved work's
+    # slug is built from its title, so redirecting to it would read that out.
+    qasida = get_object_or_404(_visible(request), pk=pk)
     return redirect('qasida_detail', slug=qasida.slug, permanent=True)
 
 
@@ -408,11 +410,11 @@ def _submitted(text):
     return (text or '').replace('\r\n', '\n').replace('\r', '\n').strip()
 
 
-def _suggested_changes(request, qasida):
+def _suggested_changes(cleaned, qasida):
     """Only the fields the sender actually altered."""
     changed = {}
     for field, target, _label in Suggestion.FIELDS:
-        proposed = _submitted(request.POST.get(field))
+        proposed = _submitted(cleaned.get(field))
         current = getattr(qasida, target)
         # The poet is a relation, so compare against its name rather than
         # against the object, whose repr would never match what was typed.
@@ -422,44 +424,66 @@ def _suggested_changes(request, qasida):
     return changed
 
 
+# Corrections one address, or one account, may send in an hour. A reader
+# working carefully through a long text sends several; a script burying the
+# editors' queue sends thousands.
+SUGGESTION_LIMIT = 30
+SUGGESTION_WINDOW = 60 * 60
+
+
 def qasida_detail(request, slug):
     qasida = get_object_or_404(_visible(request), slug=slug)
 
     if request.method == 'POST':
-        # A signed-in reader is already reachable, so their address is taken
-        # from the account rather than typed again; an anonymous one has no
-        # other way to be followed up, so it stays compulsory for them.
-        email = (request.POST.get('email') or '').strip()
-        if not email and request.user.is_authenticated:
-            email = request.user.email
-        changes = _suggested_changes(request, qasida)
-        # Tags are additive rather than a replacement, so they are taken as
-        # sent rather than compared against what the work already carries.
-        suggested_tags = _submitted(request.POST.get('suggested_tags'))
-        note = _submitted(request.POST.get('note'))
-
-        if not (email or request.user.is_authenticated):
-            messages.error(request, 'Email is required to submit a suggestion.')
-        elif not (changes or suggested_tags or note):
+        keys = throttle.keys_for(request, 'suggestion')
+        form = SuggestionForm(request.POST)
+        if any(throttle.over_limit(key, SUGGESTION_LIMIT) for key in keys):
             messages.error(
                 request,
-                'Nothing was changed, so there is nothing to review. Edit a '
-                'field, add a tag, or describe what is wrong.')
+                'That is a lot of corrections in a short time. Please wait an '
+                f'hour, or write to {settings.CONTACT_EMAIL}.')
+        elif not form.is_valid():
+            for errors in form.errors.values():
+                for error in errors:
+                    messages.error(request, error)
         else:
-            suggestion = Suggestion.objects.create(
-                qasida=qasida,
-                user=request.user if request.user.is_authenticated else None,
-                email=email,
-                suggested_tags=suggested_tags,
-                note=note,
-                **changes,
-            )
-            # The correction is already stored; telling an editor about it is
-            # the part that can fail, and notify swallows that rather than
-            # losing the correction to a mail server being down.
-            notify.suggestion_received(suggestion, request)
-            messages.success(request, 'Thank you. Your correction has been sent for review.')
-            return redirect('qasida_detail', slug=qasida.slug)
+            cleaned = form.cleaned_data
+            # A signed-in reader is already reachable, so their address is
+            # taken from the account rather than typed again; an anonymous one
+            # has no other way to be followed up, so it stays compulsory.
+            email = cleaned['email']
+            if not email and request.user.is_authenticated:
+                email = request.user.email
+            changes = _suggested_changes(cleaned, qasida)
+            # Tags are additive rather than a replacement, so they are taken
+            # as sent rather than compared against what the work carries.
+            suggested_tags = _submitted(cleaned['suggested_tags'])
+            note = _submitted(cleaned['note'])
+
+            if not (email or request.user.is_authenticated):
+                messages.error(request, 'Email is required to submit a suggestion.')
+            elif not (changes or suggested_tags or note):
+                messages.error(
+                    request,
+                    'Nothing was changed, so there is nothing to review. Edit a '
+                    'field, add a tag, or describe what is wrong.')
+            else:
+                suggestion = Suggestion.objects.create(
+                    qasida=qasida,
+                    user=request.user if request.user.is_authenticated else None,
+                    email=email,
+                    suggested_tags=suggested_tags,
+                    note=note,
+                    **changes,
+                )
+                for key in keys:
+                    throttle.record(key, SUGGESTION_WINDOW)
+                # The correction is already stored; telling an editor about it
+                # is the part that can fail, and notify swallows that rather
+                # than losing the correction to a mail server being down.
+                notify.suggestion_received(suggestion, request)
+                messages.success(request, 'Thank you. Your correction has been sent for review.')
+                return redirect('qasida_detail', slug=qasida.slug)
     elif request.user.is_authenticated:
         # Only on a plain read, so a correction does not count as a visit.
         ReadingHistory.record(request.user, qasida)
@@ -623,6 +647,10 @@ def collection(request, slug):
     })
 
 
+PDF_LIMIT = 20
+PDF_WINDOW = 10 * 60
+
+
 def qasida_download(request, slug):
     """
     Hand back the chosen layers of a work as a PDF.
@@ -631,6 +659,16 @@ def qasida_download(request, slug):
     be shared for just the original, or the original beside its translation.
     """
     qasida = get_object_or_404(_visible(request), slug=slug)
+
+    # Laying out a long work with its scans holds a worker for seconds, and
+    # there are only a few. Enough for any reader; not enough for a script to
+    # tie the whole site up asking for the largest files over and over.
+    keys = throttle.keys_for(request, 'pdf')
+    if any(throttle.over_limit(key, PDF_LIMIT) for key in keys):
+        return HttpResponse('Too many downloads in a short time. Please try again '
+                            'in a few minutes.', status=429, content_type='text/plain')
+    for key in keys:
+        throttle.record(key, PDF_WINDOW)
 
     present = available_layers(qasida)
     asked = [name for name in LAYERS if request.GET.get(name) == '1']

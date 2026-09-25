@@ -15,7 +15,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.cache import cache
-from django.test import TestCase, override_settings
+from django.test import TestCase as DjangoTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -32,6 +32,22 @@ GOOD_PASSWORD = 'Marmalade-7-Kettle'
 # Counting sign-in failures in a local cache keeps the tests independent of
 # whatever a shared Redis happens to be holding.
 LOCAL_CACHE = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}}
+
+
+@override_settings(CACHES=LOCAL_CACHE)
+class TestCase(DjangoTestCase):
+    """
+    Every test starts with an empty, in-process cache.
+
+    The rate limits count in the cache. Left on the configured Redis, a run
+    would write its counters into whatever Redis the machine points at - the
+    development one - and they would carry over from one run to the next
+    until a limit tripped in a test that has nothing to do with it.
+    """
+
+    def _pre_setup(self):
+        super()._pre_setup()
+        cache.clear()
 
 
 def pdf_text(content):
@@ -3113,3 +3129,86 @@ class AdminActionPermissionTest(TestCase):
         response = self.client.get(reverse('admin:core_qasida_changelist'))
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, 'approve_for_display')
+
+
+class AbuseLimitTest(TestCase):
+    """The limits that keep a script from burying the editors or the site."""
+
+    def setUp(self):
+        self.qasida = make_qasida(title='Existing')
+
+    def correct(self, **fields):
+        data = {'email': 'reader@example.com', 'note': 'A word is missing.'}
+        data.update(fields)
+        return self.client.post(self.qasida.get_absolute_url(), data)
+
+    def test_corrections_stop_after_a_flood(self):
+        from .views import SUGGESTION_LIMIT
+        for _ in range(SUGGESTION_LIMIT + 5):
+            self.correct()
+        self.assertEqual(Suggestion.objects.count(), SUGGESTION_LIMIT)
+
+    def test_a_correction_needs_a_real_address(self):
+        self.correct(email='not an address')
+        self.assertEqual(Suggestion.objects.count(), 0)
+
+    def test_an_overlong_field_is_an_error_not_a_crash(self):
+        response = self.correct(suggested_title='x' * 500, suggested_tags='y' * 300)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Suggestion.objects.count(), 0)
+
+    def test_the_old_numeric_address_does_not_reveal_unapproved_works(self):
+        hidden = make_qasida(title='Not Yet Read', review_state=Qasida.REVIEW_PENDING)
+        response = self.client.get(reverse('qasida_by_id', args=[hidden.pk]))
+        self.assertEqual(response.status_code, 404)
+        response = self.client.get(reverse('qasida_by_id', args=[self.qasida.pk]))
+        self.assertEqual(response.status_code, 301)
+
+    def test_pdf_downloads_are_limited(self):
+        from unittest import mock
+        from .views import PDF_LIMIT
+        url = reverse('qasida_download', args=[self.qasida.slug])
+        with mock.patch('core.views.build_pdf', return_value=b'%PDF-'):
+            codes = [self.client.get(url).status_code for _ in range(PDF_LIMIT + 1)]
+        self.assertEqual(codes[:PDF_LIMIT], [200] * PDF_LIMIT)
+        self.assertEqual(codes[-1], 429)
+
+    def test_reset_mail_to_one_address_is_limited(self):
+        from .account_views import RESET_LIMIT_PER_EMAIL
+        User.objects.create_user('reader', 'reader@example.com', GOOD_PASSWORD)
+        for _ in range(RESET_LIMIT_PER_EMAIL + 3):
+            self.client.post(reverse('password_reset'), {'email': 'reader@example.com'})
+        self.assertEqual(len(mail.outbox), RESET_LIMIT_PER_EMAIL)
+
+    def test_account_creation_from_one_address_is_limited(self):
+        from .account_views import REGISTER_LIMIT
+        for index in range(REGISTER_LIMIT + 2):
+            self.client.post(reverse('register'), {
+                'username': f'reader{index}', 'email': f'r{index}@example.com',
+                'password1': GOOD_PASSWORD, 'password2': GOOD_PASSWORD})
+            self.client.logout()
+        self.assertEqual(User.objects.count(), REGISTER_LIMIT)
+
+
+class ClientAddressTest(TestCase):
+    """Which address the limits count against, behind Traefik."""
+
+    def address(self, forwarded, remote='10.0.0.2'):
+        from django.test import RequestFactory
+        from . import throttle
+        request = RequestFactory().get('/', HTTP_X_FORWARDED_FOR=forwarded,
+                                       REMOTE_ADDR=remote)
+        return throttle.client_ip(request)
+
+    @override_settings(TRUSTED_PROXY_COUNT=1)
+    def test_the_entry_our_proxy_wrote_is_used(self):
+        # The visitor sent "1.1.1.1" themselves; Traefik appended 203.0.113.9.
+        self.assertEqual(self.address('1.1.1.1, 203.0.113.9'), '203.0.113.9')
+
+    @override_settings(TRUSTED_PROXY_COUNT=1)
+    def test_junk_in_the_header_falls_back_to_the_connection(self):
+        self.assertEqual(self.address('not-an-ip'), '10.0.0.2')
+
+    @override_settings(TRUSTED_PROXY_COUNT=0)
+    def test_without_a_proxy_the_header_is_ignored(self):
+        self.assertEqual(self.address('1.1.1.1'), '10.0.0.2')

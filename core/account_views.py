@@ -10,8 +10,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.views import LoginView
-from django.core.cache import cache
+from django.contrib.auth.views import LoginView, PasswordResetView
 from django.core.paginator import Paginator
 from django.db import IntegrityError
 from django.http import JsonResponse
@@ -21,6 +20,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_POST
 
+from . import throttle
 from .forms import (AccountEmailForm, FavouriteNoteForm, ReadingPreferencesForm,
                     RegistrationForm, SignInForm)
 from .models import (Contribution, Favourite, Qasida, ReaderProfile,
@@ -45,19 +45,10 @@ DEFAULT_BACKEND = 'core.auth_backends.UsernameOrEmailBackend'
 # stops counting, which is the right way round for a library.
 # --------------------------------------------------------------------------
 
-def _client_ip(request):
-    """The visitor's address, trusting the proxy header only behind a proxy."""
-    if getattr(settings, 'USE_X_FORWARDED_HOST', False):
-        forwarded = request.META.get('HTTP_X_FORWARDED_FOR', '')
-        if forwarded:
-            return forwarded.split(',')[0].strip()
-    return request.META.get('REMOTE_ADDR', '')
-
-
 def _attempt_keys(request):
     """The counters this attempt touches, each with the limit that applies."""
     identifier = (request.POST.get('username') or '').strip().lower()[:150]
-    keys = [(f'login-fail:ip:{_client_ip(request)}',
+    keys = [(f'login-fail:ip:{throttle.client_ip(request)}',
              getattr(settings, 'LOGIN_ATTEMPT_LIMIT_PER_IP', 40))]
     if identifier:
         keys.append((f'login-fail:id:{identifier}',
@@ -66,31 +57,18 @@ def _attempt_keys(request):
 
 
 def _too_many_attempts(request):
-    try:
-        return any((cache.get(key) or 0) >= limit
-                   for key, limit in _attempt_keys(request))
-    except Exception:
-        return False
+    return any(throttle.over_limit(key, limit) for key, limit in _attempt_keys(request))
 
 
 def _note_failed_attempt(request):
     window = getattr(settings, 'LOGIN_ATTEMPT_WINDOW', 15 * 60)
     for key, _limit in _attempt_keys(request):
-        try:
-            # add() then incr(): incr on a missing key raises, and add alone
-            # would reset the window on every failure.
-            cache.add(key, 0, window)
-            cache.incr(key)
-        except Exception:
-            return
+        throttle.record(key, window)
 
 
 def _clear_failed_attempts(request):
     for key, _limit in _attempt_keys(request):
-        try:
-            cache.delete(key)
-        except Exception:
-            return
+        throttle.clear(key)
 
 
 class SignInView(LoginView):
@@ -124,13 +102,26 @@ class SignInView(LoginView):
         return super().form_invalid(form)
 
 
+# Accounts opened from one address in an hour. A household or a mosque
+# signing up together stays well under it; a script creating accounts to get
+# round the per-account limits elsewhere does not.
+REGISTER_LIMIT = 10
+REGISTER_WINDOW = 60 * 60
+
+
 def register(request):
     """Open an account, and sign in with it straight away."""
     if request.user.is_authenticated:
         return redirect('my_library')
 
     form = RegistrationForm(request.POST or None)
-    if request.method == 'POST' and form.is_valid():
+    key = f'register:ip:{throttle.client_ip(request)}'
+    if request.method == 'POST' and throttle.over_limit(key, REGISTER_LIMIT):
+        form.is_valid()
+        form.add_error(None, "Several accounts have been opened from here in the last "
+                             "hour. Please try again later.")
+    elif request.method == 'POST' and form.is_valid():
+        throttle.record(key, REGISTER_WINDOW)
         user = form.save()
         login(request, user, backend=DEFAULT_BACKEND)
         messages.success(
@@ -139,6 +130,32 @@ def register(request):
         return redirect(_safe_next(request, fallback='my_library'))
 
     return render(request, 'core/account/register.html', {'form': form})
+
+
+# Reset emails asked for in an hour: per address typed, so nobody can fill a
+# stranger's inbox with them, and per visitor, so the form cannot be used to
+# send mail to a list of addresses. Both answer with the same page whether or
+# not an account exists, so the limit reveals nothing about who has one.
+RESET_LIMIT_PER_EMAIL = 3
+RESET_LIMIT_PER_IP = 10
+RESET_WINDOW = 60 * 60
+
+
+class RateLimitedPasswordResetView(PasswordResetView):
+    """Django's reset view, with a cap on how much mail it can be made to send."""
+
+    def form_valid(self, form):
+        email = form.cleaned_data['email'].strip().lower()
+        keys = [(f'reset:email:{email}', RESET_LIMIT_PER_EMAIL),
+                (f'reset:ip:{throttle.client_ip(self.request)}', RESET_LIMIT_PER_IP)]
+        if any(throttle.over_limit(key, limit) for key, limit in keys):
+            form.add_error(None, "A reset link has been asked for several times in the "
+                                 "last hour. Check your inbox, including spam, or try "
+                                 "again later.")
+            return self.form_invalid(form)
+        for key, _limit in keys:
+            throttle.record(key, RESET_WINDOW)
+        return super().form_valid(form)
 
 
 def _safe_next(request, fallback):

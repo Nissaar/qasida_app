@@ -56,9 +56,17 @@ ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").sp
 # because the browser's Origin says https while Django believes otherwise.
 # Only trust the header when a proxy is actually in front, or a client could
 # claim to be on HTTPS.
-if os.environ.get("DJANGO_BEHIND_PROXY", "") == "True":
+BEHIND_PROXY = os.environ.get("DJANGO_BEHIND_PROXY", "") == "True"
+if BEHIND_PROXY:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     USE_X_FORWARDED_HOST = True
+
+# How many proxies we own stand in front of Django: Traefik alone is one. The
+# rate limits read the visitor's address from X-Forwarded-For, counting this
+# many entries in from the right, since everything further left was written by
+# the visitor. Zero means no proxy, and the connecting address is used as is.
+TRUSTED_PROXY_COUNT = int(os.environ.get(
+    "DJANGO_TRUSTED_PROXY_COUNT", "1" if BEHIND_PROXY else "0"))
 
 # Django 4+ checks the Origin header against this list for unsafe methods, so
 # the admin and the suggestion form need the site's own https origin here.

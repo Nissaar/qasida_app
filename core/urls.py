@@ -92,7 +92,7 @@ urlpatterns = [
              template_name='core/account/password_changed.html'),
          name='password_change_done'),
     path('accounts/password/reset/',
-         auth_views.PasswordResetView.as_view(
+         account_views.RateLimitedPasswordResetView.as_view(
              form_class=StyledPasswordResetForm,
              template_name='core/account/password_reset.html',
              email_template_name='core/account/password_reset_email.txt',

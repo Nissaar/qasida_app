@@ -5,7 +5,7 @@ from django.contrib.auth.forms import (AuthenticationForm, PasswordChangeForm,
                                        UserCreationForm)
 
 from .models import (ContactMessage, Contribution, Dedication, Favourite,
-                     Poet, Qasida, ReaderProfile, Tag)
+                     Poet, Qasida, ReaderProfile, Suggestion, Tag)
 
 # The shell defines .input as a Tailwind component class, so widgets reuse it
 # instead of restating utilities (and inheriting dark mode for free).
@@ -534,3 +534,28 @@ class ContactForm(StyledFormMixin, forms.ModelForm):
             # Refused without saying which field gave it away.
             raise forms.ValidationError("That message could not be sent. Please try again.")
         return cleaned
+
+
+class SuggestionForm(forms.ModelForm):
+    """
+    The limits a reader's correction has to respect before it is stored.
+
+    The page renders these fields by hand, prefilled with the record, so this
+    is only ever bound to a POST. It exists for what the view used to skip:
+    an address checked as an address, and every field held to the length its
+    column allows, so an overlong one is an error message rather than a
+    database error and a 500.
+    """
+
+    class Meta:
+        model = Suggestion
+        fields = [field for field, _target, _label in Suggestion.FIELDS] + [
+            'suggested_tags', 'note', 'email']
+
+    def clean_suggested_tags(self):
+        tags = self.cleaned_data.get('suggested_tags', '')
+        limit = Tag._meta.get_field('name').max_length
+        if any(len(name.strip()) > limit for name in tags.split(',')):
+            raise forms.ValidationError(
+                f'Each tag can be at most {limit} characters. Separate tags with commas.')
+        return tags
