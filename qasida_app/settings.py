@@ -118,6 +118,8 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    # After authentication, so it sees who the page was rendered for.
+    "core.viewer.ViewerMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
@@ -139,6 +141,7 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",
                 "core.context_processors.library_stats",
                 "core.context_processors.site_contact",
+                "core.viewer.context",
             ],
         },
     },

@@ -3,6 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    {% comment %}
+    Before anything is drawn: a page made for a signed-in reader is only shown
+    back to that reader. A copy from the offline cache whose reader is no
+    longer the one signed in here - the browser was closed, the session ran
+    out, someone else signed in - is dropped, with every page cached beside
+    it, and the offline page shown instead. See core/viewer.py.
+    {% endcomment %}
+    <script>
+    (function () {
+        var page = '{{ viewer_id|escapejs }}';
+        if (!page || page === 'anon') return;
+        var found = document.cookie.match(/(?:^|; ){{ viewer_cookie }}=([^;]*)/);
+        if (found && found[1] === page) return;
+        document.documentElement.style.visibility = 'hidden';
+        var leave = function () { location.replace('{% url "offline" %}'); };
+        if (!window.caches) return leave();
+        caches.keys().then(function (names) {
+            return Promise.all(names.filter(function (name) {
+                return name.slice(-6) === '-pages';
+            }).map(function (name) { return caches.delete(name); }));
+        }).then(leave, leave);
+    })();
+    </script>
     <title>{% block title %}Qasida Library{% endblock %}</title>
     {% comment %}
     A description per page, not one for the whole site. Search engines print

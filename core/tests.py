@@ -3551,3 +3551,49 @@ class DataSafetyTest(TestCase):
         QasidaMedia.objects.create(qasida=work, url='https://youtu.be/dQw4w9WgXcQ')
         with self.assertRaises(ValidationError):
             QasidaMedia(qasida=work, url='https://www.youtube.com/watch?v=dQw4w9WgXcQ').full_clean()
+
+
+class OfflineViewerTest(TestCase):
+    """What lets an offline copy of a page be shown only to whom it was made for."""
+
+    def setUp(self):
+        self.user = User.objects.create_user('reader', 'reader@example.com', GOOD_PASSWORD)
+
+    def sign_in(self, remember):
+        data = {'username': 'reader', 'password': GOOD_PASSWORD}
+        if remember:
+            data['remember_me'] = 'on'
+        return self.client.post(reverse('login'), data)
+
+    def test_a_visitor_is_anonymous_and_gets_no_cookie(self):
+        from .viewer import COOKIE, HEADER
+        response = self.client.get('/')
+        self.assertEqual(response[HEADER], 'anon')
+        self.assertNotIn(COOKIE, response.cookies)
+
+    def test_signing_in_stamps_pages_and_sets_a_matching_cookie(self):
+        from .viewer import COOKIE, HEADER, viewer_id
+        self.sign_in(remember=True)
+        response = self.client.get('/')
+        expected = viewer_id(self.user)
+        self.assertEqual(response[HEADER], expected)
+        self.assertEqual(self.client.cookies[COOKIE].value, expected)
+        self.assertContains(response, expected)
+
+    def test_without_remember_me_the_cookie_ends_with_the_browser(self):
+        from .viewer import COOKIE
+        response = self.sign_in(remember=False)
+        self.assertEqual(response.cookies[COOKIE]['max-age'], '')
+        self.assertEqual(response.cookies[COOKIE]['expires'], '')
+
+    def test_with_remember_me_the_cookie_lasts_as_long_as_the_session(self):
+        from .viewer import COOKIE
+        response = self.sign_in(remember=True)
+        self.assertEqual(int(response.cookies[COOKIE]['max-age']),
+                         settings.SESSION_COOKIE_AGE)
+
+    def test_signing_out_by_any_route_clears_the_cookie(self):
+        from .viewer import COOKIE
+        self.sign_in(remember=True)
+        response = self.client.post(reverse('logout'))
+        self.assertEqual(response.cookies[COOKIE].value, '')
