@@ -159,7 +159,37 @@ class Collection(models.Model):
         super().save(*args, **kwargs)
 
 
-class Poet(models.Model):
+class RenameRefreshesSearch:
+    """
+    For a name that is part of every work's search text: a poet, a dedication.
+
+    Each work's search_text carries these names, and was only rebuilt when the
+    work itself was saved. An editor correcting a poet's spelling left every
+    one of that poet's works findable only under the old one.
+    """
+
+    def save(self, *args, **kwargs):
+        renamed = bool(self.pk) and (type(self).objects.filter(pk=self.pk)
+                                     .exclude(name=self.name, native_name=self.native_name)
+                                     .exists())
+        super().save(*args, **kwargs)
+        if renamed:
+            refresh_search_text(self.qasidas.all())
+
+
+def refresh_search_text(works):
+    """Rebuild search_text for `works` without re-saving each one in full."""
+    batch = []
+    for work in works.select_related('author', 'dedicated_to').iterator(chunk_size=200):
+        document = work.build_search_text()
+        if document != work.search_text:
+            work.search_text = document
+            batch.append(work)
+    Qasida.objects.bulk_update(batch, ['search_text'], batch_size=200)
+    return len(batch)
+
+
+class Poet(RenameRefreshesSearch, models.Model):
     """
     Someone who wrote a qasida.
 
@@ -208,7 +238,7 @@ class Poet(models.Model):
         return self.name
 
 
-class Dedication(models.Model):
+class Dedication(RenameRefreshesSearch, models.Model):
     """
     Who a qasida is addressed to or written in praise of.
 
@@ -457,7 +487,13 @@ class Qasida(models.Model):
             return reverse('qasida_detail', kwargs={'slug': self.slug})
         return reverse('qasida_by_id', kwargs={'pk': self.pk})
 
-    def save(self, *args, **kwargs):
+    def build_search_text(self):
+        """
+        The folded document search matches against.
+
+        The one definition of what is searchable: save() and the backfill
+        command both call this, so the two cannot disagree about it.
+        """
         # Only touched when one is set, so an ordinary save does not fetch a
         # related row it has no use for.
         dedication = ''
@@ -466,13 +502,19 @@ class Qasida(models.Model):
         poet = ''
         if self.author_id:
             poet = f'{self.author.name} {self.author.native_name}'
-        self.search_text = build_document(
+        return build_document(
             self.title, self.native_title, poet, dedication,
             self.lyrics, self.transliteration, self.translation)
+
+    def build_dedup_signature(self):
         # The original script identifies a work better than a romanisation, so
         # it is preferred; a source that publishes only a transliteration still
         # gets a signature rather than being left unmatchable.
-        self.dedup_signature = build_signature(self.lyrics, self.transliteration)
+        return build_signature(self.lyrics, self.transliteration)
+
+    def save(self, *args, **kwargs):
+        self.search_text = self.build_search_text()
+        self.dedup_signature = self.build_dedup_signature()
         extra_fields = {'search_text', 'dedup_signature'}
 
         # The slug is settled before the row is written. It used to be filled

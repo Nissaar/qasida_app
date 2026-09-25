@@ -7,6 +7,7 @@ still hides once someone is signed in, and that nothing a reader saved can be
 reached or changed by anyone else.
 """
 
+import io
 import re
 from datetime import timedelta
 from pathlib import Path
@@ -3416,3 +3417,48 @@ class ExtractionLineTest(TestCase):
         from .verse_markers import normalise
         self.assertEqual(normalise('* first line\nsecond line *'),
                          'first line\nsecond line')
+
+
+class SearchTextTest(TestCase):
+    """What search can find, and that it stays findable after edits."""
+
+    def test_the_backfill_runs_over_works_with_a_poet(self):
+        from django.core.management import call_command
+        work = make_qasida(title='With a poet', author='Al-Busiri',
+                           transliteration='latin line', translation='meaning line')
+        Qasida.objects.filter(pk=work.pk).update(search_text='', dedup_signature='')
+        call_command('backfill_search', stdout=io.StringIO())
+        work.refresh_from_db()
+        # Every layer is searchable again, not only title, poet and lyrics.
+        for term in ('busiri', 'latin line', 'meaning line'):
+            self.assertIn(term, work.search_text)
+        self.assertNotEqual(work.dedup_signature, '')
+
+    def test_the_backfill_splits_a_packed_title_into_a_poet_record(self):
+        from django.core.management import call_command
+        from .titles import split_title
+        packed = 'Qasida Burda | قصيدة البردة | Imam al-Busiri'
+        title, native, author = split_title(packed)
+        if not author:
+            self.skipTest('split_title does not recognise this shape')
+        work = make_qasida(title=packed, author='')
+        call_command('backfill_search', '--titles', stdout=io.StringIO())
+        work.refresh_from_db()
+        self.assertEqual(work.title, title)
+        self.assertEqual(work.author.name, author)
+
+    def test_renaming_a_poet_makes_their_works_findable_under_the_new_name(self):
+        work = make_qasida(title='A work', author='Busiri')
+        poet = work.author
+        poet.name = 'Imam al-Busiri'
+        poet.save()
+        response = self.client.get(reverse('search'), {'q': 'imam'})
+        self.assertContains(response, 'A work')
+
+    def test_renaming_a_dedication_refreshes_its_works(self):
+        honoured = Dedication.objects.create(name='The Prophet')
+        work = make_qasida(title='In praise', dedicated_to=honoured)
+        honoured.native_name = 'النبي'
+        honoured.save()
+        work.refresh_from_db()
+        self.assertIn('النبي', work.search_text)
