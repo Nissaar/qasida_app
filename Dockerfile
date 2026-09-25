@@ -1,8 +1,12 @@
-FROM python:3.12-slim
+# Pinned to the Debian release as well as the Python minor version, so a
+# rebuild months from now gets the same system libraries (tesseract, the fonts)
+# rather than whatever the floating tag has moved on to. Patch releases of
+# both still arrive, which is what a rebuild is for.
+FROM python:3.12-slim-trixie
 
 # Set environment variables
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
 # Set work directory
 WORKDIR /app
@@ -27,7 +31,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # with the CPU wheel first means the resolver never reaches for the CUDA one.
 # Translation is unaffected: it was always running on the CPU.
 COPY requirements.txt /app/
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+#
+# Pinned, because an unpinned torch is a few hundred megabytes that silently
+# changes under every rebuild.
+RUN pip install --no-cache-dir torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir -r requirements.txt
 
 # The unprivileged account everything runs as. The workers feed crawled HTML,
