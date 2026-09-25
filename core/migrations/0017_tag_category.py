@@ -3,6 +3,40 @@
 from django.db import migrations, models
 
 
+# The filing rules, frozen as they stand here. A migration that imports the
+# live model runs whatever the model says on the day it is applied - and
+# breaks outright if the method is renamed - so a fresh install would no
+# longer reproduce what this migration did. Later changes to Tag.classify
+# belong in a migration of their own.
+LANGUAGE_NAMES = frozenset({
+    'arabic', 'urdu', 'english', 'spanish', 'turkish', 'swedish',
+    'french', 'german', 'persian', 'farsi', 'punjabi', 'sindhi',
+})
+CONDITION_NAMES = frozenset({
+    'transliterated', 'from-archive', 'lyrics-in-images', 'text-needs-review',
+})
+FORM_NAMES = frozenset({
+    'naat', 'qasida', 'hamd', 'manqbat', 'manqabat', 'manzhuma',
+    'durood-o-salam', 'sufiyana-kalam', 'mawlid-hadra', 'tawassul',
+    'around-the-year', 'madih', 'nasheed', 'ghazal',
+})
+CATEGORY_PREFIXES = (('maqam-', 'maqam'), ('bahr-', 'bahr'), ('qasida-', 'form'))
+
+
+def classify(name):
+    key = (name or '').strip().lower()
+    for prefix, category in CATEGORY_PREFIXES:
+        if key.startswith(prefix):
+            return category
+    if key in LANGUAGE_NAMES:
+        return 'language'
+    if key in CONDITION_NAMES:
+        return 'condition'
+    if key in FORM_NAMES:
+        return 'form'
+    return 'other'
+
+
 def file_existing_tags(apps, schema_editor):
     """
     Put every tag already in the database onto an axis.
@@ -12,11 +46,9 @@ def file_existing_tags(apps, schema_editor):
     name on every page view. Anything the rules do not recognise is left
     unfiled for an editor to place, rather than guessed into a group.
     """
-    from core.models import Tag as TagModel
-
     Tag = apps.get_model('core', 'Tag')
     for tag in Tag.objects.all():
-        tag.category = TagModel.classify(tag.name)
+        tag.category = classify(tag.name)
         tag.save(update_fields=['category'])
 
 
