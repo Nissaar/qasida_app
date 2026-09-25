@@ -154,11 +154,13 @@ class QasidaAdmin(LibraryAdmin):
 
     def get_queryset(self, request):
         # Annotated once for the whole page rather than counted per row.
-        return super().get_queryset(request).annotate(_saves=Count('favourited_by', distinct=True))
+        return super().get_queryset(request).annotate(
+            _saves=Count('favourited_by', distinct=True),
+            _scans=Count('images', distinct=True))
 
-    @admin.display(description='Scans')
+    @admin.display(description='Scans', ordering='_scans')
     def scan_count(self, obj):
-        return obj.images.count()
+        return obj._scans
 
     @admin.display(description='Saved by', ordering='_saves')
     def saved_count(self, obj):
@@ -273,15 +275,25 @@ class QasidaAdmin(LibraryAdmin):
                 return None
 
             start = (collection.parts.aggregate(top=Max('collection_position'))['top'] or 0)
-            for offset, qasida in enumerate(queryset.order_by('title'), start=1):
+            # Works already in this collection keep their place: renumbering
+            # them to the end would scramble a reading order someone set.
+            joining = list(queryset.select_related(None).exclude(collection=collection)
+                           .order_by('title').only('pk', 'title'))
+            for offset, qasida in enumerate(joining, start=1):
                 qasida.collection = collection
                 qasida.collection_position = start + offset
-                qasida.save(update_fields=['collection', 'collection_position'])
+            # One statement per batch rather than a full save per work: a save
+            # rebuilds the search text from the whole text, and none of that
+            # depends on which collection a work sits in.
+            Qasida.objects.bulk_update(joining, ['collection', 'collection_position'],
+                                       batch_size=500)
 
-            self.message_user(
-                request,
-                f"Added {queryset.count()} work(s) to “{collection.name}”, "
-                f"numbered from {start + 1}.")
+            already = queryset.count() - len(joining)
+            message = (f"Added {len(joining)} work(s) to “{collection.name}”, "
+                       f"numbered from {start + 1}.")
+            if already:
+                message += f" {already} were already in it and kept their place."
+            self.message_user(request, message)
             return redirect(request.get_full_path())
 
         return render(request, 'admin/core/qasida/add_to_collection.html', {

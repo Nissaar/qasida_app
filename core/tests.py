@@ -3633,3 +3633,77 @@ class PageDetailFixTest(TestCase):
         self.assertIn('name="q" value="burda"', page)
         self.assertIn('name="o" value="2"', page)
         self.assertIn('href="?review_state__exact=pending&amp;q=burda&amp;o=2"', page)
+
+
+class QueryCountTest(TestCase):
+    """Pages cost the same number of queries however many items they list."""
+
+    def queries_for(self, url):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        cache.clear()  # the shell's totals are cached; count them every time
+        with CaptureQueriesContext(connection) as captured:
+            self.assertEqual(self.client.get(url).status_code, 200)
+        return len(captured)
+
+    def add_works(self, count, start=0):
+        from .models import QasidaMedia
+        for n in range(start, start + count):
+            work = make_qasida(title=f'Work {n}', translation='meaning')
+            QasidaMedia.objects.create(qasida=work, url=f'https://youtu.be/abcdefghij{n % 10}')
+            QasidaImage.objects.create(qasida=work, image=f'qasida_scans/{n}.png')
+
+    def test_the_listing_does_not_query_per_card(self):
+        self.add_works(2)
+        few = self.queries_for(reverse('lyrics'))
+        self.add_works(6, start=2)
+        self.assertEqual(self.queries_for(reverse('lyrics')), few)
+
+    def test_the_sitemap_does_not_query_per_work(self):
+        self.add_works(2)
+        url = '/sitemap.xml?section=qasidas'
+        few = self.queries_for(url)
+        self.add_works(6, start=2)
+        self.assertEqual(self.queries_for(url), few)
+
+    def test_the_work_page_does_not_query_per_recording(self):
+        from .models import QasidaMedia
+        work = make_qasida(title='Recorded')
+        QasidaMedia.objects.create(qasida=work, url='https://youtu.be/abcdefghij1')
+        one = self.queries_for(work.get_absolute_url())
+        for n in range(2, 6):
+            QasidaMedia.objects.create(qasida=work, url=f'https://youtu.be/abcdefghij{n}')
+        self.assertEqual(self.queries_for(work.get_absolute_url()), one)
+
+
+class DuplicateScanTest(TestCase):
+    OPENING = 'مولاي صل وسلم دائما ابدا على حبيبك خير الخلق كلهم ' * 3
+
+    def test_the_same_poem_from_two_sources_is_filed_once(self):
+        from . import dedup
+        from .models import DuplicateLink
+        a = make_qasida(title='One copy', lyrics=self.OPENING)
+        b = make_qasida(title='Other copy', lyrics=self.OPENING + ' زيادة')
+        make_qasida(title='Unrelated', lyrics='a completely different text about something else')
+        self.assertEqual(dedup.scan(), 1)
+        link = DuplicateLink.objects.get()
+        self.assertEqual((link.first_id, link.second_id), (a.pk, b.pk))
+        self.assertEqual(dedup.scan(), 0)
+
+
+class AddToCollectionTest(TestCase):
+    def test_works_already_in_it_keep_their_place(self):
+        from .models import Collection
+        editor = User.objects.create_user('editor', 'e@example.com', GOOD_PASSWORD,
+                                          is_staff=True, is_superuser=True)
+        burdah = Collection.objects.create(name='Burdah')
+        first = make_qasida(title='A part', collection=burdah, collection_position=1)
+        newcomer = make_qasida(title='B part')
+        self.client.force_login(editor)
+        self.client.post(reverse('admin:core_qasida_changelist'), {
+            'action': 'add_to_collection', 'apply': '1', 'collection': burdah.pk,
+            '_selected_action': [first.pk, newcomer.pk]})
+        first.refresh_from_db()
+        newcomer.refresh_from_db()
+        self.assertEqual(first.collection_position, 1)
+        self.assertEqual((newcomer.collection_id, newcomer.collection_position), (burdah.pk, 2))

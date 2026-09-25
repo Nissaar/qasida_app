@@ -23,6 +23,7 @@ Two signals, taken together over one bounded slice of the opening:
 """
 
 from django.contrib.postgres.search import TrigramSimilarity
+from django.db import connection, transaction
 
 from .search import normalize
 
@@ -51,12 +52,18 @@ def build_signature(*texts):
     return ''
 
 
-def candidates_for(qasida, threshold=FUZZY_THRESHOLD):
+def candidates_for(qasida, threshold=FUZZY_THRESHOLD, above_pk=None):
     """
     Works whose opening reads like this one's, closest first.
 
     Yields (other, score, matched_on). An identical opening scores 1.0 and so
-    arrives through the same query as the near misses.
+    arrives through the same query as the near misses. With `above_pk`, only
+    works with a higher id are considered, so a full scan meets each pair once.
+
+    The filter is the `%` operator, which the trigram index on the signature
+    can answer. Filtering on the similarity score itself, as this used to,
+    cannot use the index: every work was compared with every other, and the
+    nightly scan grew with the square of the library.
     """
     from .models import DuplicateLink, Qasida
 
@@ -67,18 +74,30 @@ def candidates_for(qasida, threshold=FUZZY_THRESHOLD):
     others = (Qasida.objects
               .exclude(pk=qasida.pk)
               .exclude(dedup_signature='')
+              .filter(dedup_signature__trigram_similar=signature)
               .annotate(score=TrigramSimilarity('dedup_signature', signature))
               .filter(score__gte=threshold)
+              .only('pk', 'dedup_signature')
               .order_by('-score'))
+    if above_pk is not None:
+        others = others.filter(pk__gt=above_pk)
+
+    with transaction.atomic():
+        # `%` matches at pg_trgm's own threshold, set for this transaction
+        # only so nothing else on the connection is affected.
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f'SET LOCAL pg_trgm.similarity_threshold = {float(threshold):.4f}')
+        rows = list(others)
 
     return [(other,
              round(other.score, 3),
              DuplicateLink.MATCH_OPENING if other.dedup_signature == signature
              else DuplicateLink.MATCH_FUZZY)
-            for other in others]
+            for other in rows]
 
 
-def record_duplicates(qasida, threshold=FUZZY_THRESHOLD):
+def record_duplicates(qasida, threshold=FUZZY_THRESHOLD, above_pk=None):
     """
     Link this work to anything that looks like the same poem.
 
@@ -88,7 +107,7 @@ def record_duplicates(qasida, threshold=FUZZY_THRESHOLD):
     from .models import DuplicateLink
 
     created_count = 0
-    for other, score, matched_on in candidates_for(qasida, threshold):
+    for other, score, matched_on in candidates_for(qasida, threshold, above_pk):
         first, second = sorted((qasida, other), key=lambda work: work.pk)
         link, created = DuplicateLink.objects.get_or_create(
             first=first, second=second,
@@ -107,9 +126,15 @@ def scan(queryset=None, threshold=FUZZY_THRESHOLD):
     """Look for duplicates across a set of works. Returns links created."""
     from .models import Qasida
 
-    if queryset is None:
+    # Across the whole library each pair is looked up from its lower id only;
+    # over a subset, a partner outside it may have the lower id, so every
+    # direction is kept.
+    whole_library = queryset is None
+    if whole_library:
         queryset = Qasida.objects.all()
     created_count = 0
-    for qasida in queryset.exclude(dedup_signature='').iterator():
-        created_count += record_duplicates(qasida, threshold)
+    works = queryset.exclude(dedup_signature='').only('pk', 'dedup_signature')
+    for qasida in works.iterator():
+        created_count += record_duplicates(
+            qasida, threshold, above_pk=qasida.pk if whole_library else None)
     return created_count

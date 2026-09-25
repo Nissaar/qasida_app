@@ -197,7 +197,7 @@ def _listing(request, heading):
 
     results = (_apply_filters(request, filters)
                .select_related('author', 'dedicated_to')
-               .prefetch_related('tags', 'images').order_by('-created_at'))
+               .prefetch_related('tags', 'images', 'media').order_by('-created_at'))
     paginator = Paginator(results, PAGE_SIZE)
     page_obj = paginator.get_page(request.GET.get('page'))
 
@@ -281,7 +281,7 @@ def _featured(scope, language, limit):
     """
     return (scope.filter(language__iexact=language, text_quality=Qasida.TEXT_OK)
             .exclude(lyrics='')
-            .prefetch_related('tags', 'images')
+            .prefetch_related('tags', 'images', 'media')
             .annotate(length=Length('lyrics'))
             .order_by('-length')[:limit])
 
@@ -297,7 +297,7 @@ def _recently_added(scope, limit):
     two cannot disagree about what counts as new.
     """
     return (scope.select_related('author', 'dedicated_to')
-            .prefetch_related('tags', 'images')
+            .prefetch_related('tags', 'images', 'media')
             .annotate(published=Coalesce('reviewed_at', 'created_at'))
             .order_by('-published')[:limit])
 
@@ -432,7 +432,13 @@ SUGGESTION_WINDOW = 60 * 60
 
 
 def qasida_detail(request, slug):
-    qasida = get_object_or_404(_visible(request), slug=slug)
+    # Everything the page lists, fetched once: the template asks for the
+    # recordings and scans a dozen times over - count, first, all - and each
+    # of those was a query of its own.
+    qasida = get_object_or_404(
+        _visible(request).select_related('author', 'dedicated_to', 'collection')
+        .prefetch_related('media', 'images', 'tags'),
+        slug=slug)
 
     if request.method == 'POST':
         keys = throttle.keys_for(request, 'suggestion')
@@ -552,7 +558,7 @@ def poet(request, name):
     """Everything attributed to one poet."""
     works = (_visible(request).filter(author__name__iexact=name)
              .select_related('author')
-             .prefetch_related('tags', 'images')
+             .prefetch_related('tags', 'images', 'media')
              .order_by('title'))
     paginator = Paginator(works, PAGE_SIZE)
     return render(request, 'core/poet.html', {
@@ -598,7 +604,7 @@ def dedication(request, name):
     honoured = get_object_or_404(Dedication, name__iexact=name)
     works = (_visible(request).filter(dedicated_to=honoured)
              .select_related('author', 'dedicated_to')
-             .prefetch_related('tags', 'images')
+             .prefetch_related('tags', 'images', 'media')
              .order_by('title'))
     paginator = Paginator(works, PAGE_SIZE)
     return render(request, 'core/dedication.html', {
@@ -638,7 +644,7 @@ def collection(request, slug):
     """One collection, with its parts in reading order."""
     item = get_object_or_404(Collection, slug=slug)
     parts = (_visible(request).filter(collection=item)
-             .prefetch_related('tags', 'images')
+             .prefetch_related('tags', 'images', 'media')
              .order_by('collection_position', 'title'))
     return render(request, 'core/collection.html', {
         'collection': item,
