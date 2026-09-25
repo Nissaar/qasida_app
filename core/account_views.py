@@ -10,8 +10,8 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.views import LoginView
-from django.core.cache import cache
+from django.contrib.auth.views import (LoginView, PasswordResetConfirmView,
+                                       PasswordResetView)
 from django.core.paginator import Paginator
 from django.db import IntegrityError
 from django.http import JsonResponse
@@ -21,6 +21,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_POST
 
+from . import throttle, verification
 from .forms import (AccountEmailForm, FavouriteNoteForm, ReadingPreferencesForm,
                     RegistrationForm, SignInForm)
 from .models import (Contribution, Favourite, Qasida, ReaderProfile,
@@ -45,19 +46,10 @@ DEFAULT_BACKEND = 'core.auth_backends.UsernameOrEmailBackend'
 # stops counting, which is the right way round for a library.
 # --------------------------------------------------------------------------
 
-def _client_ip(request):
-    """The visitor's address, trusting the proxy header only behind a proxy."""
-    if getattr(settings, 'USE_X_FORWARDED_HOST', False):
-        forwarded = request.META.get('HTTP_X_FORWARDED_FOR', '')
-        if forwarded:
-            return forwarded.split(',')[0].strip()
-    return request.META.get('REMOTE_ADDR', '')
-
-
 def _attempt_keys(request):
     """The counters this attempt touches, each with the limit that applies."""
     identifier = (request.POST.get('username') or '').strip().lower()[:150]
-    keys = [(f'login-fail:ip:{_client_ip(request)}',
+    keys = [(f'login-fail:ip:{throttle.client_ip(request)}',
              getattr(settings, 'LOGIN_ATTEMPT_LIMIT_PER_IP', 40))]
     if identifier:
         keys.append((f'login-fail:id:{identifier}',
@@ -66,31 +58,18 @@ def _attempt_keys(request):
 
 
 def _too_many_attempts(request):
-    try:
-        return any((cache.get(key) or 0) >= limit
-                   for key, limit in _attempt_keys(request))
-    except Exception:
-        return False
+    return any(throttle.over_limit(key, limit) for key, limit in _attempt_keys(request))
 
 
 def _note_failed_attempt(request):
     window = getattr(settings, 'LOGIN_ATTEMPT_WINDOW', 15 * 60)
     for key, _limit in _attempt_keys(request):
-        try:
-            # add() then incr(): incr on a missing key raises, and add alone
-            # would reset the window on every failure.
-            cache.add(key, 0, window)
-            cache.incr(key)
-        except Exception:
-            return
+        throttle.record(key, window)
 
 
 def _clear_failed_attempts(request):
     for key, _limit in _attempt_keys(request):
-        try:
-            cache.delete(key)
-        except Exception:
-            return
+        throttle.clear(key)
 
 
 class SignInView(LoginView):
@@ -124,21 +103,121 @@ class SignInView(LoginView):
         return super().form_invalid(form)
 
 
+# Accounts opened from one address in an hour. A household or a mosque
+# signing up together stays well under it; a script creating accounts to get
+# round the per-account limits elsewhere does not.
+REGISTER_LIMIT = 10
+REGISTER_WINDOW = 60 * 60
+
+
 def register(request):
     """Open an account, and sign in with it straight away."""
     if request.user.is_authenticated:
         return redirect('my_library')
 
     form = RegistrationForm(request.POST or None)
-    if request.method == 'POST' and form.is_valid():
+    key = f'register:ip:{throttle.client_ip(request)}'
+    if request.method == 'POST' and throttle.over_limit(key, REGISTER_LIMIT):
+        form.is_valid()
+        form.add_error(None, "Several accounts have been opened from here in the last "
+                             "hour. Please try again later.")
+    elif request.method == 'POST' and form.is_valid():
+        throttle.record(key, REGISTER_WINDOW)
         user = form.save()
+        # The one path where a stranger types an address: it waits for its
+        # owner to confirm it. See core.verification.
+        ReaderProfile.objects.update_or_create(user=user, defaults={'email_verified': False})
+        verification.send_link(user, user.email, request)
         login(request, user, backend=DEFAULT_BACKEND)
         messages.success(
             request,
-            f"Welcome, {user.username}. Anything you save is now kept to your account.")
+            f"Welcome, {user.username}. Anything you save is now kept to your account. "
+            f"We have sent a link to {user.email} to confirm the address is yours.")
         return redirect(_safe_next(request, fallback='my_library'))
 
     return render(request, 'core/account/register.html', {'form': form})
+
+
+# Reset emails asked for in an hour: per address typed, so nobody can fill a
+# stranger's inbox with them, and per visitor, so the form cannot be used to
+# send mail to a list of addresses. Both answer with the same page whether or
+# not an account exists, so the limit reveals nothing about who has one.
+RESET_LIMIT_PER_EMAIL = 3
+RESET_LIMIT_PER_IP = 10
+RESET_WINDOW = 60 * 60
+
+
+class RateLimitedPasswordResetView(PasswordResetView):
+    """Django's reset view, with a cap on how much mail it can be made to send."""
+
+    def form_valid(self, form):
+        email = form.cleaned_data['email'].strip().lower()
+        keys = [(f'reset:email:{email}', RESET_LIMIT_PER_EMAIL),
+                (f'reset:ip:{throttle.client_ip(self.request)}', RESET_LIMIT_PER_IP)]
+        if any(throttle.over_limit(key, limit) for key, limit in keys):
+            form.add_error(None, "A reset link has been asked for several times in the "
+                                 "last hour. Check your inbox, including spam, or try "
+                                 "again later.")
+            return self.form_invalid(form)
+        for key, _limit in keys:
+            throttle.record(key, RESET_WINDOW)
+        return super().form_valid(form)
+
+
+class VerifyingPasswordResetConfirmView(PasswordResetConfirmView):
+    """
+    Django's reset confirmation, which also confirms the address.
+
+    The reset link was sent to the account's address and followed from it,
+    which is exactly what a confirmation link proves.
+    """
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        verification.mark_verified_by_reset(form.user)
+        return response
+
+
+def verify_email(request, token):
+    """Follow a link sent to confirm an address."""
+    user, outcome = verification.confirm(token)
+    if outcome == verification.CHANGED:
+        messages.success(request, f'Your address is now {user.email}.')
+    elif outcome == verification.VERIFIED:
+        messages.success(request, f'Thank you - {user.email} is confirmed.')
+    elif outcome == verification.TAKEN:
+        messages.error(request, 'Another account has already confirmed that address, so '
+                                'it cannot be used for this one.')
+    else:
+        messages.error(request, 'That link has expired or has already been used. '
+                                'You can ask for a new one from your account settings.')
+    if request.user.is_authenticated:
+        return redirect('account_settings')
+    return redirect('login')
+
+
+# Confirmation links one account may ask for in an hour.
+RESEND_LIMIT = 3
+RESEND_WINDOW = 60 * 60
+
+
+@require_POST
+@login_required
+def resend_verification(request):
+    """Send the confirmation link again, to the address that is waiting."""
+    key = f'verify-resend:user:{request.user.pk}'
+    profile = ReaderProfile.for_user(request.user)
+    target = profile.pending_email or ('' if profile.email_verified else request.user.email)
+    if not target:
+        messages.info(request, 'Your address is already confirmed.')
+    elif throttle.over_limit(key, RESEND_LIMIT):
+        messages.error(request, 'Several links have been sent in the last hour. Check '
+                                'your inbox, including spam, or try again later.')
+    else:
+        throttle.record(key, RESEND_WINDOW)
+        verification.send_link(request.user, target, request)
+        messages.success(request, f'We have sent a new link to {target}.')
+    return redirect('account_settings')
 
 
 def _safe_next(request, fallback):
@@ -322,8 +401,22 @@ def account_settings(request):
         if 'save_email' in request.POST:
             email_form = AccountEmailForm(request.POST, instance=request.user)
             if email_form.is_valid():
-                email_form.save()
-                messages.success(request, 'Email address updated.')
+                new = email_form.cleaned_data['email']
+                request.user.refresh_from_db(fields=['email'])
+                if new.lower() == request.user.email.lower():
+                    profile.pending_email = ''
+                    profile.save(update_fields=['pending_email'])
+                    messages.info(request, 'That is already the address on this account.')
+                else:
+                    # Held until confirmed: the account keeps its current
+                    # address, and so its way back in, until the new one is
+                    # shown to belong to its owner.
+                    profile.pending_email = new
+                    profile.save(update_fields=['pending_email'])
+                    verification.send_link(request.user, new, request)
+                    messages.success(
+                        request, f'We have sent a link to {new}. Your address changes '
+                                 f'when you follow it.')
                 return redirect('account_settings')
         elif 'save_preferences' in request.POST:
             preferences_form = ReadingPreferencesForm(request.POST, instance=profile)
@@ -334,6 +427,8 @@ def account_settings(request):
 
     return render(request, 'core/account/settings.html', {
         'email_form': email_form,
+        'profile': profile,
+        'email_verified': profile.email_verified,
         'preferences_form': preferences_form,
         'tab': 'settings',
         'saved_count': Favourite.objects.filter(user=request.user).count(),

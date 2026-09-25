@@ -7,6 +7,7 @@ still hides once someone is signed in, and that nothing a reader saved can be
 reached or changed by anyone else.
 """
 
+import io
 import re
 from datetime import timedelta
 from pathlib import Path
@@ -15,13 +16,13 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.cache import cache
-from django.test import TestCase, override_settings
+from django.test import TestCase as DjangoTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from .models import (ContactMessage, Contribution, Dedication, Favourite,
                      Poet, Qasida, QasidaImage, ReaderProfile, ReadingHistory,
-                     Suggestion, Tag)
+                     SourceWebsite, Suggestion, Tag)
 
 User = get_user_model()
 
@@ -32,6 +33,28 @@ GOOD_PASSWORD = 'Marmalade-7-Kettle'
 # Counting sign-in failures in a local cache keeps the tests independent of
 # whatever a shared Redis happens to be holding.
 LOCAL_CACHE = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}}
+
+
+@override_settings(CACHES=LOCAL_CACHE, STORAGES={
+    'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+    'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+})
+class TestCase(DjangoTestCase):
+    """
+    Every test starts with an empty, in-process cache, and plain static names.
+
+    Production serves hashed static names from a manifest that collectstatic
+    writes; tests run without one, so they use the unhashed names.
+
+    The rate limits count in the cache. Left on the configured Redis, a run
+    would write its counters into whatever Redis the machine points at - the
+    development one - and they would carry over from one run to the next
+    until a limit tripped in a test that has nothing to do with it.
+    """
+
+    def _pre_setup(self):
+        super()._pre_setup()
+        cache.clear()
 
 
 def pdf_text(content):
@@ -70,6 +93,32 @@ class QasidaModelTest(TestCase):
 
     def test_slug_is_built_from_the_title(self):
         self.assertEqual(self.qasida.slug, 'test-qasida')
+
+    def test_a_title_in_arabic_script_is_named_after_its_id(self):
+        work = make_qasida(title='بردة المديح')
+        self.assertEqual(work.slug, f'qasida-{work.pk}')
+
+    def test_a_row_left_with_no_slug_does_not_block_new_works(self):
+        """The failure the old two-step save could leave behind."""
+        Qasida.objects.filter(pk=self.qasida.pk).update(slug='')
+        work = make_qasida(title='بردة المديح')
+        self.assertEqual(work.slug, f'qasida-{work.pk}')
+        self.assertEqual(make_qasida(title='Another').slug, 'another')
+
+    def test_a_slug_taken_meanwhile_is_replaced_rather_than_failing(self):
+        """Two workers can both see a name as free before either inserts it."""
+        from unittest import mock
+        real = Qasida.build_slug
+        calls = []
+
+        def racing(work):
+            calls.append(1)
+            # The first answer is the name another writer has just taken.
+            return 'test-qasida' if len(calls) == 1 else real(work)
+
+        with mock.patch.object(Qasida, 'build_slug', racing):
+            work = make_qasida(title='Test Qasida')
+        self.assertEqual(work.slug, 'test-qasida-2')
 
     def test_suggestion_creation(self):
         suggestion = Suggestion.objects.create(
@@ -538,7 +587,14 @@ class AccountSettingsTest(TestCase):
         self.assertIn(reverse('login'), response['Location'])
 
     def test_changing_the_email_address(self):
+        """The new address takes effect once the link sent to it is followed."""
         self.client.post(self.url, {'save_email': '1', 'email': 'moved@example.com'})
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, 'reader@example.com')
+        self.assertEqual(mail.outbox[-1].to, ['moved@example.com'])
+
+        link = re.search(r'https?://\S+/accounts/verify/\S+/', mail.outbox[-1].body).group(0)
+        self.client.get(link)
         self.user.refresh_from_db()
         self.assertEqual(self.user.email, 'moved@example.com')
 
@@ -2567,7 +2623,7 @@ class DiscoverabilityTest(TestCase):
 
     def test_every_page_declares_which_address_is_the_real_one(self):
         body = self.client.get(self.approved.get_absolute_url()).content.decode()
-        self.assertIn(f'rel="canonical"', body)
+        self.assertIn('rel="canonical"', body)
         self.assertIn(self.approved.get_absolute_url(), body)
 
     def test_the_numeric_url_redirects_rather_than_competing(self):
@@ -2901,7 +2957,8 @@ class ContributionReviewTest(TestCase):
     def test_publishing_twice_does_not_make_two_records(self):
         first = self.contribution.publish(by=self.editor)
         second = self.contribution.publish(by=self.editor)
-        self.assertEqual(first.pk, second.pk)
+        self.assertIsNotNone(first)
+        self.assertIsNone(second)
         self.assertEqual(Qasida.objects.count(), 1)
 
     def test_a_request_has_nothing_to_publish(self):
@@ -2943,6 +3000,55 @@ class ContributionReviewTest(TestCase):
         self.assertContains(self.client.get(reverse('my_contributions')),
                             'Not this time, sorry.')
 
+    def test_publish_on_a_request_never_declines_it(self):
+        """The button that says "create a record" must not do something else."""
+        request = Contribution.objects.create(kind=Contribution.KIND_REQUEST,
+                                              title='Something missing',
+                                              user=self.reader)
+        self.client.login(username='editor', password=GOOD_PASSWORD)
+        self.client.post(reverse('contribution_inbox'), {
+            'contribution': request.pk, 'action': 'publish'})
+        request.refresh_from_db()
+        self.assertEqual(request.status, Contribution.STATUS_PENDING)
+        self.assertEqual(mail.outbox, [])
+
+    def test_an_unknown_action_is_refused(self):
+        self.client.login(username='editor', password=GOOD_PASSWORD)
+        response = self.client.post(reverse('contribution_inbox'), {
+            'contribution': self.contribution.pk, 'action': ''})
+        self.assertEqual(response.status_code, 400)
+        self.contribution.refresh_from_db()
+        self.assertEqual(self.contribution.status, Contribution.STATUS_PENDING)
+
+    def test_a_decision_is_not_overturned_or_resent(self):
+        self.assertTrue(self.contribution.accept(by=self.editor))
+        mail.outbox = []
+        self.assertFalse(self.contribution.decline(by=self.editor))
+        self.contribution.refresh_from_db()
+        self.assertEqual(self.contribution.status, Contribution.STATUS_ACCEPTED)
+
+        self.client.login(username='editor', password=GOOD_PASSWORD)
+        self.client.post(reverse('contribution_inbox'), {
+            'contribution': self.contribution.pk, 'action': 'decline'})
+        self.contribution.refresh_from_db()
+        self.assertEqual(self.contribution.status, Contribution.STATUS_ACCEPTED)
+        self.assertEqual(mail.outbox, [])
+
+    def test_the_admin_batch_skips_what_was_already_decided(self):
+        waiting = Contribution.objects.create(kind=Contribution.KIND_REQUEST,
+                                              title='Still waiting', user=self.reader)
+        self.contribution.accept(by=self.editor)
+        mail.outbox = []
+        self.client.login(username='editor', password=GOOD_PASSWORD)
+        self.client.post(reverse('admin:core_contribution_changelist'), {
+            'action': 'decline_selected',
+            '_selected_action': [self.contribution.pk, waiting.pk]})
+        self.contribution.refresh_from_db()
+        waiting.refresh_from_db()
+        self.assertEqual(self.contribution.status, Contribution.STATUS_ACCEPTED)
+        self.assertEqual(waiting.status, Contribution.STATUS_DECLINED)
+        self.assertEqual(len(mail.outbox), 1)
+
     def test_a_deleted_account_does_not_take_the_text_with_it(self):
         """
         A text someone brought has become part of the library's record of
@@ -2981,3 +3087,725 @@ class SuggestionNotificationTest(TestCase):
                 'note': 'The third line is missing a word.',
             })
         self.assertEqual(Suggestion.objects.count(), 1)
+
+
+class SuggestionDecidedOnceTest(TestCase):
+    """An old correction applied a second time writes stale text over newer work."""
+
+    def setUp(self):
+        self.qasida = make_qasida(title='Original')
+        self.suggestion = Suggestion.objects.create(
+            qasida=self.qasida, email='reader@example.com', suggested_title='First fix')
+
+    def test_applying_twice_does_not_undo_a_later_edit(self):
+        self.assertTrue(self.suggestion.apply())
+        self.qasida.refresh_from_db()
+        self.qasida.title = 'Edited since'
+        self.qasida.save()
+
+        self.assertFalse(self.suggestion.apply())
+        self.qasida.refresh_from_db()
+        self.assertEqual(self.qasida.title, 'Edited since')
+
+    def test_a_rejected_suggestion_cannot_then_be_applied(self):
+        self.assertTrue(self.suggestion.reject())
+        self.assertFalse(self.suggestion.apply())
+        self.qasida.refresh_from_db()
+        self.assertEqual(self.qasida.title, 'Original')
+
+    def test_an_overlong_tag_is_left_out_rather_than_failing(self):
+        self.suggestion.suggested_tags = f"naat, {'x' * 80}"
+        self.suggestion.save()
+        self.assertTrue(self.suggestion.apply())
+        self.assertEqual(list(self.qasida.tags.values_list('name', flat=True)), ['naat'])
+
+    def test_the_inbox_refuses_an_unknown_action(self):
+        User.objects.create_user('editor', 'e@example.com', GOOD_PASSWORD, is_staff=True,
+                                 is_superuser=True)
+        self.client.login(username='editor', password=GOOD_PASSWORD)
+        response = self.client.post(reverse('suggestion_inbox'),
+                                    {'suggestion': self.suggestion.pk})
+        self.assertEqual(response.status_code, 400)
+        self.suggestion.refresh_from_db()
+        self.assertFalse(self.suggestion.is_reviewed)
+
+
+class AdminActionPermissionTest(TestCase):
+    """Staff given only "view" can read the lists, not act on them."""
+
+    def test_a_view_only_editor_is_offered_no_actions(self):
+        from django.contrib.auth.models import Permission
+        viewer = User.objects.create_user('viewer', 'v@example.com', GOOD_PASSWORD,
+                                          is_staff=True)
+        viewer.user_permissions.add(Permission.objects.get(codename='view_qasida'))
+        make_qasida(title='Pending one', review_state=Qasida.REVIEW_PENDING)
+        self.client.login(username='viewer', password=GOOD_PASSWORD)
+        response = self.client.get(reverse('admin:core_qasida_changelist'))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'approve_for_display')
+
+
+class AbuseLimitTest(TestCase):
+    """The limits that keep a script from burying the editors or the site."""
+
+    def setUp(self):
+        self.qasida = make_qasida(title='Existing')
+
+    def correct(self, **fields):
+        data = {'email': 'reader@example.com', 'note': 'A word is missing.'}
+        data.update(fields)
+        return self.client.post(self.qasida.get_absolute_url(), data)
+
+    def test_corrections_stop_after_a_flood(self):
+        from .views import SUGGESTION_LIMIT
+        for _ in range(SUGGESTION_LIMIT + 5):
+            self.correct()
+        self.assertEqual(Suggestion.objects.count(), SUGGESTION_LIMIT)
+
+    def test_a_correction_needs_a_real_address(self):
+        self.correct(email='not an address')
+        self.assertEqual(Suggestion.objects.count(), 0)
+
+    def test_an_overlong_field_is_an_error_not_a_crash(self):
+        response = self.correct(suggested_title='x' * 500, suggested_tags='y' * 300)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Suggestion.objects.count(), 0)
+
+    def test_the_old_numeric_address_does_not_reveal_unapproved_works(self):
+        hidden = make_qasida(title='Not Yet Read', review_state=Qasida.REVIEW_PENDING)
+        response = self.client.get(reverse('qasida_by_id', args=[hidden.pk]))
+        self.assertEqual(response.status_code, 404)
+        response = self.client.get(reverse('qasida_by_id', args=[self.qasida.pk]))
+        self.assertEqual(response.status_code, 301)
+
+    def test_pdf_downloads_are_limited(self):
+        from unittest import mock
+        from .views import PDF_LIMIT
+        url = reverse('qasida_download', args=[self.qasida.slug])
+        with mock.patch('core.views.build_pdf', return_value=b'%PDF-'):
+            codes = [self.client.get(url).status_code for _ in range(PDF_LIMIT + 1)]
+        self.assertEqual(codes[:PDF_LIMIT], [200] * PDF_LIMIT)
+        self.assertEqual(codes[-1], 429)
+
+    def test_reset_mail_to_one_address_is_limited(self):
+        from .account_views import RESET_LIMIT_PER_EMAIL
+        User.objects.create_user('reader', 'reader@example.com', GOOD_PASSWORD)
+        for _ in range(RESET_LIMIT_PER_EMAIL + 3):
+            self.client.post(reverse('password_reset'), {'email': 'reader@example.com'})
+        self.assertEqual(len(mail.outbox), RESET_LIMIT_PER_EMAIL)
+
+    def test_account_creation_from_one_address_is_limited(self):
+        from .account_views import REGISTER_LIMIT
+        for index in range(REGISTER_LIMIT + 2):
+            self.client.post(reverse('register'), {
+                'username': f'reader{index}', 'email': f'r{index}@example.com',
+                'password1': GOOD_PASSWORD, 'password2': GOOD_PASSWORD})
+            self.client.logout()
+        self.assertEqual(User.objects.count(), REGISTER_LIMIT)
+
+
+class ClientAddressTest(TestCase):
+    """Which address the limits count against, behind Traefik."""
+
+    def address(self, forwarded, remote='10.0.0.2'):
+        from django.test import RequestFactory
+        from . import throttle
+        request = RequestFactory().get('/', HTTP_X_FORWARDED_FOR=forwarded,
+                                       REMOTE_ADDR=remote)
+        return throttle.client_ip(request)
+
+    @override_settings(TRUSTED_PROXY_COUNT=1)
+    def test_the_entry_our_proxy_wrote_is_used(self):
+        # The visitor sent "1.1.1.1" themselves; Traefik appended 203.0.113.9.
+        self.assertEqual(self.address('1.1.1.1, 203.0.113.9'), '203.0.113.9')
+
+    @override_settings(TRUSTED_PROXY_COUNT=1)
+    def test_junk_in_the_header_falls_back_to_the_connection(self):
+        self.assertEqual(self.address('not-an-ip'), '10.0.0.2')
+
+    @override_settings(TRUSTED_PROXY_COUNT=0)
+    def test_without_a_proxy_the_header_is_ignored(self):
+        self.assertEqual(self.address('1.1.1.1'), '10.0.0.2')
+
+
+class CrawlerSafetyTest(TestCase):
+    """What one bad page, file or link on a source site can and cannot do."""
+
+    def setUp(self):
+        self.site = SourceWebsite.objects.create(
+            name='Midhah', url='https://lyrics.midhah.com/', parser_type='midhah')
+
+    def test_a_lookalike_host_is_not_the_same_host(self):
+        from .tasks import _same_host
+        host = 'site.com'
+        self.assertTrue(_same_host('https://site.com/page', host))
+        self.assertFalse(_same_host('https://site.com.evil.tld/page', host))
+        self.assertFalse(_same_host('https://site.com@10.0.0.5/admin', host))
+        self.assertFalse(_same_host('file:///etc/passwd', host))
+
+    def test_only_ordinary_web_addresses_are_stored_as_a_source(self):
+        from .tasks import _safe_source_url
+        self.assertEqual(_safe_source_url('https://site.com/a'), 'https://site.com/a')
+        self.assertEqual(_safe_source_url("javascript:alert(1)"), '')
+        self.assertEqual(_safe_source_url('https://site.com/' + 'a' * 600), '')
+
+    def test_a_javascript_source_is_never_linked(self):
+        work = make_qasida(title='Linked', source_url='javascript:alert(1)')
+        self.assertNotContains(self.client.get(work.get_absolute_url()), 'javascript:alert')
+
+    def test_an_overlong_title_is_shortened_not_fatal(self):
+        from .tasks import _create_work
+        work = _create_work(self.site, title='t' * 400, source_url='https://x.com/1',
+                            language='Urdu', author='p' * 400, lyrics='line')
+        self.assertEqual(len(work.title), 200)
+        self.assertEqual(len(work.author.name), 200)
+
+    def test_one_failing_page_does_not_stop_the_rest(self):
+        from unittest import mock
+        from . import tasks
+        urls = ['https://lyrics.midhah.com/naat/one', 'https://lyrics.midhah.com/naat/two']
+        good = {'@type': 'MusicComposition', 'name': 'Two',
+                'lyrics': [{'text': 'a line of verse'}], 'genre': ['Naat'],
+                'lyricist': 'A Poet', 'inLanguage': 'ur'}
+        pages = [{'@type': 'MusicComposition', 'name': 'One', 'lyrics': 'x',
+                  'inLanguage': ['not', 'a', 'string'], 'genre': {'weird': True}}, good]
+        with mock.patch.object(tasks, '_midhah_lyric_urls', return_value=urls), \
+                mock.patch.object(tasks, '_midhah_composition', side_effect=pages), \
+                mock.patch.object(tasks, '_create_work',
+                                  side_effect=[RuntimeError('boom'), None]) as create:
+            tasks.scrape_midhah(self.site)
+        self.assertEqual(create.call_count, 2)
+        self.assertEqual(create.call_args.kwargs['title'], 'Two')
+        self.assertEqual(create.call_args.kwargs['lyrics'], 'a line of verse')
+
+    def test_one_refusal_is_passed_over_but_several_park_the_source(self):
+        from unittest import mock
+        from . import tasks
+        from .fetching import RateLimited
+        urls = [f'https://lyrics.midhah.com/naat/{n}' for n in range(5)]
+        with mock.patch.object(tasks, '_midhah_lyric_urls', return_value=urls), \
+                mock.patch.object(tasks, '_midhah_composition',
+                                  side_effect=[RateLimited('500'), None, None, None, None]):
+            tasks.scrape_midhah(self.site)  # one refusal: carries on
+
+        with mock.patch.object(tasks, '_midhah_lyric_urls', return_value=urls), \
+                mock.patch.object(tasks, '_midhah_composition',
+                                  side_effect=RateLimited('429')) as fetch, \
+                self.assertRaises(RateLimited):
+            tasks.scrape_midhah(self.site)
+        self.assertEqual(fetch.call_count, tasks.CONSECUTIVE_REFUSALS)
+
+    def test_the_transliteration_link_is_only_followed_on_the_same_site(self):
+        from unittest import mock
+        from . import tasks
+        page = {'@type': 'MusicComposition', 'name': 'One', 'lyrics': 'verse',
+                'workTranslation': {'url': 'http://169.254.169.254/latest/meta-data'}}
+        with mock.patch.object(tasks, '_midhah_lyric_urls',
+                               return_value=['https://lyrics.midhah.com/naat/one']), \
+                mock.patch.object(tasks, '_midhah_composition', return_value=page) as fetch:
+            tasks.scrape_midhah(self.site)
+        self.assertEqual(fetch.call_count, 1)
+
+    def test_a_sitemap_index_cannot_queue_thousands_of_sitemaps(self):
+        from unittest import mock
+        from . import tasks
+        index = ''.join(f'<loc>https://site.com/sitemap-{n}.xml</loc>' for n in range(500))
+
+        def answer(url, **kwargs):
+            body = index if url.endswith('/sitemap.xml') else '<loc>https://site.com/p</loc>'
+            return mock.Mock(status_code=200, text=body)
+
+        with mock.patch.object(tasks, 'polite_get', side_effect=answer) as fetch:
+            tasks._sitemap_urls('https://site.com')
+        self.assertLessEqual(fetch.call_count, tasks.GENERIC_MAX_SITEMAPS)
+
+    def test_a_scan_that_is_not_a_page_is_not_fetched_again(self):
+        import io
+        from unittest import mock
+        from PIL import Image
+        from . import tasks
+        tiny = io.BytesIO()
+        Image.new('RGB', (20, 20)).save(tiny, 'PNG')
+        work = make_qasida(title='Scanned')
+        url = 'https://damas.nur.nu/icon.png'
+        with mock.patch.object(tasks, 'polite_get',
+                               return_value=mock.Mock(content=tiny.getvalue())) as fetch:
+            tasks._store_images(work, [url])
+            tasks._store_images(work, [url])
+        self.assertEqual(fetch.call_count, 1)
+        self.assertEqual(work.images.count(), 0)
+
+    def test_only_one_crawl_runs_at_a_time(self):
+        from unittest import mock
+        from . import tasks
+        cache.add(tasks.CRAWL_LOCK, 'someone-else', 60)
+        with mock.patch.object(tasks, '_run_crawlers') as crawl:
+            tasks.run_crawlers()
+        crawl.assert_not_called()
+        self.assertEqual(cache.get(tasks.CRAWL_LOCK), 'someone-else')
+
+    def test_a_finished_crawl_releases_its_lock(self):
+        from unittest import mock
+        from . import tasks
+        with mock.patch.object(tasks, '_run_crawlers'):
+            tasks.run_crawlers()
+        self.assertIsNone(cache.get(tasks.CRAWL_LOCK))
+
+
+class PoliteFetchTest(TestCase):
+    """The guards every crawler request passes through."""
+
+    def response(self, chunks, headers=None):
+        """A real requests response, reading its body from memory."""
+        import io
+        import requests
+        from requests.structures import CaseInsensitiveDict
+        response = requests.Response()
+        response.status_code = 200
+        response.headers = CaseInsensitiveDict(headers or {})
+        response.url = 'https://x.com/f'
+        response.raw = io.BytesIO(b''.join(chunks))
+        return response
+
+    def test_a_response_past_the_size_limit_is_abandoned(self):
+        from unittest import mock
+        from . import fetching
+        with mock.patch.object(fetching.requests, 'get',
+                               return_value=self.response([b'x' * 1024] * 20)), \
+                self.assertRaises(fetching.TooLarge):
+            fetching.polite_get('https://x.com/f', max_bytes=4096)
+
+    def test_a_declared_oversize_is_refused_before_reading(self):
+        from unittest import mock
+        from . import fetching
+        big = self.response([b'unread'], headers={'Content-Length': str(10 ** 9)})
+        with mock.patch.object(fetching.requests, 'get', return_value=big), \
+                self.assertRaises(fetching.TooLarge):
+            fetching.polite_get('https://x.com/f')
+        self.assertFalse(big._content_consumed)
+
+    def test_a_normal_response_reads_as_before(self):
+        from unittest import mock
+        from . import fetching
+        ok = self.response([b'<html>', b'</html>'], headers={'Content-Type': 'text/xml'})
+        with mock.patch.object(fetching.requests, 'get', return_value=ok):
+            self.assertEqual(fetching.polite_get('https://x.com/f').content, b'<html></html>')
+
+    def test_nothing_but_the_web_is_fetched(self):
+        import requests
+        from . import fetching
+        with self.assertRaises(requests.exceptions.InvalidSchema):
+            fetching.polite_get('file:///etc/passwd')
+
+    def test_a_nonsense_retry_after_is_not_a_crash(self):
+        from unittest import mock
+        from .fetching import _retry_after_seconds
+        for header in ('-5', 'nan', 'inf'):
+            pause = _retry_after_seconds(mock.Mock(headers={'Retry-After': header}), 0)
+            self.assertGreaterEqual(pause, 0)
+            self.assertLessEqual(pause, 60)
+
+
+class ExtractionLineTest(TestCase):
+    """Lines read out of crawled markup keep all of their words."""
+
+    def test_a_coloured_phrase_does_not_cost_the_rest_of_the_line(self):
+        from bs4 import BeautifulSoup
+        from .extract import html_to_verse
+        soup = BeautifulSoup(
+            '<div><p><span class="red">Ya Rasulallah</span> salamun alayk</p>'
+            '<p>second line</p></div>', 'html.parser')
+        verse = html_to_verse(soup.div)
+        self.assertIn('salamun alayk', verse)
+        self.assertIn('second line', verse)
+
+    def test_lines_held_in_spans_are_still_lines(self):
+        from bs4 import BeautifulSoup
+        from .extract import html_to_verse
+        soup = BeautifulSoup('<div><span>first line</span><span>second line</span></div>',
+                             'html.parser')
+        self.assertEqual(html_to_verse(soup.div).splitlines(), ['first line', 'second line'])
+
+    def test_a_divider_at_the_edge_of_a_line_adds_no_stanza_break(self):
+        from .verse_markers import normalise
+        self.assertEqual(normalise('* first line\nsecond line *'),
+                         'first line\nsecond line')
+
+
+class SearchTextTest(TestCase):
+    """What search can find, and that it stays findable after edits."""
+
+    def test_the_backfill_runs_over_works_with_a_poet(self):
+        from django.core.management import call_command
+        work = make_qasida(title='With a poet', author='Al-Busiri',
+                           transliteration='latin line', translation='meaning line')
+        Qasida.objects.filter(pk=work.pk).update(search_text='', dedup_signature='')
+        call_command('backfill_search', stdout=io.StringIO())
+        work.refresh_from_db()
+        # Every layer is searchable again, not only title, poet and lyrics.
+        for term in ('busiri', 'latin line', 'meaning line'):
+            self.assertIn(term, work.search_text)
+        self.assertNotEqual(work.dedup_signature, '')
+
+    def test_the_backfill_splits_a_packed_title_into_a_poet_record(self):
+        from django.core.management import call_command
+        from .titles import split_title
+        packed = 'Qasida Burda | قصيدة البردة | Imam al-Busiri'
+        title, native, author = split_title(packed)
+        if not author:
+            self.skipTest('split_title does not recognise this shape')
+        work = make_qasida(title=packed, author='')
+        call_command('backfill_search', '--titles', stdout=io.StringIO())
+        work.refresh_from_db()
+        self.assertEqual(work.title, title)
+        self.assertEqual(work.author.name, author)
+
+    def test_renaming_a_poet_makes_their_works_findable_under_the_new_name(self):
+        work = make_qasida(title='A work', author='Busiri')
+        poet = work.author
+        poet.name = 'Imam al-Busiri'
+        poet.save()
+        response = self.client.get(reverse('search'), {'q': 'imam'})
+        self.assertContains(response, 'A work')
+
+    def test_renaming_a_dedication_refreshes_its_works(self):
+        honoured = Dedication.objects.create(name='The Prophet')
+        work = make_qasida(title='In praise', dedicated_to=honoured)
+        honoured.native_name = 'النبي'
+        honoured.save()
+        work.refresh_from_db()
+        self.assertIn('النبي', work.search_text)
+
+
+class DataSafetyTest(TestCase):
+    """Edits that background work and constraints must not undo or refuse."""
+
+    def test_enrichment_does_not_overwrite_a_translation_typed_meanwhile(self):
+        from unittest import mock
+        from . import enrich
+        work = make_qasida(title='Work', language='Arabic', lyrics='مكتبة القصائد')
+
+        def slow_translation(lyrics, code):
+            # While the worker translates, an editor saves their own.
+            Qasida.objects.filter(pk=work.pk).update(translation='Typed by an editor')
+            return 'machine draft'
+
+        with mock.patch.object(enrich, 'available_source_codes', return_value={'ar'}), \
+                mock.patch.object(enrich, 'is_native_script', return_value=True), \
+                mock.patch.object(enrich, 'translate_verse', side_effect=slow_translation) as tr, \
+                mock.patch.object(enrich, 'can_transliterate', return_value=False):
+            enrich.enrich(Qasida.objects.get(pk=work.pk))
+        tr.assert_called_once()
+        work.refresh_from_db()
+        self.assertEqual(work.translation, 'Typed by an editor')
+
+    def test_enrichment_of_a_changed_text_is_dropped(self):
+        from unittest import mock
+        from . import enrich
+        work = make_qasida(title='Work', language='Arabic', lyrics='مكتبة القصائد')
+        stale = Qasida.objects.get(pk=work.pk)
+        Qasida.objects.filter(pk=work.pk).update(lyrics='نص مصحح')
+        with mock.patch.object(enrich, 'available_source_codes', return_value={'ar'}), \
+                mock.patch.object(enrich, 'is_native_script', return_value=True), \
+                mock.patch.object(enrich, 'translate_verse', return_value='draft') as tr, \
+                mock.patch.object(enrich, 'can_transliterate', return_value=False):
+            self.assertEqual(enrich.enrich(stale), [])
+        tr.assert_called_once()
+        work.refresh_from_db()
+        self.assertEqual(work.translation, '')
+
+    def test_enrichment_is_queued_only_after_the_save_commits(self):
+        from unittest import mock
+        from . import tasks
+        editor = User.objects.create_user('editor', 'e@example.com', GOOD_PASSWORD,
+                                          is_staff=True, is_superuser=True)
+        self.client.force_login(editor)
+        with mock.patch.object(tasks.enrich_qasida, 'delay') as delay:
+            with self.captureOnCommitCallbacks(execute=False) as callbacks:
+                self.client.post(reverse('admin:core_qasida_add'), {
+                    'title': 'New work', 'lyrics': 'verse', 'language': 'Arabic',
+                    'review_state': Qasida.REVIEW_PENDING, 'text_quality': Qasida.TEXT_OK,
+                    'translation_origin': Qasida.TRANSLATION_NONE,
+                    'media-TOTAL_FORMS': 0, 'media-INITIAL_FORMS': 0,
+                    'images-TOTAL_FORMS': 0, 'images-INITIAL_FORMS': 0,
+                })
+                delay.assert_not_called()
+            self.assertTrue(Qasida.objects.filter(title='New work').exists())
+            for callback in callbacks:
+                callback()
+            delay.assert_called_once()
+
+    def test_a_collection_named_in_arabic_gets_an_address(self):
+        from .models import Collection
+        first = Collection.objects.create(name='البردة')
+        second = Collection.objects.create(name='الهمزية')
+        self.assertTrue(first.slug)
+        self.assertNotEqual(first.slug, second.slug)
+        self.assertEqual(self.client.get(reverse('collections')).status_code, 200)
+
+    def test_names_that_differ_only_in_punctuation_both_get_an_address(self):
+        from .models import Collection
+        a = Collection.objects.create(name='Burdah')
+        b = Collection.objects.create(name='Burdah.')
+        self.assertNotEqual(a.slug, b.slug)
+
+    def test_a_second_hand_uploaded_scan_is_allowed(self):
+        work = make_qasida(title='Scanned')
+        QasidaImage.objects.create(qasida=work, image='qasida_scans/a.png', source_url='')
+        QasidaImage.objects.create(qasida=work, image='qasida_scans/b.png', source_url='')
+        self.assertEqual(work.images.count(), 2)
+
+    def test_a_link_that_is_not_a_video_is_a_message_not_a_crash(self):
+        from django.core.exceptions import ValidationError
+        from .models import QasidaMedia
+        work = make_qasida(title='Recorded')
+        with self.assertRaises(ValidationError):
+            QasidaMedia(qasida=work, url='https://example.com/not-a-video').full_clean()
+        QasidaMedia.objects.create(qasida=work, url='https://youtu.be/dQw4w9WgXcQ')
+        with self.assertRaises(ValidationError):
+            QasidaMedia(qasida=work, url='https://www.youtube.com/watch?v=dQw4w9WgXcQ').full_clean()
+
+
+class OfflineViewerTest(TestCase):
+    """What lets an offline copy of a page be shown only to whom it was made for."""
+
+    def setUp(self):
+        self.user = User.objects.create_user('reader', 'reader@example.com', GOOD_PASSWORD)
+
+    def sign_in(self, remember):
+        data = {'username': 'reader', 'password': GOOD_PASSWORD}
+        if remember:
+            data['remember_me'] = 'on'
+        return self.client.post(reverse('login'), data)
+
+    def test_a_visitor_is_anonymous_and_gets_no_cookie(self):
+        from .viewer import COOKIE, HEADER
+        response = self.client.get('/')
+        self.assertEqual(response[HEADER], 'anon')
+        self.assertNotIn(COOKIE, response.cookies)
+
+    def test_signing_in_stamps_pages_and_sets_a_matching_cookie(self):
+        from .viewer import COOKIE, HEADER, viewer_id
+        self.sign_in(remember=True)
+        response = self.client.get('/')
+        expected = viewer_id(self.user)
+        self.assertEqual(response[HEADER], expected)
+        self.assertEqual(self.client.cookies[COOKIE].value, expected)
+        self.assertContains(response, expected)
+
+    def test_without_remember_me_the_cookie_ends_with_the_browser(self):
+        from .viewer import COOKIE
+        response = self.sign_in(remember=False)
+        self.assertEqual(response.cookies[COOKIE]['max-age'], '')
+        self.assertEqual(response.cookies[COOKIE]['expires'], '')
+
+    def test_with_remember_me_the_cookie_lasts_as_long_as_the_session(self):
+        from .viewer import COOKIE
+        response = self.sign_in(remember=True)
+        self.assertEqual(int(response.cookies[COOKIE]['max-age']),
+                         settings.SESSION_COOKIE_AGE)
+
+    def test_signing_out_by_any_route_clears_the_cookie(self):
+        from .viewer import COOKIE
+        self.sign_in(remember=True)
+        response = self.client.post(reverse('logout'))
+        self.assertEqual(response.cookies[COOKIE].value, '')
+
+
+class PageDetailFixTest(TestCase):
+    """Small things readers and editors could see going wrong."""
+
+    def test_a_work_with_a_scan_is_shared_with_its_scan(self):
+        work = make_qasida(title='Scanned')
+        QasidaImage.objects.create(qasida=work, image='qasida_scans/page.png')
+        response = self.client.get(work.get_absolute_url())
+        self.assertRegex(response.content.decode(),
+                         r'og:image" content="http://testserver/media/qasida_scans/page\.png"')
+
+    def test_a_work_without_a_scan_is_shared_with_the_icon(self):
+        work = make_qasida(title='Plain')
+        response = self.client.get(work.get_absolute_url())
+        self.assertRegex(response.content.decode(), r'og:image" content="[^"]*icon-192\.png"')
+
+    def test_the_find_panel_keeps_the_other_filters_search_and_order(self):
+        editor = User.objects.create_user('editor', 'e@example.com', GOOD_PASSWORD,
+                                          is_staff=True, is_superuser=True)
+        self.client.force_login(editor)
+        response = self.client.get(reverse('admin:core_qasida_changelist'), {
+            'review_state__exact': Qasida.REVIEW_PENDING, 'author_contains': 'busiri',
+            'q': 'burda', 'o': '2'})
+        page = response.content.decode()
+        self.assertIn('name="review_state__exact" value="pending"', page)
+        self.assertNotIn("[&#x27;pending&#x27;]", page)
+        self.assertIn('name="q" value="burda"', page)
+        self.assertIn('name="o" value="2"', page)
+        self.assertIn('href="?review_state__exact=pending&amp;q=burda&amp;o=2"', page)
+
+
+class QueryCountTest(TestCase):
+    """Pages cost the same number of queries however many items they list."""
+
+    def queries_for(self, url):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        cache.clear()  # the shell's totals are cached; count them every time
+        with CaptureQueriesContext(connection) as captured:
+            self.assertEqual(self.client.get(url).status_code, 200)
+        return len(captured)
+
+    def add_works(self, count, start=0):
+        from .models import QasidaMedia
+        for n in range(start, start + count):
+            work = make_qasida(title=f'Work {n}', translation='meaning')
+            QasidaMedia.objects.create(qasida=work, url=f'https://youtu.be/abcdefghij{n % 10}')
+            QasidaImage.objects.create(qasida=work, image=f'qasida_scans/{n}.png')
+
+    def test_the_listing_does_not_query_per_card(self):
+        self.add_works(2)
+        few = self.queries_for(reverse('lyrics'))
+        self.add_works(6, start=2)
+        self.assertEqual(self.queries_for(reverse('lyrics')), few)
+
+    def test_the_sitemap_does_not_query_per_work(self):
+        self.add_works(2)
+        url = '/sitemap.xml?section=qasidas'
+        few = self.queries_for(url)
+        self.add_works(6, start=2)
+        self.assertEqual(self.queries_for(url), few)
+
+    def test_the_work_page_does_not_query_per_recording(self):
+        from .models import QasidaMedia
+        work = make_qasida(title='Recorded')
+        QasidaMedia.objects.create(qasida=work, url='https://youtu.be/abcdefghij1')
+        one = self.queries_for(work.get_absolute_url())
+        for n in range(2, 6):
+            QasidaMedia.objects.create(qasida=work, url=f'https://youtu.be/abcdefghij{n}')
+        self.assertEqual(self.queries_for(work.get_absolute_url()), one)
+
+
+class DuplicateScanTest(TestCase):
+    OPENING = 'مولاي صل وسلم دائما ابدا على حبيبك خير الخلق كلهم ' * 3
+
+    def test_the_same_poem_from_two_sources_is_filed_once(self):
+        from . import dedup
+        from .models import DuplicateLink
+        a = make_qasida(title='One copy', lyrics=self.OPENING)
+        b = make_qasida(title='Other copy', lyrics=self.OPENING + ' زيادة')
+        make_qasida(title='Unrelated', lyrics='a completely different text about something else')
+        self.assertEqual(dedup.scan(), 1)
+        link = DuplicateLink.objects.get()
+        self.assertEqual((link.first_id, link.second_id), (a.pk, b.pk))
+        self.assertEqual(dedup.scan(), 0)
+
+
+class AddToCollectionTest(TestCase):
+    def test_works_already_in_it_keep_their_place(self):
+        from .models import Collection
+        editor = User.objects.create_user('editor', 'e@example.com', GOOD_PASSWORD,
+                                          is_staff=True, is_superuser=True)
+        burdah = Collection.objects.create(name='Burdah')
+        first = make_qasida(title='A part', collection=burdah, collection_position=1)
+        newcomer = make_qasida(title='B part')
+        self.client.force_login(editor)
+        self.client.post(reverse('admin:core_qasida_changelist'), {
+            'action': 'add_to_collection', 'apply': '1', 'collection': burdah.pk,
+            '_selected_action': [first.pk, newcomer.pk]})
+        first.refresh_from_db()
+        newcomer.refresh_from_db()
+        self.assertEqual(first.collection_position, 1)
+        self.assertEqual((newcomer.collection_id, newcomer.collection_position), (burdah.pk, 2))
+
+
+class EmailVerificationTest(TestCase):
+    """An address counts only once its owner has shown it is theirs."""
+
+    def register(self, username='newreader', email='new@example.com'):
+        return self.client.post(reverse('register'), {
+            'username': username, 'email': email,
+            'password1': GOOD_PASSWORD, 'password2': GOOD_PASSWORD})
+
+    def link_in(self, message):
+        return re.search(r'https?://\S+/accounts/verify/\S+/', message.body).group(0)
+
+    def test_signing_up_sends_a_link_and_the_address_waits_for_it(self):
+        from .verification import is_verified
+        self.register()
+        user = User.objects.get(username='newreader')
+        self.assertFalse(is_verified(user))
+        self.assertEqual(mail.outbox[-1].to, ['new@example.com'])
+        self.client.get(self.link_in(mail.outbox[-1]))
+        self.assertTrue(is_verified(user))
+
+    def test_an_unconfirmed_address_does_not_sign_in_but_the_username_does(self):
+        self.register()
+        self.client.logout()
+        self.assertFalse(self.client.login(username='new@example.com', password=GOOD_PASSWORD))
+        self.assertTrue(self.client.login(username='newreader', password=GOOD_PASSWORD))
+
+    def test_an_unconfirmed_address_does_not_lock_its_owner_out(self):
+        self.register(username='squatter', email='owner@example.com')
+        self.client.logout()
+        self.register(username='owner', email='owner@example.com')
+        self.assertTrue(User.objects.filter(username='owner').exists())
+
+    def test_an_address_confirmed_elsewhere_is_not_handed_to_a_second_account(self):
+        from .verification import TAKEN, confirm, make_token
+        self.register(username='squatter', email='owner@example.com')
+        squatter = User.objects.get(username='squatter')
+        self.client.logout()
+        User.objects.create_user('owner', 'owner@example.com', GOOD_PASSWORD)
+        self.assertEqual(confirm(make_token(squatter, 'owner@example.com'))[1], TAKEN)
+
+    def test_an_old_link_confirms_nothing_once_the_address_moved_on(self):
+        from .verification import INVALID, confirm, make_token
+        user = User.objects.create_user('reader', 'now@example.com', GOOD_PASSWORD)
+        self.assertEqual(confirm(make_token(user, 'before@example.com'))[1], INVALID)
+        self.assertEqual(confirm('not-a-token')[1], INVALID)
+
+    def test_existing_accounts_count_as_confirmed(self):
+        from .models import ReaderProfile
+        from .verification import is_verified
+        user = User.objects.create_user('old', 'old@example.com', GOOD_PASSWORD)
+        self.assertTrue(is_verified(user))
+        ReaderProfile.for_user(user)  # a profile made later changes nothing
+        self.assertTrue(is_verified(user))
+        self.assertTrue(self.client.login(username='old@example.com', password=GOOD_PASSWORD))
+
+    def test_a_password_reset_confirms_the_address(self):
+        from .verification import is_verified
+        self.register()
+        self.client.logout()
+        mail.outbox = []
+        self.client.post(reverse('password_reset'), {'email': 'new@example.com'})
+        link = re.search(r'https?://\S+/accounts/reset/\S+/', mail.outbox[-1].body).group(0)
+        form_page = self.client.get(link, follow=True)
+        self.client.post(form_page.redirect_chain[-1][0], {
+            'new_password1': 'Another-8-Teapot', 'new_password2': 'Another-8-Teapot'})
+        self.assertTrue(is_verified(User.objects.get(username='newreader')))
+
+    @override_settings(LIBRARY_NOTIFY_EMAILS=['editors@example.com'])
+    def test_an_editor_reply_is_not_sent_to_an_unconfirmed_address(self):
+        self.register()
+        user = User.objects.get(username='newreader')
+        contribution = Contribution.objects.create(
+            kind=Contribution.KIND_REQUEST, title='Something', user=user)
+        mail.outbox = []
+        editor = User.objects.create_user('editor', 'e@example.com', GOOD_PASSWORD, is_staff=True)
+        contribution.decline(by=editor)
+        from . import notify
+        self.assertFalse(notify.contribution_decided(contribution))
+        self.assertEqual(mail.outbox, [])
+
+
+class FormAccessibilityTest(TestCase):
+    def test_every_described_by_reference_points_at_something(self):
+        page = self.client.post(reverse('register'), {
+            'username': 'has@sign', 'email': 'bad', 'password1': 'x', 'password2': 'y',
+        }).content.decode()
+        references = set()
+        for value in re.findall(r'aria-describedby="([^"]+)"', page):
+            references.update(value.split())
+        self.assertTrue(references)
+        for ref in references:
+            self.assertIn(f'id="{ref}"', page, f'{ref} is referenced but not on the page')
+        self.assertIn('aria-invalid="true"', page)

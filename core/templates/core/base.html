@@ -3,6 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    {% comment %}
+    Before anything is drawn: a page made for a signed-in reader is only shown
+    back to that reader. A copy from the offline cache whose reader is no
+    longer the one signed in here - the browser was closed, the session ran
+    out, someone else signed in - is dropped, with every page cached beside
+    it, and the offline page shown instead. See core/viewer.py.
+    {% endcomment %}
+    <script>
+    (function () {
+        var page = '{{ viewer_id|escapejs }}';
+        if (!page || page === 'anon') return;
+        var found = document.cookie.match(/(?:^|; ){{ viewer_cookie }}=([^;]*)/);
+        if (found && found[1] === page) return;
+        document.documentElement.style.visibility = 'hidden';
+        var leave = function () { location.replace('{% url "offline" %}'); };
+        if (!window.caches) return leave();
+        caches.keys().then(function (names) {
+            return Promise.all(names.filter(function (name) {
+                return name.slice(-6) === '-pages';
+            }).map(function (name) { return caches.delete(name); }));
+        }).then(leave, leave);
+    })();
+    </script>
     <title>{% block title %}Qasida Library{% endblock %}</title>
     {% comment %}
     A description per page, not one for the whole site. Search engines print
@@ -464,31 +487,56 @@
 (function () {
     var MIN = 2, DELAY = 180;
 
-    document.querySelectorAll('input[data-suggest]').forEach(function (input) {
+    document.querySelectorAll('input[data-suggest]').forEach(function (input, which) {
         var host = input.closest('.relative') || input.parentElement;
         if (!host) return;
 
+        // A combobox in the ARIA sense: the input owns the list, and the
+        // option under the arrow keys is announced through
+        // aria-activedescendant while focus stays in the box. Without these
+        // the highlight moved on screen and a screen reader said nothing.
+        var panelId = (input.id || 'suggest-' + which) + '-suggestions';
         var panel = document.createElement('div');
         panel.className = 'suggest-panel';
         panel.hidden = true;
+        panel.id = panelId;
         panel.setAttribute('role', 'listbox');
+        panel.setAttribute('aria-label', 'Suggestions');
         host.appendChild(panel);
+
+        // How many matched, said once per answer rather than per keystroke.
+        var status = document.createElement('p');
+        status.className = 'sr-only';
+        status.setAttribute('role', 'status');
+        status.setAttribute('aria-live', 'polite');
+        host.appendChild(status);
 
         var timer = null, controller = null, items = [], active = -1;
 
         input.setAttribute('autocomplete', 'off');
+        input.setAttribute('role', 'combobox');
         input.setAttribute('aria-autocomplete', 'list');
+        input.setAttribute('aria-controls', panelId);
         input.setAttribute('aria-expanded', 'false');
 
         function close() {
             panel.hidden = true;
             input.setAttribute('aria-expanded', 'false');
+            input.removeAttribute('aria-activedescendant');
             active = -1;
         }
 
         function highlight(index) {
-            items.forEach(function (el, i) { el.classList.toggle('is-active', i === index); });
-            if (index >= 0 && items[index]) items[index].scrollIntoView({block: 'nearest'});
+            items.forEach(function (el, i) {
+                el.classList.toggle('is-active', i === index);
+                el.setAttribute('aria-selected', i === index ? 'true' : 'false');
+            });
+            if (index >= 0 && items[index]) {
+                items[index].scrollIntoView({block: 'nearest'});
+                input.setAttribute('aria-activedescendant', items[index].id);
+            } else {
+                input.removeAttribute('aria-activedescendant');
+            }
             active = index;
         }
 
@@ -506,6 +554,7 @@
                     link.className = 'suggest-item';
                     link.href = row.url;
                     link.setAttribute('role', 'option');
+                    link.id = panelId + '-' + items.length;
 
                     var title = document.createElement('span');
                     title.className = 'suggest-title';
@@ -540,12 +589,17 @@
                     all.className = 'suggest-foot';
                     all.href = '{% url "search" %}?q=' + encodeURIComponent(data.query);
                     all.textContent = 'See all ' + data.total + ' results';
+                    all.setAttribute('role', 'option');
+                    all.id = panelId + '-all';
                     panel.appendChild(all);
                     items.push(all);
                 }
             }
             panel.hidden = false;
             input.setAttribute('aria-expanded', 'true');
+            status.textContent = data.total
+                ? data.total + (data.total === 1 ? ' match' : ' matches') + ', use the arrow keys to choose'
+                : 'No matches';
             highlight(-1);
         }
 

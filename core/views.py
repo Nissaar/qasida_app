@@ -1,5 +1,3 @@
-from urllib.parse import urlencode
-
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
@@ -7,12 +5,12 @@ from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db.models import Count, Q
 from django.db.models.functions import Coalesce, Length
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from . import notify, throttle
 from .forms import (ContactForm, QasidaForm, QasidaRequestForm,
-                    QasidaSubmissionForm)
+                    QasidaSubmissionForm, SuggestionForm)
 from .models import (Collection, Contribution, Dedication, Favourite, Poet,
                      Qasida, ReadingHistory, SourceWebsite, Suggestion, Tag)
 from .export import LAYERS, available_layers
@@ -197,7 +195,7 @@ def _listing(request, heading):
 
     results = (_apply_filters(request, filters)
                .select_related('author', 'dedicated_to')
-               .prefetch_related('tags', 'images').order_by('-created_at'))
+               .prefetch_related('tags', 'images', 'media').order_by('-created_at'))
     paginator = Paginator(results, PAGE_SIZE)
     page_obj = paginator.get_page(request.GET.get('page'))
 
@@ -281,7 +279,7 @@ def _featured(scope, language, limit):
     """
     return (scope.filter(language__iexact=language, text_quality=Qasida.TEXT_OK)
             .exclude(lyrics='')
-            .prefetch_related('tags', 'images')
+            .prefetch_related('tags', 'images', 'media')
             .annotate(length=Length('lyrics'))
             .order_by('-length')[:limit])
 
@@ -297,7 +295,7 @@ def _recently_added(scope, limit):
     two cannot disagree about what counts as new.
     """
     return (scope.select_related('author', 'dedicated_to')
-            .prefetch_related('tags', 'images')
+            .prefetch_related('tags', 'images', 'media')
             .annotate(published=Coalesce('reviewed_at', 'created_at'))
             .order_by('-published')[:limit])
 
@@ -393,7 +391,9 @@ def qasida_by_id(request, pk):
     Links to /qasida/<id>/ are already out in the world and cached by the
     service worker, so they redirect permanently to the slug instead of 404ing.
     """
-    qasida = get_object_or_404(Qasida, pk=pk)
+    # Through the review gate like every other way in: an unapproved work's
+    # slug is built from its title, so redirecting to it would read that out.
+    qasida = get_object_or_404(_visible(request), pk=pk)
     return redirect('qasida_detail', slug=qasida.slug, permanent=True)
 
 
@@ -408,11 +408,11 @@ def _submitted(text):
     return (text or '').replace('\r\n', '\n').replace('\r', '\n').strip()
 
 
-def _suggested_changes(request, qasida):
+def _suggested_changes(cleaned, qasida):
     """Only the fields the sender actually altered."""
     changed = {}
     for field, target, _label in Suggestion.FIELDS:
-        proposed = _submitted(request.POST.get(field))
+        proposed = _submitted(cleaned.get(field))
         current = getattr(qasida, target)
         # The poet is a relation, so compare against its name rather than
         # against the object, whose repr would never match what was typed.
@@ -422,44 +422,72 @@ def _suggested_changes(request, qasida):
     return changed
 
 
+# Corrections one address, or one account, may send in an hour. A reader
+# working carefully through a long text sends several; a script burying the
+# editors' queue sends thousands.
+SUGGESTION_LIMIT = 30
+SUGGESTION_WINDOW = 60 * 60
+
+
 def qasida_detail(request, slug):
-    qasida = get_object_or_404(_visible(request), slug=slug)
+    # Everything the page lists, fetched once: the template asks for the
+    # recordings and scans a dozen times over - count, first, all - and each
+    # of those was a query of its own.
+    qasida = get_object_or_404(
+        _visible(request).select_related('author', 'dedicated_to', 'collection')
+        .prefetch_related('media', 'images', 'tags'),
+        slug=slug)
 
     if request.method == 'POST':
-        # A signed-in reader is already reachable, so their address is taken
-        # from the account rather than typed again; an anonymous one has no
-        # other way to be followed up, so it stays compulsory for them.
-        email = (request.POST.get('email') or '').strip()
-        if not email and request.user.is_authenticated:
-            email = request.user.email
-        changes = _suggested_changes(request, qasida)
-        # Tags are additive rather than a replacement, so they are taken as
-        # sent rather than compared against what the work already carries.
-        suggested_tags = _submitted(request.POST.get('suggested_tags'))
-        note = _submitted(request.POST.get('note'))
-
-        if not (email or request.user.is_authenticated):
-            messages.error(request, 'Email is required to submit a suggestion.')
-        elif not (changes or suggested_tags or note):
+        keys = throttle.keys_for(request, 'suggestion')
+        form = SuggestionForm(request.POST)
+        if any(throttle.over_limit(key, SUGGESTION_LIMIT) for key in keys):
             messages.error(
                 request,
-                'Nothing was changed, so there is nothing to review. Edit a '
-                'field, add a tag, or describe what is wrong.')
+                'That is a lot of corrections in a short time. Please wait an '
+                f'hour, or write to {settings.CONTACT_EMAIL}.')
+        elif not form.is_valid():
+            for errors in form.errors.values():
+                for error in errors:
+                    messages.error(request, error)
         else:
-            suggestion = Suggestion.objects.create(
-                qasida=qasida,
-                user=request.user if request.user.is_authenticated else None,
-                email=email,
-                suggested_tags=suggested_tags,
-                note=note,
-                **changes,
-            )
-            # The correction is already stored; telling an editor about it is
-            # the part that can fail, and notify swallows that rather than
-            # losing the correction to a mail server being down.
-            notify.suggestion_received(suggestion, request)
-            messages.success(request, 'Thank you. Your correction has been sent for review.')
-            return redirect('qasida_detail', slug=qasida.slug)
+            cleaned = form.cleaned_data
+            # A signed-in reader is already reachable, so their address is
+            # taken from the account rather than typed again; an anonymous one
+            # has no other way to be followed up, so it stays compulsory.
+            email = cleaned['email']
+            if not email and request.user.is_authenticated:
+                email = request.user.email
+            changes = _suggested_changes(cleaned, qasida)
+            # Tags are additive rather than a replacement, so they are taken
+            # as sent rather than compared against what the work carries.
+            suggested_tags = _submitted(cleaned['suggested_tags'])
+            note = _submitted(cleaned['note'])
+
+            if not (email or request.user.is_authenticated):
+                messages.error(request, 'Email is required to submit a suggestion.')
+            elif not (changes or suggested_tags or note):
+                messages.error(
+                    request,
+                    'Nothing was changed, so there is nothing to review. Edit a '
+                    'field, add a tag, or describe what is wrong.')
+            else:
+                suggestion = Suggestion.objects.create(
+                    qasida=qasida,
+                    user=request.user if request.user.is_authenticated else None,
+                    email=email,
+                    suggested_tags=suggested_tags,
+                    note=note,
+                    **changes,
+                )
+                for key in keys:
+                    throttle.record(key, SUGGESTION_WINDOW)
+                # The correction is already stored; telling an editor about it
+                # is the part that can fail, and notify swallows that rather
+                # than losing the correction to a mail server being down.
+                notify.suggestion_received(suggestion, request)
+                messages.success(request, 'Thank you. Your correction has been sent for review.')
+                return redirect('qasida_detail', slug=qasida.slug)
     elif request.user.is_authenticated:
         # Only on a plain read, so a correction does not count as a visit.
         ReadingHistory.record(request.user, qasida)
@@ -483,12 +511,22 @@ def suggestion_inbox(request):
     """Review queue for reader-submitted corrections."""
     if request.method == 'POST':
         suggestion = get_object_or_404(Suggestion, pk=request.POST.get('suggestion'))
-        if request.POST.get('action') == 'approve':
-            suggestion.apply()
-            messages.success(request, f'Applied the suggestion for "{suggestion.qasida}".')
+        action = request.POST.get('action')
+        # Each button names what it does, and anything else is refused rather
+        # than read as a rejection.
+        if action not in ('approve', 'reject'):
+            return HttpResponseBadRequest('Unknown action.')
+        if action == 'approve':
+            done = suggestion.apply()
+            success = f'Applied the suggestion for "{suggestion.qasida}".'
         else:
-            suggestion.reject()
-            messages.success(request, 'Suggestion rejected.')
+            done = suggestion.reject()
+            success = 'Suggestion rejected.'
+        if done:
+            messages.success(request, success)
+        else:
+            messages.warning(request, 'That suggestion had already been decided, '
+                                      'so nothing was changed.')
         return redirect('suggestion_inbox')
 
     pending = (Suggestion.objects.filter(is_reviewed=False)
@@ -518,7 +556,7 @@ def poet(request, name):
     """Everything attributed to one poet."""
     works = (_visible(request).filter(author__name__iexact=name)
              .select_related('author')
-             .prefetch_related('tags', 'images')
+             .prefetch_related('tags', 'images', 'media')
              .order_by('title'))
     paginator = Paginator(works, PAGE_SIZE)
     return render(request, 'core/poet.html', {
@@ -564,7 +602,7 @@ def dedication(request, name):
     honoured = get_object_or_404(Dedication, name__iexact=name)
     works = (_visible(request).filter(dedicated_to=honoured)
              .select_related('author', 'dedicated_to')
-             .prefetch_related('tags', 'images')
+             .prefetch_related('tags', 'images', 'media')
              .order_by('title'))
     paginator = Paginator(works, PAGE_SIZE)
     return render(request, 'core/dedication.html', {
@@ -604,13 +642,17 @@ def collection(request, slug):
     """One collection, with its parts in reading order."""
     item = get_object_or_404(Collection, slug=slug)
     parts = (_visible(request).filter(collection=item)
-             .prefetch_related('tags', 'images')
+             .prefetch_related('tags', 'images', 'media')
              .order_by('collection_position', 'title'))
     return render(request, 'core/collection.html', {
         'collection': item,
         'parts': parts,
         'total': parts.count(),
     })
+
+
+PDF_LIMIT = 20
+PDF_WINDOW = 10 * 60
 
 
 def qasida_download(request, slug):
@@ -621,6 +663,16 @@ def qasida_download(request, slug):
     be shared for just the original, or the original beside its translation.
     """
     qasida = get_object_or_404(_visible(request), slug=slug)
+
+    # Laying out a long work with its scans holds a worker for seconds, and
+    # there are only a few. Enough for any reader; not enough for a script to
+    # tie the whole site up asking for the largest files over and over.
+    keys = throttle.keys_for(request, 'pdf')
+    if any(throttle.over_limit(key, PDF_LIMIT) for key in keys):
+        return HttpResponse('Too many downloads in a short time. Please try again '
+                            'in a few minutes.', status=429, content_type='text/plain')
+    for key in keys:
+        throttle.record(key, PDF_WINDOW)
 
     present = available_layers(qasida)
     asked = [name for name in LAYERS if request.GET.get(name) == '1']
@@ -795,22 +847,39 @@ def contribution_inbox(request):
         action = request.POST.get('action')
         note = (request.POST.get('staff_note') or '').strip()
 
-        if action == 'publish' and contribution.can_publish():
-            qasida = contribution.publish(by=request.user)
+        if action not in ('publish', 'accept', 'decline'):
+            return HttpResponseBadRequest('Unknown action.')
+
+        already = (f'"{contribution.display_title}" had already been decided, '
+                   f'so nothing was changed.')
+        if action == 'publish':
+            # Refused outright rather than falling through to another action:
+            # pressing "create a record" must never decline the contribution
+            # and tell its sender so.
+            if not contribution.can_publish():
+                messages.error(
+                    request,
+                    f'"{contribution.display_title}" has no text to make a record '
+                    f'from, or already has one. Nothing was changed.')
+                return redirect('contribution_inbox')
+            qasida = contribution.publish(by=request.user, note=note)
+            if qasida is None:
+                messages.warning(request, already)
+                return redirect('contribution_inbox')
             notify.contribution_decided(contribution, request)
             messages.success(
                 request,
                 f'Created a record from "{contribution.display_title}". Read it '
                 f'through and approve it, and it goes on the site.')
             return redirect('qasida_edit', slug=qasida.slug)
-        if action == 'accept':
-            contribution.accept(by=request.user, note=note)
+
+        decide = contribution.accept if action == 'accept' else contribution.decline
+        if decide(by=request.user, note=note):
             notify.contribution_decided(contribution, request)
-            messages.success(request, f'Accepted "{contribution.display_title}".')
+            verb = 'Accepted' if action == 'accept' else 'Declined'
+            messages.success(request, f'{verb} "{contribution.display_title}".')
         else:
-            contribution.decline(by=request.user, note=note)
-            notify.contribution_decided(contribution, request)
-            messages.success(request, f'Declined "{contribution.display_title}".')
+            messages.warning(request, already)
         return redirect('contribution_inbox')
 
     waiting = (Contribution.objects.filter(status=Contribution.STATUS_PENDING)

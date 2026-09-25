@@ -27,11 +27,27 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-default-key-do-not-use-in-prod")
-
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("DJANGO_DEBUG", "") == "True"
+
+# SECURITY WARNING: keep the secret key used in production secret!
+#
+# The key signs sessions, password-reset links and CSRF tokens. A fallback is
+# only allowed while debugging: a production container that silently started
+# with a key printed in a public repository would let anyone forge a session
+# for any account, and nothing about the site would look wrong.
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "")
+# The placeholder in .env.prod.example counts as unset: copying the example
+# without editing it is the likeliest way to end up here.
+if SECRET_KEY == "replace-me":
+    SECRET_KEY = ""
+if not SECRET_KEY:
+    if not DEBUG:
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY is not set. Generate one with "
+            "`python -c 'import secrets; print(secrets.token_urlsafe(50))'` "
+            "and put it in .env, or set DJANGO_DEBUG=True for local work.")
+    SECRET_KEY = "django-insecure-development-only"
 
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
@@ -40,9 +56,17 @@ ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").sp
 # because the browser's Origin says https while Django believes otherwise.
 # Only trust the header when a proxy is actually in front, or a client could
 # claim to be on HTTPS.
-if os.environ.get("DJANGO_BEHIND_PROXY", "") == "True":
+BEHIND_PROXY = os.environ.get("DJANGO_BEHIND_PROXY", "") == "True"
+if BEHIND_PROXY:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     USE_X_FORWARDED_HOST = True
+
+# How many proxies we own stand in front of Django: Traefik alone is one. The
+# rate limits read the visitor's address from X-Forwarded-For, counting this
+# many entries in from the right, since everything further left was written by
+# the visitor. Zero means no proxy, and the connecting address is used as is.
+TRUSTED_PROXY_COUNT = int(os.environ.get(
+    "DJANGO_TRUSTED_PROXY_COUNT", "1" if BEHIND_PROXY else "0"))
 
 # Django 4+ checks the Origin header against this list for unsafe methods, so
 # the admin and the suggestion form need the site's own https origin here.
@@ -94,10 +118,25 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    # After authentication, so it sees who the page was rendered for.
+    "core.viewer.ViewerMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# Static files are served under names that carry a hash of their contents
+# (admin.3f9a1c.css). The service worker keeps anything under /static/ for
+# good, which is right for a file whose name changes when it does, and wrong
+# for one that keeps its name: editors were running week-old admin styling
+# and scripts because the worker never asked for them again. Compressed
+# copies come for free, since whitenoise is already serving these.
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 ROOT_URLCONF = "qasida_app.urls"
 
@@ -115,6 +154,7 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",
                 "core.context_processors.library_stats",
                 "core.context_processors.site_contact",
+                "core.viewer.context",
             ],
         },
     },
@@ -149,6 +189,9 @@ CELERY_BEAT_SCHEDULE = {
     'run-crawlers-every-midnight': {
         'task': 'core.tasks.run_crawlers',
         'schedule': crontab(minute=0, hour=0),
+        # A run the worker could not pick up within a few hours - it was down,
+        # or busy - is dropped rather than started late, on top of the next.
+        'options': {'expires': 6 * 60 * 60},
     },
 }
 

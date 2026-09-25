@@ -86,14 +86,37 @@ def _leaf_blocks(element):
     each line in its own div inside 1400 others, and reading the wrappers
     turned a whole poem into a single line.
     """
-    leaves = []
+    leaves, taken = [], set()
     for node in element.find_all(BLOCK_TAGS):
-        if node.find(BLOCK_TAGS):
-            continue  # a wrapper, not a line
+        if any(id(parent) in taken for parent in node.parents):
+            continue  # inside a line already taken whole
+        if _is_wrapper(node):
+            continue
         text = node.get_text(' ', strip=True)
         if text:
             leaves.append(node)
+            taken.add(id(node))
     return leaves
+
+
+def _own_text(node):
+    """The text sitting directly in `node`, outside any child element."""
+    return ''.join(node.find_all(string=True, recursive=False)).strip()
+
+
+def _is_wrapper(node):
+    """
+    Whether `node` only holds lines, rather than being one.
+
+    A span inside a line is usually emphasis - a coloured or bold phrase -
+    not a line of its own. Counting it as one made its parent a "wrapper",
+    and `<p><span>Ya Rasulallah</span> salamun alayk</p>` came out as
+    "Ya Rasulallah", the rest of the line silently gone. So a span only makes
+    its parent a wrapper when the parent has no text of its own beside it.
+    """
+    if node.find([tag for tag in BLOCK_TAGS if tag != 'span']):
+        return True
+    return bool(node.find('span')) and not _own_text(node)
 
 
 def _lines_from_breaks(element):

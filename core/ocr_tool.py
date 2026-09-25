@@ -12,7 +12,8 @@ import pymupdf
 from django import forms
 from PIL import Image
 
-from .tasks import OCR_DPI, SCAN_OCR_CONFIG, _keep_arabic_lines, _prepare_scan
+from .textrepair import (MAX_PDF_PAGES, OCR_DPI, SCAN_OCR_CONFIG, keep_arabic_lines,
+                         prepare_scan)
 
 # Language packs installed in the image.
 LANGUAGE_CHOICES = [
@@ -25,7 +26,6 @@ LANGUAGE_CHOICES = [
 ]
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
-MAX_PDF_PAGES = 30
 
 
 class OcrUploadForm(forms.Form):
@@ -76,10 +76,10 @@ def run_ocr(upload, language, keep_script_only, page_segmentation=SCAN_OCR_CONFI
     pages, notes = [], []
     for number, image in enumerate(_images_from_upload(upload), start=1):
         with image:
-            prepared = _prepare_scan(image)
+            prepared = prepare_scan(image)
             raw = pytesseract.image_to_string(
                 prepared, lang=language, config=page_segmentation)
-        cleaned = _keep_arabic_lines(raw) if keep_script_only else raw.strip()
+        cleaned = keep_arabic_lines(raw) if keep_script_only else raw.strip()
         notes.append(f"page {number}: {len(cleaned)} characters")
         if cleaned:
             pages.append(cleaned)

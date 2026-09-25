@@ -1,5 +1,8 @@
+import uuid
+
 from django.conf import settings
 from django.contrib.postgres.indexes import GinIndex
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 from django.utils.text import slugify
@@ -153,11 +156,57 @@ class Collection(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.slug:
-            self.slug = slugify(self.name)[:220]
+            self.slug = self.build_slug()
         super().save(*args, **kwargs)
 
+    def build_slug(self):
+        """
+        A unique URL fragment for this collection.
 
-class Poet(models.Model):
+        A name in Arabic script slugifies to nothing, and two names differing
+        only in punctuation slugify to the same thing; either one used to fail
+        the insert or leave a collection whose page could not be linked to.
+        """
+        base = (slugify(self.name) or slugify(self.native_name) or 'collection')[:200]
+        candidate, suffix = base, 2
+        others = Collection.objects.exclude(pk=self.pk)
+        while others.filter(slug=candidate).exists():
+            candidate = f'{base}-{suffix}'
+            suffix += 1
+        return candidate
+
+
+class RenameRefreshesSearch:
+    """
+    For a name that is part of every work's search text: a poet, a dedication.
+
+    Each work's search_text carries these names, and was only rebuilt when the
+    work itself was saved. An editor correcting a poet's spelling left every
+    one of that poet's works findable only under the old one.
+    """
+
+    def save(self, *args, **kwargs):
+        renamed = bool(self.pk) and (type(self).objects.filter(pk=self.pk)
+                                     .exclude(name=self.name, native_name=self.native_name)
+                                     .exists())
+        super().save(*args, **kwargs)
+        if renamed:
+            refresh_search_text(self.qasidas.all())
+
+
+def refresh_search_text(works):
+    """Rebuild search_text for `works` without re-saving each one in full."""
+    batch = []
+    for work in works.select_related('author', 'dedicated_to').iterator(chunk_size=200):
+        document = work.build_search_text()
+        if document != work.search_text:
+            work.search_text = document
+            batch.append(work)
+    Qasida.objects.bulk_update(batch, ['search_text'], batch_size=200)
+    return len(batch)
+
+
+class Poet(RenameRefreshesSearch, models.Model):
     """
     Someone who wrote a qasida.
 
@@ -188,16 +237,25 @@ class Poet(models.Model):
         case, so a crawler meeting the same name capitalised differently does
         not manufacture a second record of one person.
         """
-        name = (name or '').strip()
+        name = (name or '').strip()[:cls._meta.get_field('name').max_length].strip()
         if not name:
             return None
-        return cls.objects.filter(name__iexact=name).first() or cls.objects.create(name=name)
+        found = cls.objects.filter(name__iexact=name).first()
+        if found:
+            return found
+        try:
+            with transaction.atomic():
+                return cls.objects.create(name=name)
+        except IntegrityError:
+            # Another worker created the same poet between the lookup and the
+            # insert; theirs is the record.
+            return cls.objects.filter(name__iexact=name).first()
 
     def __str__(self):
         return self.name
 
 
-class Dedication(models.Model):
+class Dedication(RenameRefreshesSearch, models.Model):
     """
     Who a qasida is addressed to or written in praise of.
 
@@ -414,6 +472,15 @@ class Qasida(models.Model):
         """This work's language as a tag a browser understands."""
         return language_code(self.language)
 
+    def _slug_base(self):
+        """The readable part of the slug, or '' when nothing Latin is to hand."""
+        base = slugify(self.title or '')
+        if not base and self.transliteration:
+            first_line = next(
+                (line for line in self.transliteration.splitlines() if line.strip()), '')
+            base = slugify(first_line)
+        return base[:200]
+
     def build_slug(self):
         """
         A readable, unique URL fragment for this work.
@@ -421,14 +488,7 @@ class Qasida(models.Model):
         Falls back through the transliteration and finally the id, because a
         title in Arabic or Urdu script slugifies to nothing.
         """
-        base = slugify(self.title or '')
-        if not base and self.transliteration:
-            first_line = next(
-                (line for line in self.transliteration.splitlines() if line.strip()), '')
-            base = slugify(first_line)
-        if not base:
-            base = f'qasida-{self.pk}' if self.pk else 'qasida'
-        base = base[:200]
+        base = self._slug_base() or (f'qasida-{self.pk}' if self.pk else 'qasida')
 
         candidate = base
         suffix = 2
@@ -444,7 +504,13 @@ class Qasida(models.Model):
             return reverse('qasida_detail', kwargs={'slug': self.slug})
         return reverse('qasida_by_id', kwargs={'pk': self.pk})
 
-    def save(self, *args, **kwargs):
+    def build_search_text(self):
+        """
+        The folded document search matches against.
+
+        The one definition of what is searchable: save() and the backfill
+        command both call this, so the two cannot disagree about it.
+        """
         # Only touched when one is set, so an ordinary save does not fetch a
         # related row it has no use for.
         dedication = ''
@@ -453,24 +519,69 @@ class Qasida(models.Model):
         poet = ''
         if self.author_id:
             poet = f'{self.author.name} {self.author.native_name}'
-        self.search_text = build_document(
+        return build_document(
             self.title, self.native_title, poet, dedication,
             self.lyrics, self.transliteration, self.translation)
+
+    def build_dedup_signature(self):
         # The original script identifies a work better than a romanisation, so
         # it is preferred; a source that publishes only a transliteration still
         # gets a signature rather than being left unmatchable.
-        self.dedup_signature = build_signature(self.lyrics, self.transliteration)
+        return build_signature(self.lyrics, self.transliteration)
+
+    def save(self, *args, **kwargs):
+        self.search_text = self.build_search_text()
+        self.dedup_signature = self.build_dedup_signature()
+        extra_fields = {'search_text', 'dedup_signature'}
+
+        # The slug is settled before the row is written. It used to be filled
+        # in by a second statement after an insert with slug='', and the column
+        # is unique: a crash between the two, or two workers creating at once,
+        # left a row holding '' for good, after which every new work collided
+        # with it and the crawlers stopped importing anything.
+        generated = needs_id = False
+        if not self.slug:
+            generated = True
+            # A work with no Latin title is named after its id, which does not
+            # exist yet. It is written under a placeholder that cannot collide
+            # and renamed once the id is known, in the same transaction.
+            needs_id = not self.pk and not self._slug_base()
+            self.slug = f'qasida-new-{uuid.uuid4().hex}' if needs_id else self.build_slug()
+            extra_fields.add('slug')
+
         update_fields = kwargs.get('update_fields')
         if update_fields:
-            kwargs['update_fields'] = list(
-                set(update_fields) | {'search_text', 'dedup_signature'})
-        super().save(*args, **kwargs)
+            kwargs['update_fields'] = list(set(update_fields) | extra_fields)
 
-        # A row with no title in Latin script needs its id to build a slug, so
-        # this runs after the first save rather than before it.
-        if not self.slug:
-            self.slug = self.build_slug()
-            super().save(update_fields=['slug'])
+        with transaction.atomic():
+            self._save_claiming_slug(generated, *args, **kwargs)
+            if needs_id:
+                self.slug = self.build_slug()
+                super().save(update_fields=['slug'])
+
+    # How many times a generated slug is recomputed after another writer took
+    # it first. Two is already a coincidence; five is only a backstop.
+    SLUG_ATTEMPTS = 5
+
+    def _save_claiming_slug(self, generated, *args, **kwargs):
+        """
+        Save, taking a fresh slug if another writer claimed ours meanwhile.
+
+        build_slug checks for a free name and the insert takes it, and a
+        second worker can take the same name in between. Only a slug this
+        method generated is retried: one an editor typed is theirs to change.
+        """
+        for attempt in range(self.SLUG_ATTEMPTS):
+            try:
+                with transaction.atomic():
+                    super().save(*args, **kwargs)
+                return
+            except IntegrityError:
+                clashed = (Qasida.objects.exclude(pk=self.pk)
+                           .filter(slug=self.slug).exists())
+                if not (generated and clashed) or attempt == self.SLUG_ATTEMPTS - 1:
+                    raise
+                self.slug = self.build_slug()
 
     def __str__(self):
         return self.title or f"Qasida {self.id}"
@@ -493,7 +604,11 @@ class QasidaImage(models.Model):
     class Meta:
         ordering = ('position', 'id')
         constraints = [
+            # Only for scans with a source. One an editor uploads by hand has
+            # none, and a second hand upload was refused as a duplicate of
+            # the first.
             models.UniqueConstraint(fields=('qasida', 'source_url'),
+                                    condition=~models.Q(source_url=''),
                                     name='unique_qasida_image_source'),
         ]
 
@@ -521,8 +636,27 @@ class QasidaMedia(models.Model):
         verbose_name_plural = 'qasida media'
         constraints = [
             models.UniqueConstraint(fields=('qasida', 'video_id'),
+                                    condition=~models.Q(video_id=''),
                                     name='unique_qasida_video'),
         ]
+
+    def clean(self):
+        """
+        Refuse a link that is not a playable video, or one already attached.
+
+        video_id is not an editable field, so the admin never checked the
+        constraint on it: the same video added twice, or two links nothing
+        could be read from, reached the database and came back as an error
+        page instead of a message beside the field.
+        """
+        super().clean()
+        video_id = extract_youtube_id(self.url or '')
+        if not video_id:
+            raise ValidationError({'url': "That is not a YouTube link a player can be made from."})
+        if self.qasida_id and (QasidaMedia.objects.filter(qasida_id=self.qasida_id,
+                                                          video_id=video_id)
+                               .exclude(pk=self.pk).exists()):
+            raise ValidationError({'url': "This recording is already attached to this work."})
 
     def save(self, *args, **kwargs):
         self.video_id = extract_youtube_id(self.url) or ''
@@ -612,39 +746,75 @@ class Suggestion(models.Model):
                 })
         return listed
 
+    def _lock_if_unreviewed(self):
+        """
+        Take a row lock and re-read, reporting whether it is still undecided.
+
+        Must run inside a transaction. Two editors pressing a button at once,
+        or one pressing it twice, would otherwise each read "not reviewed" and
+        both act - and applying an old correction a second time writes its
+        stale text over whatever was corrected since.
+        """
+        type(self).objects.select_for_update().filter(pk=self.pk).first()
+        self.refresh_from_db(fields=['is_reviewed', 'is_approved'])
+        return not self.is_reviewed
+
     def apply(self):
-        """Fold this suggestion into its qasida and mark it approved."""
-        for field, target, _ in self.FIELDS:
-            proposed = getattr(self, field)
-            if not proposed.strip():
-                continue
-            # The poet is a relation; a reader proposes a name, which becomes
-            # a record of that poet if we do not already hold one.
-            if target == 'author':
-                setattr(self.qasida, target, Poet.named(proposed))
-            else:
-                setattr(self.qasida, target, proposed)
+        """
+        Fold this suggestion into its qasida and mark it approved.
 
-        # A translation a reader has corrected is no longer the machine's, and
-        # the page must stop warning that it might be. Nor is it the source's.
-        if self.suggested_translation.strip():
-            self.qasida.translation_origin = Qasida.TRANSLATION_READER
+        Returns False, and changes nothing, when it had already been decided.
+        """
+        with transaction.atomic():
+            if not self._lock_if_unreviewed():
+                return False
+            self.qasida.refresh_from_db()
+            for field, target, _ in self.FIELDS:
+                proposed = getattr(self, field)
+                if not proposed.strip():
+                    continue
+                # The poet is a relation; a reader proposes a name, which becomes
+                # a record of that poet if we do not already hold one.
+                if target == 'author':
+                    setattr(self.qasida, target, Poet.named(proposed))
+                else:
+                    setattr(self.qasida, target, proposed)
 
-        if self.suggested_tags:
-            for name in (t.strip() for t in self.suggested_tags.split(',')):
-                if name:
-                    tag, _ = Tag.objects.get_or_create(name=name)
-                    self.qasida.tags.add(tag)
+            # A translation a reader has corrected is no longer the machine's, and
+            # the page must stop warning that it might be. Nor is it the source's.
+            if self.suggested_translation.strip():
+                self.qasida.translation_origin = Qasida.TRANSLATION_READER
 
-        self.qasida.save()
-        self.is_approved = True
-        self.is_reviewed = True
-        self.save(update_fields=['is_approved', 'is_reviewed'])
+            self.qasida.save()
+            for name in self.tag_names():
+                tag, _ = Tag.objects.get_or_create(name=name)
+                self.qasida.tags.add(tag)
+
+            self.is_approved = True
+            self.is_reviewed = True
+            self.save(update_fields=['is_approved', 'is_reviewed'])
+        return True
 
     def reject(self):
-        self.is_approved = False
-        self.is_reviewed = True
-        self.save(update_fields=['is_approved', 'is_reviewed'])
+        """Mark it declined. Returns False when it had already been decided."""
+        with transaction.atomic():
+            if not self._lock_if_unreviewed():
+                return False
+            self.is_approved = False
+            self.is_reviewed = True
+            self.save(update_fields=['is_approved', 'is_reviewed'])
+        return True
+
+    def tag_names(self):
+        """
+        The proposed tags, each one short enough to be a tag.
+
+        Anything longer than a tag name can hold is left out rather than
+        failing the whole approval on a database error.
+        """
+        limit = Tag._meta.get_field('name').max_length
+        names = (t.strip() for t in self.suggested_tags.split(','))
+        return [name for name in names if name and len(name) <= limit]
 
     def __str__(self):
         return f"Suggestion for {self.qasida} by {self.email}"
@@ -845,6 +1015,16 @@ class ReaderProfile(models.Model):
         default=True, help_text="Show the translation beside the original.")
     lyrics_size = models.CharField(max_length=2, choices=SIZE_CHOICES, default=SIZE_MEDIUM,
                                    help_text="How large the verse itself is set.")
+    # Whether the account's address has been shown to belong to its owner.
+    # True by default: every account that existed before this, and any made
+    # by staff or createsuperuser, is taken as vouched for. Only an account a
+    # stranger opens through the sign-up form starts unconfirmed.
+    email_verified = models.BooleanField(
+        default=True, help_text="The owner has confirmed the address is theirs.")
+    # A new address asked for but not yet confirmed. The account keeps its
+    # current one until the link sent here is followed.
+    pending_email = models.EmailField(
+        blank=True, help_text="An address change waiting to be confirmed.")
 
     @classmethod
     def for_user(cls, user):
@@ -967,7 +1147,20 @@ class Contribution(models.Model):
         """Whether there is a text here to make a record out of."""
         return bool(self.lyrics.strip()) and self.published_as_id is None
 
-    def publish(self, by=None):
+    def _lock_if_pending(self):
+        """
+        Take a row lock and re-read, reporting whether it still awaits a decision.
+
+        Must run inside a transaction. Without it a double-click on "create a
+        record" made two records from one submission, and a batch action in
+        the admin re-decided - and re-emailed - contributions that had long
+        since been answered.
+        """
+        type(self).objects.select_for_update().filter(pk=self.pk).first()
+        self.refresh_from_db(fields=['status', 'published_as'])
+        return self.status == self.STATUS_PENDING
+
+    def publish(self, by=None, note=None):
         """
         Turn a submission into a record of its own, awaiting review.
 
@@ -976,45 +1169,57 @@ class Contribution(models.Model):
         serves it, and text typed in by a reader is no different from text a
         crawler found. The editor who accepts it lands on the new record and
         approves it there, having read it.
+
+        Returns the new record, or None when there was nothing to make one
+        from or the contribution had already been decided.
         """
-        if not self.can_publish():
-            return self.published_as
+        with transaction.atomic():
+            if not self._lock_if_pending() or not self.can_publish():
+                return None
 
-        dedication = None
-        name = self.dedication_name.strip()
-        if name:
-            dedication = (Dedication.objects.filter(name__iexact=name).first()
-                          or Dedication.objects.create(name=name))
+            dedication = None
+            name = self.dedication_name.strip()
+            if name:
+                dedication = (Dedication.objects.filter(name__iexact=name).first()
+                              or Dedication.objects.create(name=name))
 
-        qasida = Qasida.objects.create(
-            title=self.title.strip(),
-            native_title=self.native_title.strip(),
-            author=Poet.named(self.poet_name),
-            dedicated_to=dedication,
-            language=self.language.strip(),
-            lyrics=self.lyrics,
-            transliteration=self.transliteration,
-            translation=self.translation,
-            # A reader who typed out a translation is the source of it, and
-            # the page must not warn that a machine wrote it.
-            translation_origin=(Qasida.TRANSLATION_READER
-                                if self.translation.strip() else Qasida.TRANSLATION_NONE),
-            source_url=self.source_url or None,
-            review_state=Qasida.REVIEW_PENDING,
-        )
-        self.published_as = qasida
-        self.accept(by=by)
+            qasida = Qasida.objects.create(
+                title=self.title.strip(),
+                native_title=self.native_title.strip(),
+                author=Poet.named(self.poet_name),
+                dedicated_to=dedication,
+                language=self.language.strip(),
+                lyrics=self.lyrics,
+                transliteration=self.transliteration,
+                translation=self.translation,
+                # A reader who typed out a translation is the source of it, and
+                # the page must not warn that a machine wrote it.
+                translation_origin=(Qasida.TRANSLATION_READER
+                                    if self.translation.strip() else Qasida.TRANSLATION_NONE),
+                source_url=self.source_url or None,
+                review_state=Qasida.REVIEW_PENDING,
+            )
+            self.published_as = qasida
+            self._close(self.STATUS_ACCEPTED, by, note)
         return qasida
 
     def accept(self, by=None, note=None):
-        self.status = self.STATUS_ACCEPTED
-        self._close(by, note)
+        """Accept without a record. Returns False when already decided."""
+        return self._decide(self.STATUS_ACCEPTED, by, note)
 
     def decline(self, by=None, note=None):
-        self.status = self.STATUS_DECLINED
-        self._close(by, note)
+        """Decline it. Returns False when already decided."""
+        return self._decide(self.STATUS_DECLINED, by, note)
 
-    def _close(self, by, note):
+    def _decide(self, status, by, note):
+        with transaction.atomic():
+            if not self._lock_if_pending():
+                return False
+            self._close(status, by, note)
+        return True
+
+    def _close(self, status, by, note):
+        self.status = status
         if note is not None:
             self.staff_note = note
         self.reviewed_at = timezone.now()

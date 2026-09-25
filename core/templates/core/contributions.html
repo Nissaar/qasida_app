@@ -1,4 +1,5 @@
 {% extends 'core/base.html' %}
+{% load qasida_extras %}
 
 {% block title %}Contributions | Qasida Library{% endblock %}
 {% block robots %}<meta name="robots" content="noindex">{% endblock %}
@@ -46,10 +47,10 @@
         {% if contribution.language %}
         <div><dt class="eyebrow">Language</dt><dd>{{ contribution.language }}</dd></div>
         {% endif %}
-        {% if contribution.source_url %}
+        {% with source=contribution.source_url|web_url %}{% if source %}
         <div class="sm:col-span-2"><dt class="eyebrow">Source link</dt>
-            <dd><a href="{{ contribution.source_url }}" rel="nofollow noopener" target="_blank" class="text-brand-700 dark:text-brand-300 hover:underline break-all">{{ contribution.source_url }}</a></dd></div>
-        {% endif %}
+            <dd><a href="{{ source }}" rel="nofollow noopener" target="_blank" class="text-brand-700 dark:text-brand-300 hover:underline break-all">{{ source }}</a></dd></div>
+        {% endif %}{% endwith %}
     </dl>
 
     {% if contribution.source_note %}

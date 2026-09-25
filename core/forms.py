@@ -1,11 +1,12 @@
 from django import forms
+from django.db import transaction
 from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import (AuthenticationForm, PasswordChangeForm,
                                        PasswordResetForm, SetPasswordForm,
                                        UserCreationForm)
 
 from .models import (ContactMessage, Contribution, Dedication, Favourite,
-                     Poet, Qasida, ReaderProfile, Tag)
+                     Poet, Qasida, ReaderProfile, Suggestion, Tag)
 
 # The shell defines .input as a Tailwind component class, so widgets reuse it
 # instead of restating utilities (and inheriting dark mode for free).
@@ -87,10 +88,12 @@ class QasidaForm(forms.ModelForm):
             tags = [Tag.objects.get_or_create(name=n)[0] for n in names]
             qasida.tags.set(tags)
             # Derive whatever is still missing, on the worker so the form
-            # returns immediately.
+            # returns immediately - and only once the save has committed, or
+            # a quick worker finds no row yet and quietly does nothing.
             if not qasida.transliteration or not qasida.translation:
                 from .tasks import enrich_qasida
-                enrich_qasida.delay(qasida.pk, False)
+                pk = qasida.pk
+                transaction.on_commit(lambda: enrich_qasida.delay(pk, False))
         return qasida
 
 
@@ -150,8 +153,11 @@ class RegistrationForm(StyledFormMixin, UserCreationForm):
         return username
 
     def clean_email(self):
+        from .verification import confirmed_holders
         email = get_user_model().objects.normalize_email(self.cleaned_data['email'].strip())
-        if get_user_model()._default_manager.filter(email__iexact=email).exists():
+        # Only a confirmed address is taken. One someone typed onto their
+        # account without owning it must not lock its real owner out.
+        if confirmed_holders(email).exists():
             raise forms.ValidationError(
                 "There is already an account with that email address. "
                 "You can sign in, or reset the password.")
@@ -223,10 +229,8 @@ class AccountEmailForm(StyledFormMixin, forms.ModelForm):
         email = get_user_model().objects.normalize_email(self.cleaned_data['email'].strip())
         if not email:
             raise forms.ValidationError("An email address is needed to recover the account.")
-        clash = (get_user_model()._default_manager
-                 .filter(email__iexact=email)
-                 .exclude(pk=self.instance.pk))
-        if clash.exists():
+        from .verification import confirmed_holders
+        if confirmed_holders(email).exclude(pk=self.instance.pk).exists():
             raise forms.ValidationError("Another account already uses that address.")
         return email
 
@@ -534,3 +538,28 @@ class ContactForm(StyledFormMixin, forms.ModelForm):
             # Refused without saying which field gave it away.
             raise forms.ValidationError("That message could not be sent. Please try again.")
         return cleaned
+
+
+class SuggestionForm(forms.ModelForm):
+    """
+    The limits a reader's correction has to respect before it is stored.
+
+    The page renders these fields by hand, prefilled with the record, so this
+    is only ever bound to a POST. It exists for what the view used to skip:
+    an address checked as an address, and every field held to the length its
+    column allows, so an overlong one is an error message rather than a
+    database error and a 500.
+    """
+
+    class Meta:
+        model = Suggestion
+        fields = [field for field, _target, _label in Suggestion.FIELDS] + [
+            'suggested_tags', 'note', 'email']
+
+    def clean_suggested_tags(self):
+        tags = self.cleaned_data.get('suggested_tags', '')
+        limit = Tag._meta.get_field('name').max_length
+        if any(len(name.strip()) > limit for name in tags.split(',')):
+            raise forms.ValidationError(
+                f'Each tag can be at most {limit} characters. Separate tags with commas.')
+        return tags

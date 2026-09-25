@@ -10,10 +10,10 @@ change if the Arabic would not survive it.
 from django.core.management.base import BaseCommand
 
 from core.models import Qasida
-from core.tasks import (
+from core.textrepair import (
     FURNITURE_MIN_KEPT,
     FURNITURE_THRESHOLD,
-    _arabic_len,
+    arabic_len,
     furniture_ratio,
     strip_page_furniture,
 )
@@ -41,8 +41,8 @@ class Command(BaseCommand):
         for qasida in rows:
             before_ratio = furniture_ratio(qasida.lyrics)
             tidied = strip_page_furniture(qasida.lyrics)
-            kept_arabic = _arabic_len(tidied)
-            original_arabic = _arabic_len(qasida.lyrics)
+            kept_arabic = arabic_len(tidied)
+            original_arabic = arabic_len(qasida.lyrics)
 
             safe = (original_arabic == 0
                     or kept_arabic >= original_arabic * FURNITURE_MIN_KEPT)

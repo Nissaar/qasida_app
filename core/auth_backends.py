@@ -29,8 +29,12 @@ class UsernameOrEmailBackend(ModelBackend):
         if not username or password is None:
             return None
 
+        # An address only counts once its owner has confirmed it: otherwise
+        # anyone could put a stranger's address on an account and be signed
+        # in by it. See core.verification.
         candidates = list(user_model._default_manager.filter(
-            Q(username__iexact=username) | Q(email__iexact=username)))
+            Q(username__iexact=username)
+            | (Q(email__iexact=username) & ~Q(reader_profile__email_verified=False))))
 
         # An exact username wins outright: it is unique by constraint, so it
         # cannot be the ambiguous case even if an address happens to match too.

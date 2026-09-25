@@ -1,0 +1,11 @@
+Someone asked to use this address for the Qasida Library account "{{ user.get_username }}".
+
+If that was you, follow this link to confirm it:
+
+{{ link }}
+
+The link works for {{ days }} days. Until then the account can still be used by its username, but not by this address.
+
+If it was not you, ignore this message and nothing will change.
+
+-- Qasida Library

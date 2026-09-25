@@ -1,0 +1,70 @@
+name: Tests
+
+# Every push, on every branch, and every pull request. The server deploys by
+# pulling main, so a failing suite has to show up before that pull, not after.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # The same Postgres and Redis the app runs against. Postgres rather than
+    # SQLite because the search and duplicate detection lean on pg_trgm.
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: qasida_db
+          POSTGRES_USER: qasida_user
+          POSTGRES_PASSWORD: qasida_password
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U qasida_user -d qasida_db"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+
+    env:
+      DJANGO_SECRET_KEY: ci-only-not-secret
+      DB_HOST: localhost
+      DB_PORT: '5432'
+      CELERY_BROKER_URL: redis://localhost:6379/0
+      CELERY_RESULT_BACKEND: redis://localhost:6379/0
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      # The face the PDFs are set in; one test checks it is embedded.
+      - name: Install the Arabic font
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-hosny-amiri
+
+      # Everything but argostranslate, which pulls in torch and its models and
+      # is never loaded by the tests: translation is imported lazily and
+      # mocked where it is exercised.
+      - name: Install dependencies
+        run: grep -v '^argostranslate' requirements.txt | pip install -r /dev/stdin
+
+      # A model change without its migration would otherwise only surface as
+      # a surprise folded into somebody's next migration.
+      - name: Check migrations match the models
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: Run the tests
+        run: python manage.py test core --noinput

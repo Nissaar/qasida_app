@@ -5,11 +5,48 @@ table of suspected pairs. No existing row is altered beyond having its
 signature filled in, and nothing is merged or hidden by this migration.
 """
 
+import re
+import unicodedata
+
 import django.contrib.postgres.indexes
 import django.db.models.deletion
 from django.db import migrations, models
 
-from core.dedup import build_signature
+# The signature rules, frozen as they stand here, rather than imported from
+# core.dedup and core.search. A migration that imports live code computes
+# whatever that code says on the day it is applied - and breaks outright if
+# it moves - so a fresh install would no longer reproduce this migration.
+# Signatures are rebuilt with `find_duplicates --rebuild-signatures` when the
+# rules change, not by editing this.
+SIGNATURE_LENGTH = 240
+DIACRITICS_RE = re.compile('[\u064b-\u0652\u0653-\u0655\u0670\u06d6-\u06ed\u0640]')
+LETTER_FOLDING = str.maketrans({
+    '\u0623': '\u0627', '\u0625': '\u0627', '\u0622': '\u0627', '\u0671': '\u0627',
+    '\u0649': '\u064a', '\u0626': '\u064a',
+    '\u0624': '\u0648',
+    '\u0629': '\u0647',
+    '\ufdf2': '\u0627\u0644\u0644\u0647',
+})
+PUNCTUATION_RE = re.compile(r'[^\w\s\u0600-\u06ff]+', re.UNICODE)
+WHITESPACE_RE = re.compile(r'\s+')
+
+
+def normalize(text):
+    if not text:
+        return ''
+    text = unicodedata.normalize('NFKC', text)
+    text = DIACRITICS_RE.sub('', text)
+    text = text.translate(LETTER_FOLDING)
+    text = PUNCTUATION_RE.sub(' ', text)
+    return WHITESPACE_RE.sub(' ', text).strip().lower()
+
+
+def build_signature(*texts):
+    for text in texts:
+        folded = normalize(text)
+        if folded:
+            return folded[:SIGNATURE_LENGTH]
+    return ''
 
 # Large enough to make the backfill a handful of statements rather than one per
 # work, small enough not to hold the whole library in memory at once.
