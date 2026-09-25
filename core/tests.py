@@ -21,7 +21,7 @@ from django.utils import timezone
 
 from .models import (ContactMessage, Contribution, Dedication, Favourite,
                      Poet, Qasida, QasidaImage, ReaderProfile, ReadingHistory,
-                     Suggestion, Tag)
+                     SourceWebsite, Suggestion, Tag)
 
 User = get_user_model()
 
@@ -3212,3 +3212,207 @@ class ClientAddressTest(TestCase):
     @override_settings(TRUSTED_PROXY_COUNT=0)
     def test_without_a_proxy_the_header_is_ignored(self):
         self.assertEqual(self.address('1.1.1.1'), '10.0.0.2')
+
+
+class CrawlerSafetyTest(TestCase):
+    """What one bad page, file or link on a source site can and cannot do."""
+
+    def setUp(self):
+        self.site = SourceWebsite.objects.create(
+            name='Midhah', url='https://lyrics.midhah.com/', parser_type='midhah')
+
+    def test_a_lookalike_host_is_not_the_same_host(self):
+        from .tasks import _same_host
+        host = 'site.com'
+        self.assertTrue(_same_host('https://site.com/page', host))
+        self.assertFalse(_same_host('https://site.com.evil.tld/page', host))
+        self.assertFalse(_same_host('https://site.com@10.0.0.5/admin', host))
+        self.assertFalse(_same_host('file:///etc/passwd', host))
+
+    def test_only_ordinary_web_addresses_are_stored_as_a_source(self):
+        from .tasks import _safe_source_url
+        self.assertEqual(_safe_source_url('https://site.com/a'), 'https://site.com/a')
+        self.assertEqual(_safe_source_url("javascript:alert(1)"), '')
+        self.assertEqual(_safe_source_url('https://site.com/' + 'a' * 600), '')
+
+    def test_a_javascript_source_is_never_linked(self):
+        work = make_qasida(title='Linked', source_url='javascript:alert(1)')
+        self.assertNotContains(self.client.get(work.get_absolute_url()), 'javascript:alert')
+
+    def test_an_overlong_title_is_shortened_not_fatal(self):
+        from .tasks import _create_work
+        work = _create_work(self.site, title='t' * 400, source_url='https://x.com/1',
+                            language='Urdu', author='p' * 400, lyrics='line')
+        self.assertEqual(len(work.title), 200)
+        self.assertEqual(len(work.author.name), 200)
+
+    def test_one_failing_page_does_not_stop_the_rest(self):
+        from unittest import mock
+        from . import tasks
+        urls = ['https://lyrics.midhah.com/naat/one', 'https://lyrics.midhah.com/naat/two']
+        good = {'@type': 'MusicComposition', 'name': 'Two',
+                'lyrics': [{'text': 'a line of verse'}], 'genre': ['Naat'],
+                'lyricist': 'A Poet', 'inLanguage': 'ur'}
+        pages = [{'@type': 'MusicComposition', 'name': 'One', 'lyrics': 'x',
+                  'inLanguage': ['not', 'a', 'string'], 'genre': {'weird': True}}, good]
+        with mock.patch.object(tasks, '_midhah_lyric_urls', return_value=urls), \
+                mock.patch.object(tasks, '_midhah_composition', side_effect=pages), \
+                mock.patch.object(tasks, '_create_work',
+                                  side_effect=[RuntimeError('boom'), None]) as create:
+            tasks.scrape_midhah(self.site)
+        self.assertEqual(create.call_count, 2)
+        self.assertEqual(create.call_args.kwargs['title'], 'Two')
+        self.assertEqual(create.call_args.kwargs['lyrics'], 'a line of verse')
+
+    def test_one_refusal_is_passed_over_but_several_park_the_source(self):
+        from unittest import mock
+        from . import tasks
+        from .fetching import RateLimited
+        urls = [f'https://lyrics.midhah.com/naat/{n}' for n in range(5)]
+        with mock.patch.object(tasks, '_midhah_lyric_urls', return_value=urls), \
+                mock.patch.object(tasks, '_midhah_composition',
+                                  side_effect=[RateLimited('500'), None, None, None, None]):
+            tasks.scrape_midhah(self.site)  # one refusal: carries on
+
+        with mock.patch.object(tasks, '_midhah_lyric_urls', return_value=urls), \
+                mock.patch.object(tasks, '_midhah_composition',
+                                  side_effect=RateLimited('429')) as fetch, \
+                self.assertRaises(RateLimited):
+            tasks.scrape_midhah(self.site)
+        self.assertEqual(fetch.call_count, tasks.CONSECUTIVE_REFUSALS)
+
+    def test_the_transliteration_link_is_only_followed_on_the_same_site(self):
+        from unittest import mock
+        from . import tasks
+        page = {'@type': 'MusicComposition', 'name': 'One', 'lyrics': 'verse',
+                'workTranslation': {'url': 'http://169.254.169.254/latest/meta-data'}}
+        with mock.patch.object(tasks, '_midhah_lyric_urls',
+                               return_value=['https://lyrics.midhah.com/naat/one']), \
+                mock.patch.object(tasks, '_midhah_composition', return_value=page) as fetch:
+            tasks.scrape_midhah(self.site)
+        self.assertEqual(fetch.call_count, 1)
+
+    def test_a_sitemap_index_cannot_queue_thousands_of_sitemaps(self):
+        from unittest import mock
+        from . import tasks
+        index = ''.join(f'<loc>https://site.com/sitemap-{n}.xml</loc>' for n in range(500))
+
+        def answer(url, **kwargs):
+            body = index if url.endswith('/sitemap.xml') else '<loc>https://site.com/p</loc>'
+            return mock.Mock(status_code=200, text=body)
+
+        with mock.patch.object(tasks, 'polite_get', side_effect=answer) as fetch:
+            tasks._sitemap_urls('https://site.com')
+        self.assertLessEqual(fetch.call_count, tasks.GENERIC_MAX_SITEMAPS)
+
+    def test_a_scan_that_is_not_a_page_is_not_fetched_again(self):
+        import io
+        from unittest import mock
+        from PIL import Image
+        from . import tasks
+        tiny = io.BytesIO()
+        Image.new('RGB', (20, 20)).save(tiny, 'PNG')
+        work = make_qasida(title='Scanned')
+        url = 'https://damas.nur.nu/icon.png'
+        with mock.patch.object(tasks, 'polite_get',
+                               return_value=mock.Mock(content=tiny.getvalue())) as fetch:
+            tasks._store_images(work, [url])
+            tasks._store_images(work, [url])
+        self.assertEqual(fetch.call_count, 1)
+        self.assertEqual(work.images.count(), 0)
+
+    def test_only_one_crawl_runs_at_a_time(self):
+        from unittest import mock
+        from . import tasks
+        cache.add(tasks.CRAWL_LOCK, 'someone-else', 60)
+        with mock.patch.object(tasks, '_run_crawlers') as crawl:
+            tasks.run_crawlers()
+        crawl.assert_not_called()
+        self.assertEqual(cache.get(tasks.CRAWL_LOCK), 'someone-else')
+
+    def test_a_finished_crawl_releases_its_lock(self):
+        from unittest import mock
+        from . import tasks
+        with mock.patch.object(tasks, '_run_crawlers'):
+            tasks.run_crawlers()
+        self.assertIsNone(cache.get(tasks.CRAWL_LOCK))
+
+
+class PoliteFetchTest(TestCase):
+    """The guards every crawler request passes through."""
+
+    def response(self, chunks, headers=None):
+        """A real requests response, reading its body from memory."""
+        import io
+        import requests
+        from requests.structures import CaseInsensitiveDict
+        response = requests.Response()
+        response.status_code = 200
+        response.headers = CaseInsensitiveDict(headers or {})
+        response.url = 'https://x.com/f'
+        response.raw = io.BytesIO(b''.join(chunks))
+        return response
+
+    def test_a_response_past_the_size_limit_is_abandoned(self):
+        from unittest import mock
+        from . import fetching
+        with mock.patch.object(fetching.requests, 'get',
+                               return_value=self.response([b'x' * 1024] * 20)), \
+                self.assertRaises(fetching.TooLarge):
+            fetching.polite_get('https://x.com/f', max_bytes=4096)
+
+    def test_a_declared_oversize_is_refused_before_reading(self):
+        from unittest import mock
+        from . import fetching
+        big = self.response([b'unread'], headers={'Content-Length': str(10 ** 9)})
+        with mock.patch.object(fetching.requests, 'get', return_value=big), \
+                self.assertRaises(fetching.TooLarge):
+            fetching.polite_get('https://x.com/f')
+        self.assertFalse(big._content_consumed)
+
+    def test_a_normal_response_reads_as_before(self):
+        from unittest import mock
+        from . import fetching
+        ok = self.response([b'<html>', b'</html>'], headers={'Content-Type': 'text/xml'})
+        with mock.patch.object(fetching.requests, 'get', return_value=ok):
+            self.assertEqual(fetching.polite_get('https://x.com/f').content, b'<html></html>')
+
+    def test_nothing_but_the_web_is_fetched(self):
+        import requests
+        from . import fetching
+        with self.assertRaises(requests.exceptions.InvalidSchema):
+            fetching.polite_get('file:///etc/passwd')
+
+    def test_a_nonsense_retry_after_is_not_a_crash(self):
+        from unittest import mock
+        from .fetching import _retry_after_seconds
+        for header in ('-5', 'nan', 'inf'):
+            pause = _retry_after_seconds(mock.Mock(headers={'Retry-After': header}), 0)
+            self.assertGreaterEqual(pause, 0)
+            self.assertLessEqual(pause, 60)
+
+
+class ExtractionLineTest(TestCase):
+    """Lines read out of crawled markup keep all of their words."""
+
+    def test_a_coloured_phrase_does_not_cost_the_rest_of_the_line(self):
+        from bs4 import BeautifulSoup
+        from .extract import html_to_verse
+        soup = BeautifulSoup(
+            '<div><p><span class="red">Ya Rasulallah</span> salamun alayk</p>'
+            '<p>second line</p></div>', 'html.parser')
+        verse = html_to_verse(soup.div)
+        self.assertIn('salamun alayk', verse)
+        self.assertIn('second line', verse)
+
+    def test_lines_held_in_spans_are_still_lines(self):
+        from bs4 import BeautifulSoup
+        from .extract import html_to_verse
+        soup = BeautifulSoup('<div><span>first line</span><span>second line</span></div>',
+                             'html.parser')
+        self.assertEqual(html_to_verse(soup.div).splitlines(), ['first line', 'second line'])
+
+    def test_a_divider_at_the_edge_of_a_line_adds_no_stanza_break(self):
+        from .verse_markers import normalise
+        self.assertEqual(normalise('* first line\nsecond line *'),
+                         'first line\nsecond line')

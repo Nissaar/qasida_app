@@ -173,6 +173,9 @@ CELERY_BEAT_SCHEDULE = {
     'run-crawlers-every-midnight': {
         'task': 'core.tasks.run_crawlers',
         'schedule': crontab(minute=0, hour=0),
+        # A run the worker could not pick up within a few hours - it was down,
+        # or busy - is dropped rather than started late, on top of the next.
+        'options': {'expires': 6 * 60 * 60},
     },
 }
 

@@ -6,6 +6,7 @@ import re
 import statistics
 import time
 import unicodedata
+import uuid
 from collections import Counter
 from urllib.parse import urljoin, urlsplit
 from urllib.robotparser import RobotFileParser
@@ -15,12 +16,13 @@ import pytesseract
 import requests
 from bs4 import BeautifulSoup
 from celery import shared_task
+from django.core.cache import cache
 from django.core.files.base import ContentFile
 from django.utils.text import slugify
 from PIL import Image, ImageFilter, ImageOps
 
-from .extract import extract_work
-from .fetching import BotChallenge, HEADERS, RateLimited, USER_AGENT, polite_get
+from .extract import _as_text, extract_work
+from .fetching import BotChallenge, RateLimited, USER_AGENT, polite_get
 from .models import Poet, Qasida, QasidaImage, Tag, SourceWebsite
 from .titles import split_title
 
@@ -59,6 +61,92 @@ VIEWER_CHROME = (
     'Loading...', 'Taking too long?', 'Reload document',
     'Open in new tab', 'Related Posts',
 )
+
+
+# Size limits for the two kinds of file the crawlers download whole.
+MAX_PDF_BYTES = 50 * 1024 * 1024
+MAX_SCAN_BYTES = 15 * 1024 * 1024
+
+# Pages rasterised or read from one PDF. A 300-page scanned book at OCR
+# resolution is gigabytes of pixels and hours of Tesseract inside the nightly
+# run; the editor's OCR bench stops at the same number.
+MAX_PDF_PAGES = 30
+
+# How long a scan that failed to decode, or was too small to be a page, is
+# remembered and not fetched again. Icons and error pages do not turn into
+# scans, and every nightly pass was downloading them all over again.
+REJECTED_SCAN_TTL = 30 * 24 * 60 * 60
+
+# Refusals in a row that park a source for the night. One page that answers
+# 500 forever is that page's problem, and used to stop the whole source at the
+# same place every night; several pages in a row is the host asking us to stop.
+CONSECUTIVE_REFUSALS = 3
+
+
+class _Refusals:
+    """Counts rate-limit refusals in a row, re-raising once there are too many."""
+
+    def __init__(self, limit=CONSECUTIVE_REFUSALS):
+        self.limit = limit
+        self.in_a_row = 0
+
+    def refused(self, error):
+        self.in_a_row += 1
+        if self.in_a_row >= self.limit:
+            raise error
+
+    def answered(self):
+        self.in_a_row = 0
+
+
+def _safe_source_url(url):
+    """
+    The URL if it can be stored and linked to as a work's source, else ''.
+
+    These come out of third-party pages and JSON, and are rendered as a link
+    on the work's page. Only an ordinary web address that fits the column is
+    accepted: a `javascript:` URL would run in a reader's browser, and an
+    overlong one used to fail the insert and stop the whole source.
+    """
+    url = (url or '').strip()
+    parts = urlsplit(url)
+    if parts.scheme not in ('http', 'https') or not parts.hostname or len(url) > 500:
+        return ''
+    return url
+
+
+def _same_host(url, host):
+    """
+    Whether `url` is an http(s) address on `host` itself.
+
+    Compared on the parsed hostname. A prefix test on the URL passes
+    `https://site.com.evil.tld/` and `https://site.com@10.0.0.5/`, the second
+    of which requests sends to 10.0.0.5.
+    """
+    parts = urlsplit(url or '')
+    return (parts.scheme in ('http', 'https')
+            and (parts.hostname or '').lower() == (host or '').lower())
+
+
+def _create_work(website, *, title, source_url, language, tags=(), author='',
+                 native_title='', **fields):
+    """
+    Store one crawled work and tag it.
+
+    Every field is held to the length of its column here, once, so a long
+    title from any source is shortened rather than failing the insert.
+    """
+    qasida = Qasida.objects.create(
+        title=(title or 'Untitled')[:200],
+        native_title=(native_title or '')[:200],
+        author=Poet.named(author),
+        language=(language or 'Unknown')[:50],
+        source_url=source_url,
+        source_site=website,
+        **fields,
+    )
+    _add_tags(qasida, tags)
+    return qasida
 
 
 def _arabic_len(text):
@@ -105,12 +193,12 @@ def _looks_shattered(text):
     return single_ratio > SHATTERED_SINGLE_RATIO or tatweel_ratio > SHATTERED_TATWEEL_RATIO
 
 
-def _pdf_page_pngs(pdf_bytes, dpi=PAGE_IMAGE_DPI):
-    """Rasterise every page. These images are the trustworthy record of a
-    document whose text layer cannot be read."""
+def _pdf_page_pngs(pdf_bytes, dpi=PAGE_IMAGE_DPI, limit=MAX_PDF_PAGES):
+    """Rasterise the pages, one at a time. These images are the trustworthy
+    record of a document whose text layer cannot be read."""
     doc = pymupdf.open(stream=pdf_bytes, filetype='pdf')
     try:
-        for index in range(doc.page_count):
+        for index in range(min(doc.page_count, limit)):
             yield index, doc[index].get_pixmap(dpi=dpi).tobytes('png')
     finally:
         doc.close()
@@ -132,11 +220,12 @@ def _ocr_pdf(pdf_bytes):
     Each candidate page-segmentation mode is scored and the one recovering the
     most Arabic without shattering is returned.
     """
-    pages = [png for _, png in _pdf_page_pngs(pdf_bytes, dpi=OCR_DPI)]
     best, best_key = '', None
     for config in OCR_CONFIGS:
         chunks = []
-        for png in pages:
+        # Rasterised again for each mode rather than held: a few dozen pages at
+        # OCR resolution is more memory than a worker should keep at once.
+        for _, png in _pdf_page_pngs(pdf_bytes, dpi=OCR_DPI):
             with Image.open(io.BytesIO(png)) as page_image:
                 chunks.append(pytesseract.image_to_string(
                     page_image, lang=OCR_LANGS, config=config))
@@ -320,23 +409,27 @@ def _store_images(qasida, urls):
     """
     added = 0
     for position, url in enumerate(urls):
-        if qasida.images.filter(source_url=url).exists():
+        if qasida.images.filter(source_url=url).exists() or _scan_was_rejected(url):
             continue
         try:
-            res = polite_get(url, timeout=45)
-            res.raise_for_status()
-            data = res.content
-
+            data = polite_get(url, timeout=45, max_bytes=MAX_SCAN_BYTES).content
+        except RateLimited:
+            raise
+        except Exception as e:
+            print(f"    image failed ({type(e).__name__}): {url[:90]}")
+            continue
+        try:
             with Image.open(io.BytesIO(data)) as probe:
                 probe.verify()
             with Image.open(io.BytesIO(data)) as probe:
                 width, height = probe.size
                 image_format = (probe.format or '').lower()
-
-            if width < MIN_IMAGE_PX or height < MIN_IMAGE_PX:
-                continue
         except Exception as e:
-            print(f"    image failed ({type(e).__name__}): {url[:90]}")
+            print(f"    not an image ({type(e).__name__}): {url[:90]}")
+            _remember_rejected_scan(url)
+            continue
+        if width < MIN_IMAGE_PX or height < MIN_IMAGE_PX:
+            _remember_rejected_scan(url)
             continue
 
         extension = 'jpg' if image_format in ('jpeg', 'jpg') else (image_format or 'jpg')
@@ -352,6 +445,30 @@ def _store_images(qasida, urls):
         record.image.save(f"{stem}-{digest}.{extension}", ContentFile(data), save=True)
         added += 1
     return added
+
+
+def _rejected_scan_key(url):
+    return f"scan-rejected:{hashlib.sha1(url.encode('utf-8')).hexdigest()}"
+
+
+def _scan_was_rejected(url):
+    try:
+        return bool(cache.get(_rejected_scan_key(url)))
+    except Exception:
+        return False  # no cache, no memory: fetch it as before
+
+
+def _remember_rejected_scan(url):
+    """
+    Note a URL that turned out not to be a scan, so it is not fetched nightly.
+
+    Only for a file that arrived and was not a usable page. A network failure
+    is not remembered, because the next attempt may well succeed.
+    """
+    try:
+        cache.set(_rejected_scan_key(url), 1, REJECTED_SCAN_TTL)
+    except Exception:
+        pass
 
 
 def _add_tags(qasida, names):
@@ -412,19 +529,22 @@ def scrape_mynaatbook(website):
             stats['no_lyrics'] += 1
             print(f"  SKIP (no lyrics in bundle): {name}")
             continue
+        if not _safe_source_url(url):
+            stats['bad_url'] += 1
+            continue
 
-        qasida = Qasida.objects.create(
-            title=name,
-            lyrics=lyrics,
-            source_url=url,
-            source_site=website,
-            language='Urdu',
-        )
-        _add_tags(qasida, ['naat', 'urdu'])
+        try:
+            _create_work(website, title=name, lyrics=lyrics, source_url=url,
+                         language='Urdu', tags=['naat', 'urdu'])
+        except Exception as e:
+            stats['errors'] += 1
+            print(f"  failed ({type(e).__name__}): {name[:60]}")
+            continue
         stats['saved'] += 1
 
     print(f"mynaatbook done: {stats['saved']} saved, {stats['already_present']} already present, "
-          f"{stats['no_lyrics']} without lyrics.")
+          f"{stats['no_lyrics']} without lyrics, {stats['bad_url']} with an unusable URL, "
+          f"{stats['errors']} errors.")
 
 
 def scrape_desertechoblog(website):
@@ -442,15 +562,19 @@ def scrape_desertechoblog(website):
         return
 
     soup = BeautifulSoup(response.content, 'html.parser')
-    # Find all article/post links on the homepage
+    host = urlsplit(website.url).hostname
+    # Find all article/post links on the homepage. Only the blog's own: a
+    # dated link to anywhere else is somebody else's post.
     post_links = [a['href'] for a in soup.select('a')
-                  if a.has_attr('href') and ('/201' in a['href'] or '/202' in a['href'])]
+                  if a.has_attr('href') and ('/201' in a['href'] or '/202' in a['href'])
+                  and _same_host(a['href'], host)]
     post_links = list(set(post_links))
 
     if not post_links:
         # Fallback if selectors above didn't catch anything, just grab links in the content area
         post_links = [a['href'] for a in soup.select('div#content a, main#main a')
-                      if a.has_attr('href') and '/20' in a['href']]
+                      if a.has_attr('href') and '/20' in a['href']
+                      and _same_host(a['href'], host)]
         post_links = list(set(post_links))
 
     print(f"Found {len(post_links)} links on desertechoblog.")
@@ -460,11 +584,12 @@ def scrape_desertechoblog(website):
         if Qasida.objects.filter(source_url=link).exists():
             stats['already_present'] += 1
             continue
+        if not _safe_source_url(link):
+            stats['bad_url'] += 1
+            continue
 
-        time.sleep(2)  # Rate limit
         try:
             detail_res = polite_get(link, timeout=20)
-            detail_res.raise_for_status()
             detail_soup = BeautifulSoup(detail_res.content, 'html.parser')
 
             title_tag = detail_soup.select_one('h1.entry-title')
@@ -485,14 +610,9 @@ def scrape_desertechoblog(website):
                 print(f"  SKIP (empty content): {title}")
                 continue
 
-            qasida = Qasida.objects.create(
-                title=title,
-                lyrics=lyrics,
-                source_url=link,
-                source_site=website,
-                language='Arabic',  # Assuming mostly Arabic Qasidas
-            )
-            _add_tags(qasida, ['qasida', 'arabic'])
+            _create_work(website, title=title, lyrics=lyrics, source_url=link,
+                         language='Arabic',  # Assuming mostly Arabic Qasidas
+                         tags=['qasida', 'arabic'])
             stats['saved'] += 1
         except Exception as e:
             stats['errors'] += 1
@@ -770,8 +890,7 @@ def _fetch_pdf_text(url):
     The bytes are kept so a document whose text layer turns out to be
     unreadable can be rasterised and OCR'd instead of discarded.
     """
-    res = polite_get(url, timeout=45)
-    res.raise_for_status()
+    res = polite_get(url, timeout=45, max_bytes=MAX_PDF_BYTES)
     if not res.content.startswith(b'%PDF'):
         return None, ''
     return res.content, _pdf_text(res.content)
@@ -883,6 +1002,155 @@ def _strip_viewer_chrome(text):
     return "\n".join(lines).strip()
 
 
+def _import_damas_post(website, post, term_slugs, stats):
+    """Store one damas post, or top up the scans of one already held."""
+    stats['seen'] += 1
+    link = post.get('link') or ''
+    raw_title = _clean_title(post.get('title', {}).get('rendered', ''))
+    title, native_title, author = split_title(raw_title)
+    title = title or 'Unknown Title'
+
+    if not link:
+        stats['no_link'] += 1
+        return
+    if not _safe_source_url(link):
+        stats['bad_url'] += 1
+        return
+
+    body = post.get('content', {}).get('rendered', '') or ''
+    image_urls = _image_urls(body)
+
+    existing = Qasida.objects.filter(source_url=link).first()
+    if existing:
+        # Still fetch the scans - rows saved before images were collected
+        # need backfilling, and a post can gain pages later.
+        stats['already_present'] += 1
+        added = _store_images(existing, image_urls)
+        if added:
+            stats['images_backfilled'] += added
+            print(f"  +{added} scan(s) for existing: {title[:60]}")
+        return
+
+    soup = BeautifulSoup(body, 'html.parser')
+
+    # 1. A handful of legacy posts still carry the text inline.
+    lyrics, origin = '', ''
+    pdf_bytes = None
+    legacy = soup.select_one('div.arabic')
+    if legacy:
+        lyrics, origin = legacy.get_text(separator='\n', strip=True), 'inline div.arabic'
+
+    # 2. Otherwise pull the text layer out of the linked PDF.
+    if _arabic_len(lyrics) < MIN_ARABIC_CHARS:
+        pdf_url = _pick_arabic_pdf(list(dict.fromkeys(PDF_URL_RE.findall(body))))
+        if pdf_url:
+            try:
+                pdf_bytes, candidate = _fetch_pdf_text(pdf_url)
+                if _arabic_len(candidate) > _arabic_len(lyrics):
+                    lyrics, origin = candidate, f"pdf {pdf_url.rsplit('/', 1)[-1]}"
+            except RateLimited:
+                raise
+            except Exception as e:
+                stats['pdf_errors'] += 1
+                print(f"  PDF failed for {title[:60]}: {type(e).__name__}")
+
+    # 3. Last resort: whatever text the post itself renders.
+    if _arabic_len(lyrics) < MIN_ARABIC_CHARS:
+        inline = _strip_viewer_chrome(soup.get_text(separator='\n', strip=True))
+        if _arabic_len(inline) > _arabic_len(lyrics):
+            lyrics, origin = inline, 'inline post text'
+
+    # When there is no machine-readable text, the scans are the content:
+    # keep the post and show the images rather than dropping it.
+    scan_only = _arabic_len(lyrics) < MIN_ARABIC_CHARS
+    if scan_only and not image_urls:
+        stats['no_text'] += 1
+        print(f"  SKIP (no lyrics and no scans): {title[:70]}")
+        return
+
+    # Real taxonomy from the site instead of two hardcoded tags.
+    tag_names = ['qasida']
+    for taxonomy in DAMAS_TAXONOMIES:
+        for term_id in post.get(taxonomy) or []:
+            name = term_slugs.get((taxonomy, term_id))
+            if name:
+                tag_names.append(name)
+
+    languages = [term_slugs.get(('language', tid)) for tid in post.get('language') or []]
+    languages = [lang for lang in languages if lang]
+    if 'arabic' in languages:
+        language = 'Arabic'
+    elif languages:
+        language = languages[0].title()
+    else:
+        language = 'Arabic'
+
+    # A readable-looking text layer can still be shattered glyph soup. When
+    # it is, rasterise the pages (the trustworthy record) and OCR them.
+    text_quality = Qasida.TEXT_OK
+    if pdf_bytes and _looks_shattered(lyrics):
+        text_quality = Qasida.TEXT_POOR
+        rebuilt = ''
+        try:
+            rebuilt = _reassemble_pdf_text(pdf_bytes)
+        except Exception as e:
+            print(f"  reassembly failed for {title[:60]}: {type(e).__name__}")
+        if _reassembly_is_improvement(rebuilt, lyrics):
+            lyrics, origin = rebuilt, 'reflowed'
+            text_quality = Qasida.TEXT_OCR
+        else:
+            transcript = ''
+            try:
+                transcript = _ocr_pdf(pdf_bytes)
+            except Exception as e:
+                print(f"  OCR failed for {title[:60]}: {type(e).__name__}")
+            if _ocr_is_improvement(transcript, lyrics):
+                lyrics, origin = transcript, 'ocr'
+                text_quality = Qasida.TEXT_OCR
+        stats['shattered'] += 1
+
+    if scan_only:
+        tag_names.append(SCAN_ONLY_TAG)
+    if text_quality != Qasida.TEXT_OK:
+        tag_names.append(UNRELIABLE_TEXT_TAG)
+
+    qasida = _create_work(
+        website,
+        title=title,
+        native_title=native_title,
+        # A name from a source becomes a record of that poet, reusing
+        # one we already hold rather than repeating the name per work.
+        author=author,
+        lyrics=lyrics if not scan_only else _strip_viewer_chrome(
+            soup.get_text(separator='\n', strip=True)),
+        source_url=link,
+        language=language,
+        text_quality=text_quality,
+        tags=tag_names,
+    )
+
+    added = _store_images(qasida, image_urls)
+    if text_quality != Qasida.TEXT_OK and pdf_bytes:
+        # Without a reliable transcription the rendered pages are the content.
+        added += _store_page_images(qasida, pdf_bytes)
+    stats['images_saved'] += added
+    if scan_only:
+        if not added:
+            # Every candidate failed to decode, so there is nothing to show.
+            qasida.delete()
+            stats['image_fetch_failed'] += 1
+            print(f"  SKIP (scans unreadable): {title[:70]}")
+            return
+        stats['saved_scan_only'] += 1
+        origin = f"{added} scan(s)"
+    else:
+        stats['saved'] += 1
+        if added:
+            origin = f"{origin} + {added} scan(s)"
+    print(f"Scraped and saved [{origin}]: {title[:70]}")
+
+
+
 def scrape_damas(website):
     """Scraper for damas.nur.nu, driven by its WordPress REST API."""
     print(f"Scraping damas: {website.url}")
@@ -892,154 +1160,31 @@ def scrape_damas(website):
     print(f"Loaded {len(term_slugs)} damas taxonomy terms.")
 
     stats = Counter()
+    refusals = _Refusals()
     for post in _damas_posts(api_base):
-        stats['seen'] += 1
-        link = post.get('link') or ''
-        raw_title = _clean_title(post.get('title', {}).get('rendered', ''))
-        title, native_title, author = split_title(raw_title)
-        title = title or 'Unknown Title'
-
-        if not link:
-            stats['no_link'] += 1
-            continue
-
-        body = post.get('content', {}).get('rendered', '') or ''
-        image_urls = _image_urls(body)
-
-        existing = Qasida.objects.filter(source_url=link).first()
-        if existing:
-            # Still fetch the scans - rows saved before images were collected
-            # need backfilling, and a post can gain pages later.
-            stats['already_present'] += 1
-            added = _store_images(existing, image_urls)
-            if added:
-                stats['images_backfilled'] += added
-                print(f"  +{added} scan(s) for existing: {title[:60]}")
-            continue
-
-        soup = BeautifulSoup(body, 'html.parser')
-
-        # 1. A handful of legacy posts still carry the text inline.
-        lyrics, origin = '', ''
-        pdf_bytes = None
-        legacy = soup.select_one('div.arabic')
-        if legacy:
-            lyrics, origin = legacy.get_text(separator='\n', strip=True), 'inline div.arabic'
-
-        # 2. Otherwise pull the text layer out of the linked PDF.
-        if _arabic_len(lyrics) < MIN_ARABIC_CHARS:
-            pdf_url = _pick_arabic_pdf(list(dict.fromkeys(PDF_URL_RE.findall(body))))
-            if pdf_url:
-                time.sleep(1)
-                try:
-                    pdf_bytes, candidate = _fetch_pdf_text(pdf_url)
-                    if _arabic_len(candidate) > _arabic_len(lyrics):
-                        lyrics, origin = candidate, f"pdf {pdf_url.rsplit('/', 1)[-1]}"
-                except Exception as e:
-                    stats['pdf_errors'] += 1
-                    print(f"  PDF failed for {title[:60]}: {type(e).__name__}")
-
-        # 3. Last resort: whatever text the post itself renders.
-        if _arabic_len(lyrics) < MIN_ARABIC_CHARS:
-            inline = _strip_viewer_chrome(soup.get_text(separator='\n', strip=True))
-            if _arabic_len(inline) > _arabic_len(lyrics):
-                lyrics, origin = inline, 'inline post text'
-
-        # When there is no machine-readable text, the scans are the content:
-        # keep the post and show the images rather than dropping it.
-        scan_only = _arabic_len(lyrics) < MIN_ARABIC_CHARS
-        if scan_only and not image_urls:
-            stats['no_text'] += 1
-            print(f"  SKIP (no lyrics and no scans): {title[:70]}")
-            continue
-
-        # Real taxonomy from the site instead of two hardcoded tags.
-        tag_names = ['qasida']
-        for taxonomy in DAMAS_TAXONOMIES:
-            for term_id in post.get(taxonomy) or []:
-                name = term_slugs.get((taxonomy, term_id))
-                if name:
-                    tag_names.append(name)
-
-        languages = [term_slugs.get(('language', tid)) for tid in post.get('language') or []]
-        languages = [lang for lang in languages if lang]
-        if 'arabic' in languages:
-            language = 'Arabic'
-        elif languages:
-            language = languages[0].title()
-        else:
-            language = 'Arabic'
-
-        # A readable-looking text layer can still be shattered glyph soup. When
-        # it is, rasterise the pages (the trustworthy record) and OCR them.
-        text_quality = Qasida.TEXT_OK
-        if pdf_bytes and _looks_shattered(lyrics):
-            text_quality = Qasida.TEXT_POOR
-            rebuilt = ''
-            try:
-                rebuilt = _reassemble_pdf_text(pdf_bytes)
-            except Exception as e:
-                print(f"  reassembly failed for {title[:60]}: {type(e).__name__}")
-            if _reassembly_is_improvement(rebuilt, lyrics):
-                lyrics, origin = rebuilt, 'reflowed'
-                text_quality = Qasida.TEXT_OCR
-            else:
-                transcript = ''
-                try:
-                    transcript = _ocr_pdf(pdf_bytes)
-                except Exception as e:
-                    print(f"  OCR failed for {title[:60]}: {type(e).__name__}")
-                if _ocr_is_improvement(transcript, lyrics):
-                    lyrics, origin = transcript, 'ocr'
-                    text_quality = Qasida.TEXT_OCR
-            stats['shattered'] += 1
-
-        if scan_only:
-            tag_names.append(SCAN_ONLY_TAG)
-        if text_quality != Qasida.TEXT_OK:
-            tag_names.append(UNRELIABLE_TEXT_TAG)
-
-        qasida = Qasida.objects.create(
-            title=title,
-            native_title=native_title,
-            # A name from a source becomes a record of that poet, reusing
-            # one we already hold rather than repeating the name per work.
-            author=Poet.named(author),
-            lyrics=lyrics if not scan_only else _strip_viewer_chrome(
-                soup.get_text(separator='\n', strip=True)),
-            source_url=link,
-            source_site=website,
-            language=language,
-            text_quality=text_quality,
-        )
-        _add_tags(qasida, tag_names)
-
-        added = _store_images(qasida, image_urls)
-        if text_quality != Qasida.TEXT_OK and pdf_bytes:
-            # Without a reliable transcription the rendered pages are the content.
-            added += _store_page_images(qasida, pdf_bytes)
-        stats['images_saved'] += added
-        if scan_only:
-            if not added:
-                # Every candidate failed to decode, so there is nothing to show.
-                qasida.delete()
-                stats['image_fetch_failed'] += 1
-                print(f"  SKIP (scans unreadable): {title[:70]}")
-                continue
-            stats['saved_scan_only'] += 1
-            origin = f"{added} scan(s)"
-        else:
-            stats['saved'] += 1
-            if added:
-                origin = f"{origin} + {added} scan(s)"
-        print(f"Scraped and saved [{origin}]: {title[:70]}")
+        try:
+            _import_damas_post(website, post, term_slugs, stats)
+            refusals.answered()
+        except RateLimited as e:
+            stats['refused'] += 1
+            print(f"  refused: {e}")
+            refusals.refused(e)
+        except BotChallenge:
+            raise
+        except Exception as e:
+            # One post the code did not foresee is logged and passed over, so
+            # it cannot stop every post after it, night after night.
+            stats['errors'] += 1
+            print(f"  failed ({type(e).__name__}): {(post.get('link') or '')[:90]}")
 
     print(f"damas done: {stats['seen']} posts seen, {stats['saved']} saved with text, "
           f"{stats['saved_scan_only']} saved as scans only, {stats['already_present']} already present, "
           f"{stats['images_saved'] + stats['images_backfilled']} scans stored "
           f"({stats['images_backfilled']} backfilled), {stats['no_text']} without text or scans, "
           f"{stats['image_fetch_failed']} with unreadable scans, {stats['shattered']} with an "
-          f"unreadable text layer (rasterised + OCR'd), {stats['pdf_errors']} PDF errors.")
+          f"unreadable text layer (rasterised + OCR'd), {stats['pdf_errors']} PDF errors, "
+          f"{stats['bad_url']} with an unusable URL, {stats['refused']} refused, "
+          f"{stats['errors']} errors.")
 
 
 # --- lyrics.midhah.com ------------------------------------------------------
@@ -1088,6 +1233,82 @@ def _midhah_lyric_urls(base_url):
     return [u for u in dict.fromkeys(locations) if pattern.match(u)]
 
 
+def _ld_url(value):
+    """A URL out of a JSON-LD field that may be a string, an object or a list."""
+    if isinstance(value, list):
+        value = value[0] if value else ''
+    if isinstance(value, dict):
+        value = value.get('url') or ''
+    return value if isinstance(value, str) else ''
+
+
+def _import_midhah_page(website, url, host, stats):
+    """
+    Store the work on one midhah lyric page.
+
+    schema.org lets every field used here be a string, an object or a list,
+    and a page that picked a different one than expected used to raise out
+    of the crawl. They are read through _as_text, which accepts all three.
+    """
+    if not _safe_source_url(url):
+        stats['bad_url'] += 1
+        return
+    try:
+        composition = _midhah_composition(url)
+    except RateLimited:
+        raise  # counted by the caller, which parks the source if it keeps up
+    except Exception as e:
+        stats['errors'] += 1
+        print(f"  fetch failed ({type(e).__name__}): {url}")
+        return
+
+    if not composition:
+        stats['no_metadata'] += 1
+        print(f"  SKIP (no JSON-LD composition): {url}")
+        return
+
+    lyrics = _as_text(composition.get('lyrics'))
+    if not lyrics:
+        stats['no_lyrics'] += 1
+        print(f"  SKIP (no lyric text): {url}")
+        return
+
+    # The Latin version lives on its own page, keyed by workTranslation. Only
+    # followed on midhah itself: it is a link out of the page's own data.
+    transliteration = ''
+    translation_url = _ld_url(composition.get('workTranslation'))
+    if translation_url and _same_host(translation_url, host):
+        try:
+            other = _midhah_composition(translation_url)
+            if other:
+                transliteration = _as_text(other.get('lyrics'))
+        except RateLimited:
+            raise
+        except Exception as e:
+            stats['translation_errors'] += 1
+            print(f"  transliteration failed ({type(e).__name__}): {url}")
+
+    genre = _as_text(composition.get('genre'))
+    poet = _as_text(composition.get('lyricist'))
+    code = _as_text(composition.get('inLanguage')).lower()
+    language = MIDHAH_LANGUAGES.get(code, code.title() or 'Urdu')
+
+    title, native_title, author = split_title(_clean_title(_as_text(composition.get('name'))))
+
+    tag_names = [language.lower()]
+    if genre:
+        tag_names.append(slugify(genre))
+    if transliteration:
+        tag_names.append('transliterated')
+    _create_work(website, title=title, native_title=native_title,
+                 author=poet or author, language=language, lyrics=lyrics,
+                 transliteration=transliteration, source_url=url, tags=tag_names)
+
+    stats['saved'] += 1
+    if transliteration:
+        stats['with_transliteration'] += 1
+
+
 def scrape_midhah(website, limit=None):
     """
     Scraper for lyrics.midhah.com, driven by its JSON-LD and sitemap.
@@ -1104,7 +1325,9 @@ def scrape_midhah(website, limit=None):
     known = set(Qasida.objects.filter(source_site=website)
                 .values_list('source_url', flat=True))
 
+    host = urlsplit(website.url).hostname
     stats = Counter()
+    refusals = _Refusals()
     for url in urls:
         if limit is not None and stats['saved'] >= limit:
             print(f"Stopping at the {limit}-page limit for this pass.")
@@ -1113,73 +1336,26 @@ def scrape_midhah(website, limit=None):
             stats['already_present'] += 1
             continue
         try:
-            composition = _midhah_composition(url)
-        except RateLimited:
-            raise  # let run_crawlers park this source for the next run
+            _import_midhah_page(website, url, host, stats)
+            refusals.answered()
+        except RateLimited as e:
+            stats['refused'] += 1
+            print(f"  refused: {url} ({e})")
+            refusals.refused(e)
+        except BotChallenge:
+            raise
         except Exception as e:
+            # One page shaped in a way nobody foresaw is logged and passed
+            # over rather than stopping the source at it every night.
             stats['errors'] += 1
-            print(f"  fetch failed ({type(e).__name__}): {url}")
-            continue
-
-        if not composition:
-            stats['no_metadata'] += 1
-            print(f"  SKIP (no JSON-LD composition): {url}")
-            continue
-
-        lyrics = (composition.get('lyrics') or {}).get('text', '').strip()
-        if not lyrics:
-            stats['no_lyrics'] += 1
-            print(f"  SKIP (no lyric text): {url}")
-            continue
-
-        # The Latin version lives on its own page, keyed by workTranslation.
-        transliteration = ''
-        translation = composition.get('workTranslation') or {}
-        if translation.get('url'):
-            try:
-                other = _midhah_composition(translation['url'])
-                if other:
-                    transliteration = (other.get('lyrics') or {}).get('text', '').strip()
-            except RateLimited:
-                raise
-            except Exception as e:
-                stats['translation_errors'] += 1
-                print(f"  transliteration failed ({type(e).__name__}): {url}")
-
-        genre = (composition.get('genre') or '').strip()
-        poet = ((composition.get('lyricist') or {}).get('name') or '').strip()
-        code = (composition.get('inLanguage') or '').strip().lower()
-        language = MIDHAH_LANGUAGES.get(code, code.title() or 'Urdu')
-
-        title, native_title, author = split_title(_clean_title(composition.get('name', '')))
-
-        qasida = Qasida.objects.create(
-            title=title or 'Untitled',
-            native_title=native_title,
-            author=Poet.named(poet or author),
-            language=language,
-            lyrics=lyrics,
-            transliteration=transliteration,
-            source_url=url,
-            source_site=website,
-        )
-
-        tag_names = [language.lower()]
-        if genre:
-            tag_names.append(slugify(genre))
-        if transliteration:
-            tag_names.append('transliterated')
-        _add_tags(qasida, tag_names)
-
-        stats['saved'] += 1
-        if transliteration:
-            stats['with_transliteration'] += 1
+            print(f"  failed ({type(e).__name__}): {url}")
 
     print(f"midhah done: {stats['saved']} saved "
           f"({stats['with_transliteration']} with a transliteration), "
           f"{stats['already_present']} already present, {stats['no_metadata']} without JSON-LD, "
           f"{stats['no_lyrics']} without lyric text, {stats['errors']} fetch errors, "
-          f"{stats['translation_errors']} transliteration errors.")
+          f"{stats['translation_errors']} transliteration errors, {stats['refused']} refused, "
+          f"{stats['bad_url']} with an unusable URL.")
 
 
 # --- generic source ---------------------------------------------------------
@@ -1192,6 +1368,7 @@ def scrape_midhah(website, limit=None):
 # Ceilings so a badly chosen start URL cannot crawl forever.
 GENERIC_MAX_PAGES = 400
 GENERIC_MAX_DISCOVERY = 2000
+GENERIC_MAX_SITEMAPS = 20
 
 # Paths that are never a single work.
 GENERIC_SKIP_RE = re.compile(
@@ -1222,6 +1399,11 @@ def _sitemap_urls(root):
     collected = []
     queue = [f"{root}/sitemap.xml"]
     seen = set()
+    host = urlsplit(root).hostname
+    # Counted as they are queued, not as they are read: an index listing
+    # thousands of sub-sitemaps used to queue every one while this was still
+    # at one, and then spend hours reading them.
+    sitemaps_queued = 1
     while queue and len(collected) < GENERIC_MAX_DISCOVERY:
         target = queue.pop(0)
         if target in seen:
@@ -1237,16 +1419,32 @@ def _sitemap_urls(root):
             continue
         locations = re.findall(r'<loc>\s*([^<\s]+)\s*</loc>', body.text)
         for location in locations:
-            if location.endswith('.xml') and len(seen) < 20:
-                queue.append(location)
+            if not _same_host(location, host):
+                continue
+            if location.endswith('.xml'):
+                if sitemaps_queued < GENERIC_MAX_SITEMAPS:
+                    queue.append(location)
+                    sitemaps_queued += 1
             else:
                 collected.append(location)
     return collected
 
 
+# Marks a page the link crawl fetched but could not extract, so the import
+# fetches it again and reports the failure in its own count.
+_NOT_EXTRACTED = object()
+
+
 def _crawl_links(root, start_url, robots, budget):
-    """Breadth-first link discovery, used when there is no sitemap."""
-    found, seen, queue = [], {start_url}, [start_url]
+    """
+    Breadth-first link discovery, used when there is no sitemap.
+
+    Returns the pages found, each with what extraction made of it, so the
+    import that follows does not download every page a second time. Only the
+    small extracted result is kept, not the page.
+    """
+    host = urlsplit(root).hostname
+    found, seen, queue = {}, {start_url}, [start_url]
     while queue and len(found) < budget:
         current = queue.pop(0)
         try:
@@ -1255,11 +1453,14 @@ def _crawl_links(root, start_url, robots, budget):
             raise
         except Exception:
             continue
-        found.append(current)
+        try:
+            found[current] = extract_work(page.text)
+        except Exception:
+            found[current] = _NOT_EXTRACTED
         soup = BeautifulSoup(page.content, 'html.parser')
         for anchor_tag in soup.select('a[href]'):
             link = urljoin(current, anchor_tag['href']).split('#')[0]
-            if not link.startswith(root) or link in seen:
+            if not _same_host(link, host) or link in seen:
                 continue
             if GENERIC_SKIP_RE.search(link) or not robots.can_fetch(USER_AGENT, link):
                 continue
@@ -1267,6 +1468,42 @@ def _crawl_links(root, start_url, robots, budget):
             if len(seen) < GENERIC_MAX_DISCOVERY:
                 queue.append(link)
     return found
+
+
+def _import_generic_page(website, url, work, stats):
+    """Store the work on one page, fetching it unless the link crawl already did."""
+    if not _safe_source_url(url):
+        stats['bad_url'] += 1
+        return
+    if work is _NOT_EXTRACTED:
+        try:
+            page = polite_get(url, timeout=30)
+        except RateLimited:
+            raise
+        except Exception:
+            stats['fetch_errors'] += 1
+            return
+        try:
+            work = extract_work(page.text)
+        except Exception as e:
+            stats['extract_errors'] += 1
+            print(f"  extract failed ({type(e).__name__}): {url}")
+            return
+
+    if not work:
+        stats['nothing_found'] += 1
+        return
+
+    title, native_title, author = split_title(_clean_title(work['title']))
+    language = work['language'] or ('Arabic' if _arabic_len(work['lyrics']) > 40 else '')
+    names = [slugify(work['genre'])] if work['genre'] else []
+    if language:
+        names.append(slugify(language))
+    _create_work(website, title=title, native_title=native_title,
+                 author=work['author'] or author, language=language,
+                 lyrics=work['lyrics'], source_url=url, tags=names)
+    stats['saved'] += 1
+    stats[f"via_{work['via']}"] += 1
 
 
 def scrape_generic(website, limit=None):
@@ -1280,17 +1517,21 @@ def scrape_generic(website, limit=None):
         print(f"  robots.txt disallows {website.url}; nothing crawled.")
         return
 
+    host = urlsplit(root).hostname
+    extracted = {}
     candidates = [u for u in _sitemap_urls(root)
-                  if u.startswith(root) and not GENERIC_SKIP_RE.search(u)
+                  if _same_host(u, host) and not GENERIC_SKIP_RE.search(u)
                   and robots.can_fetch(USER_AGENT, u)]
     if candidates:
         print(f"  sitemap gave {len(candidates)} candidate pages")
     else:
-        candidates = _crawl_links(root, website.url, robots, GENERIC_MAX_PAGES)
+        extracted = _crawl_links(root, website.url, robots, GENERIC_MAX_PAGES)
+        candidates = list(extracted)
         print(f"  no usable sitemap; link crawl found {len(candidates)} pages")
 
     ceiling = limit if limit is not None else GENERIC_MAX_PAGES
     stats = Counter()
+    refusals = _Refusals()
     for url in candidates:
         if stats['saved'] >= ceiling:
             print(f"  stopping at {ceiling} saved works for this pass")
@@ -1299,46 +1540,22 @@ def scrape_generic(website, limit=None):
             stats['already_present'] += 1
             continue
         try:
-            page = polite_get(url, timeout=30)
-        except RateLimited:
+            _import_generic_page(website, url, extracted.get(url, _NOT_EXTRACTED), stats)
+            refusals.answered()
+        except RateLimited as e:
+            stats['refused'] += 1
+            refusals.refused(e)
+        except BotChallenge:
             raise
         except Exception as e:
-            stats['fetch_errors'] += 1
-            continue
-
-        try:
-            work = extract_work(page.text)
-        except Exception as e:
-            stats['extract_errors'] += 1
-            print(f"  extract failed ({type(e).__name__}): {url}")
-            continue
-
-        if not work:
-            stats['nothing_found'] += 1
-            continue
-
-        title, native_title, author = split_title(_clean_title(work['title']))
-        language = work['language'] or ('Arabic' if _arabic_len(work['lyrics']) > 40 else '')
-        qasida = Qasida.objects.create(
-            title=(title or 'Untitled')[:200],
-            native_title=native_title[:200],
-            author=Poet.named((work['author'] or author)[:200]),
-            language=(language or 'Unknown')[:50],
-            lyrics=work['lyrics'],
-            source_url=url,
-            source_site=website,
-        )
-        names = [slugify(work['genre'])] if work['genre'] else []
-        if language:
-            names.append(slugify(language))
-        _add_tags(qasida, names)
-        stats['saved'] += 1
-        stats[f"via_{work['via']}"] += 1
+            stats['errors'] += 1
+            print(f"  failed ({type(e).__name__}): {url}")
 
     print(f"generic done for {website.name}: {stats['saved']} saved "
           f"(json-ld {stats['via_json-ld']}, markup {stats['via_markup']}), "
           f"{stats['already_present']} already present, {stats['nothing_found']} with no work found, "
-          f"{stats['fetch_errors']} fetch errors, {stats['extract_errors']} extract errors.")
+          f"{stats['fetch_errors']} fetch errors, {stats['extract_errors']} extract errors, "
+          f"{stats['refused']} refused, {stats['errors']} errors.")
 
 
 # --- Internet Archive snapshots --------------------------------------------
@@ -1434,7 +1651,7 @@ def scrape_wayback(website, limit=None, refresh=False):
         try:
             page = polite_get(snapshot, timeout=90)
             throttled = 0
-        except RateLimited as e:
+        except RateLimited:
             # The archive throttles in bursts. Wait longer and carry on rather
             # than losing the rest of the import; give up only if it keeps
             # refusing, and the run is resumable either way.
@@ -1454,55 +1671,61 @@ def scrape_wayback(website, limit=None, refresh=False):
             continue
 
         try:
-            work = extract_work(page.text)
+            _import_wayback_page(website, url, page, existing, stats)
         except Exception as e:
-            stats['extract_errors'] += 1
-            continue
-
-        if not work:
-            stats['nothing_found'] += 1
-            continue
-
-        title, native_title, author = split_title(_clean_title(work['title']))
-        language = work['language'] or ('Arabic' if _arabic_len(work['lyrics']) > 40 else 'Unknown')
-
-        if existing is not None:
-            # Only the extracted text is refreshed; anything an editor set is
-            # left alone, and the row keeps its review state.
-            row = Qasida.objects.get(pk=existing)
-            before = len([l for l in row.lyrics.splitlines() if l.strip()])
-            after = len([l for l in work['lyrics'].splitlines() if l.strip()])
-            if after > before:
-                row.lyrics = work['lyrics']
-                row.save(update_fields=['lyrics', 'search_text'])
-                stats['refreshed'] += 1
-                print(f"  refreshed {row.pk}: {before} -> {after} lines")
-            else:
-                stats['refresh_no_gain'] += 1
-            continue
-
-        qasida = Qasida.objects.create(
-            title=(title or 'Untitled')[:200],
-            native_title=native_title[:200],
-            author=Poet.named((work['author'] or author)[:200]),
-            language=language[:50],
-            lyrics=work['lyrics'],
-            source_url=url,
-            source_site=website,
-        )
-        names = ['from-archive']
-        if work['genre']:
-            names.append(slugify(work['genre']))
-        if language and language != 'Unknown':
-            names.append(slugify(language))
-        _add_tags(qasida, names)
-        stats['saved'] += 1
+            stats['errors'] += 1
+            print(f"  failed ({type(e).__name__}): {url}")
 
     print(f"archive import for {website.name}: {stats['saved']} saved, "
           f"{stats['already_present']} already present, {stats['refreshed']} refreshed, "
           f"{stats['refresh_no_gain']} refreshed with no gain, "
           f"{stats['nothing_found']} with no work found, {stats['throttled']} throttled, "
-          f"{stats['fetch_errors']} fetch errors, {stats['extract_errors']} extract errors.")
+          f"{stats['fetch_errors']} fetch errors, {stats['extract_errors']} extract errors, "
+          f"{stats['errors']} errors.")
+
+
+def _import_wayback_page(website, url, page, existing, stats):
+    """Store, or refresh, the work read from one archived snapshot."""
+    try:
+        work = extract_work(page.text)
+    except Exception:
+        stats['extract_errors'] += 1
+        return
+
+    if not work:
+        stats['nothing_found'] += 1
+        return
+
+    title, native_title, author = split_title(_clean_title(work['title']))
+    language = work['language'] or ('Arabic' if _arabic_len(work['lyrics']) > 40 else 'Unknown')
+
+    if existing is not None:
+        # Only the extracted text is refreshed; anything an editor set is
+        # left alone, and the row keeps its review state.
+        row = Qasida.objects.get(pk=existing)
+        before = len([l for l in row.lyrics.splitlines() if l.strip()])
+        after = len([l for l in work['lyrics'].splitlines() if l.strip()])
+        if after > before:
+            row.lyrics = work['lyrics']
+            row.save(update_fields=['lyrics', 'search_text'])
+            stats['refreshed'] += 1
+            print(f"  refreshed {row.pk}: {before} -> {after} lines")
+        else:
+            stats['refresh_no_gain'] += 1
+        return
+
+    if not _safe_source_url(url):
+        stats['bad_url'] += 1
+        return
+    names = ['from-archive']
+    if work['genre']:
+        names.append(slugify(work['genre']))
+    if language and language != 'Unknown':
+        names.append(slugify(language))
+    _create_work(website, title=title, native_title=native_title,
+                 author=work['author'] or author, language=language,
+                 lyrics=work['lyrics'], source_url=url, tags=names)
+    stats['saved'] += 1
 
 
 # --- WordPress REST API source ----------------------------------------------
@@ -1648,26 +1871,34 @@ def scrape_wordpress_api(website, limit=None):
                 print(f"  SKIP (no text): {link}")
                 continue
 
-            name, native_title, author = split_title(title)
-            qasida = Qasida.objects.create(
-                title=name or 'Untitled',
-                native_title=native_title,
-                # The site credits performers rather than poets, and a
-                # performer is not the author, so this is left for a reviewer
-                # rather than guessed from the URL.
-                author=Poet.named(author),
-                language='Urdu',
-                lyrics='',
-                transliteration=body,
-                source_url=link,
-                source_site=website,
-            )
+            if not _safe_source_url(link):
+                stats['bad_url'] += 1
+                continue
 
+            name, native_title, author = split_title(title)
             tag_names = ['urdu', 'transliterated', NO_ORIGINAL_TAG, source_tag]
             tag_names += [slugify(categories[cid])
                           for cid in post.get('categories') or []
                           if cid in categories]
-            _add_tags(qasida, tag_names)
+            try:
+                _create_work(
+                    website,
+                    title=name,
+                    native_title=native_title,
+                    # The site credits performers rather than poets, and a
+                    # performer is not the author, so this is left for a
+                    # reviewer rather than guessed from the URL.
+                    author=author,
+                    language='Urdu',
+                    lyrics='',
+                    transliteration=body,
+                    source_url=link,
+                    tags=tag_names,
+                )
+            except Exception as e:
+                stats['errors'] += 1
+                print(f"  failed ({type(e).__name__}): {link}")
+                continue
 
             known.add(link)
             stats['saved'] += 1
@@ -1700,11 +1931,47 @@ def enrich_qasida(qasida_id, overwrite=False):
     return f"qasida {qasida_id}: {', '.join(changed) if changed else 'nothing to add'}"
 
 
-@shared_task
+# How long one crawl may run before the worker kills it. The schedule starts a
+# crawl every midnight, so one still going the following evening has stalled,
+# and would otherwise run into the next.
+CRAWL_TIME_LIMIT = 20 * 60 * 60
+CRAWL_LOCK = 'crawl-in-progress'
+
+
+@shared_task(time_limit=CRAWL_TIME_LIMIT)
 def run_crawlers():
     """
     Periodic task to trigger all active web crawlers based on database configuration.
+
+    Only one runs at a time. Every scraper checks whether a URL is already
+    held and then inserts it, so two crawls side by side - a long night
+    running into the next, or one started by hand - each imported the same
+    posts and every work arrived twice.
     """
+    token = uuid.uuid4().hex
+    try:
+        acquired = cache.add(CRAWL_LOCK, token, CRAWL_TIME_LIMIT)
+    except Exception:
+        # Without the cache there is no lock to take. The broker lives in the
+        # same Redis, so a task that got here can almost certainly reach it;
+        # if not, crawling unguarded is what happened before.
+        acquired = True
+    if not acquired:
+        print("Another crawl is still running; not starting a second.")
+        return
+    try:
+        _run_crawlers()
+    finally:
+        try:
+            # Only our own lock: one that expired and was taken by a later
+            # run is that run's to release.
+            if cache.get(CRAWL_LOCK) == token:
+                cache.delete(CRAWL_LOCK)
+        except Exception:
+            pass
+
+
+def _run_crawlers():
     print("Starting crawler task...")
     active_websites = SourceWebsite.objects.filter(is_active=True)
 

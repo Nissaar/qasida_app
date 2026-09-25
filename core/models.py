@@ -190,10 +190,19 @@ class Poet(models.Model):
         case, so a crawler meeting the same name capitalised differently does
         not manufacture a second record of one person.
         """
-        name = (name or '').strip()
+        name = (name or '').strip()[:cls._meta.get_field('name').max_length].strip()
         if not name:
             return None
-        return cls.objects.filter(name__iexact=name).first() or cls.objects.create(name=name)
+        found = cls.objects.filter(name__iexact=name).first()
+        if found:
+            return found
+        try:
+            with transaction.atomic():
+                return cls.objects.create(name=name)
+        except IntegrityError:
+            # Another worker created the same poet between the lookup and the
+            # insert; theirs is the record.
+            return cls.objects.filter(name__iexact=name).first()
 
     def __str__(self):
         return self.name

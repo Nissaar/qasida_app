@@ -1,10 +1,24 @@
 """Template helpers for laying out verse text."""
 
 import re
+from urllib.parse import urlsplit
 
 from django import template
 
 register = template.Library()
+
+
+@register.filter
+def web_url(value):
+    """
+    The value if it is an http(s) address, else ''.
+
+    Source links arrive from other sites' pages and from readers, and are
+    rendered as links. Anything that is not an ordinary web address - above
+    all a `javascript:` URL, which would run on our page - is not linked.
+    """
+    value = (value or '').strip()
+    return value if urlsplit(value).scheme in ('http', 'https') else ''
 
 # One or more blank lines separate stanzas in the stored text.
 STANZA_SPLIT_RE = re.compile(r'\n\s*\n+')

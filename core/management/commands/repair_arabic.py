@@ -7,15 +7,13 @@ letters. This command finds those rows, rasterises the source PDF (the pages are
 the trustworthy record), tries OCR, and keeps whichever text is better.
 """
 
-import re
 import time
 
-import requests
 from django.core.management.base import BaseCommand
 
+from core.fetching import polite_get
 from core.models import Qasida
 from core.tasks import (
-    HEADERS,
     PDF_URL_RE,
     _fetch_pdf_text,
     _looks_shattered,
@@ -132,8 +130,7 @@ class Command(BaseCommand):
         if not slug:
             return None
         try:
-            res = requests.get(DAMAS_API, headers=HEADERS, timeout=60, params={'slug': slug})
-            posts = res.json()
+            posts = polite_get(DAMAS_API, timeout=60, params={'slug': slug}).json()
         except Exception:
             return None
         if not isinstance(posts, list) or not posts:

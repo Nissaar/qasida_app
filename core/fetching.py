@@ -8,6 +8,7 @@ per host with a minimum gap, exponential backoff on the statuses that mean
 "slow down", and Retry-After honoured when the server sends it.
 """
 
+import math
 import random
 import threading
 import time
@@ -35,12 +36,25 @@ MAX_ATTEMPTS = 5
 # Cap so a hostile Retry-After cannot park the crawl for an hour.
 MAX_BACKOFF = 60.0
 
+# How much one response may hold before it is abandoned. Everything a crawler
+# fetches is read into memory - a page to parse, a PDF to rasterise, a scan to
+# decode - so a runaway file on a source site would otherwise take the worker
+# with it. Callers fetching something known to be large pass their own.
+DEFAULT_MAX_BYTES = 20 * 1024 * 1024
+# The whole response, not each read: `timeout` alone restarts with every chunk,
+# so a server dripping a byte at a time could hold the crawl indefinitely.
+DEFAULT_DEADLINE = 180
+
 _last_request = {}
 _lock = threading.Lock()
 
 
 class RateLimited(requests.RequestException):
     """Raised when a host kept refusing after every attempt."""
+
+
+class TooLarge(requests.RequestException):
+    """The response ran past the size or time allowed for it."""
 
 
 class BotChallenge(requests.RequestException):
@@ -81,17 +95,19 @@ def _host_delay(host):
 
 
 def _wait_turn(host):
-    """Space out requests to one host without blocking others."""
+    """
+    Space out requests to one host without blocking others.
+
+    The slot is reserved under the lock and slept for outside it, so a thread
+    waiting six seconds for one host does not hold up a request to another.
+    """
     with _lock:
-        delay = _host_delay(host)
-        previous = _last_request.get(host)
         now = time.monotonic()
-        if previous is not None:
-            gap = now - previous
-            if gap < delay:
-                time.sleep(delay - gap)
-                now = time.monotonic()
-        _last_request[host] = now
+        previous = _last_request.get(host)
+        slot = now if previous is None else max(now, previous + _host_delay(host))
+        _last_request[host] = slot
+    if slot > now:
+        time.sleep(slot - now)
 
 
 def _retry_after_seconds(response, attempt):
@@ -99,13 +115,42 @@ def _retry_after_seconds(response, attempt):
     header = response.headers.get('Retry-After')
     if header:
         try:
-            return min(float(header), MAX_BACKOFF)
+            seconds = float(header)
         except ValueError:
-            pass  # HTTP-date form; fall through to our own schedule
+            seconds = None  # HTTP-date form; fall through to our own schedule
+        # A negative, infinite or NaN figure is no figure at all, and would
+        # make time.sleep raise.
+        if seconds is not None and math.isfinite(seconds):
+            return min(max(seconds, 0.0), MAX_BACKOFF)
     return min(MAX_BACKOFF, (2 ** attempt) + random.uniform(0, 0.75))
 
 
-def polite_get(url, timeout=30, headers=None, allow=(), **kwargs):
+def _read_capped(response, max_bytes, deadline):
+    """Read the body, refusing one that is too large or too slow to arrive."""
+    declared = response.headers.get('Content-Length')
+    if declared and declared.isdigit() and int(declared) > max_bytes:
+        response.close()
+        raise TooLarge(f"{response.url} declares {int(declared)} bytes; "
+                       f"the limit is {max_bytes}")
+    started = time.monotonic()
+    chunks, size = [], 0
+    for chunk in response.iter_content(64 * 1024):
+        size += len(chunk)
+        if size > max_bytes:
+            response.close()
+            raise TooLarge(f"{response.url} ran past {max_bytes} bytes")
+        if time.monotonic() - started > deadline:
+            response.close()
+            raise TooLarge(f"{response.url} took more than {deadline}s to arrive")
+        chunks.append(chunk)
+    # Handed back as an ordinary response, so .content, .text and .json()
+    # work for callers exactly as before.
+    response._content = b''.join(chunks)
+    response._content_consumed = True
+
+
+def polite_get(url, timeout=30, headers=None, allow=(), max_bytes=DEFAULT_MAX_BYTES,
+               deadline=DEFAULT_DEADLINE, **kwargs):
     """
     GET a URL, pausing between requests to the same host and retrying the
     statuses that mean "too fast". Raises on a final failure so callers can
@@ -114,7 +159,12 @@ def polite_get(url, timeout=30, headers=None, allow=(), **kwargs):
     `allow` lists status codes to hand back untouched instead of raising - the
     damas pager, for instance, reads a 400 as "past the last page".
     """
-    host = urlsplit(url).netloc
+    parts = urlsplit(url)
+    if parts.scheme not in ('http', 'https'):
+        # Every URL here came out of somebody else's page. Nothing but the web
+        # is ours to fetch.
+        raise requests.exceptions.InvalidSchema(f"refusing to fetch {url[:80]!r}")
+    host = parts.netloc
     merged = dict(HEADERS)
     if headers:
         merged.update(headers)
@@ -123,7 +173,11 @@ def polite_get(url, timeout=30, headers=None, allow=(), **kwargs):
     for attempt in range(MAX_ATTEMPTS):
         _wait_turn(host)
         try:
-            response = requests.get(url, timeout=timeout, headers=merged, **kwargs)
+            response = requests.get(url, timeout=timeout, headers=merged, stream=True,
+                                    **kwargs)
+            _read_capped(response, max_bytes, deadline)
+        except TooLarge:
+            raise  # asking again would fetch the same oversized file
         except requests.RequestException as e:
             last_error = e
             time.sleep(min(MAX_BACKOFF, 2 ** attempt))
