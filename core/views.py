@@ -7,7 +7,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db.models import Count, Q
 from django.db.models.functions import Coalesce, Length
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from . import notify, throttle
@@ -483,12 +483,22 @@ def suggestion_inbox(request):
     """Review queue for reader-submitted corrections."""
     if request.method == 'POST':
         suggestion = get_object_or_404(Suggestion, pk=request.POST.get('suggestion'))
-        if request.POST.get('action') == 'approve':
-            suggestion.apply()
-            messages.success(request, f'Applied the suggestion for "{suggestion.qasida}".')
+        action = request.POST.get('action')
+        # Each button names what it does, and anything else is refused rather
+        # than read as a rejection.
+        if action not in ('approve', 'reject'):
+            return HttpResponseBadRequest('Unknown action.')
+        if action == 'approve':
+            done = suggestion.apply()
+            success = f'Applied the suggestion for "{suggestion.qasida}".'
         else:
-            suggestion.reject()
-            messages.success(request, 'Suggestion rejected.')
+            done = suggestion.reject()
+            success = 'Suggestion rejected.'
+        if done:
+            messages.success(request, success)
+        else:
+            messages.warning(request, 'That suggestion had already been decided, '
+                                      'so nothing was changed.')
         return redirect('suggestion_inbox')
 
     pending = (Suggestion.objects.filter(is_reviewed=False)
@@ -795,22 +805,39 @@ def contribution_inbox(request):
         action = request.POST.get('action')
         note = (request.POST.get('staff_note') or '').strip()
 
-        if action == 'publish' and contribution.can_publish():
-            qasida = contribution.publish(by=request.user)
+        if action not in ('publish', 'accept', 'decline'):
+            return HttpResponseBadRequest('Unknown action.')
+
+        already = (f'"{contribution.display_title}" had already been decided, '
+                   f'so nothing was changed.')
+        if action == 'publish':
+            # Refused outright rather than falling through to another action:
+            # pressing "create a record" must never decline the contribution
+            # and tell its sender so.
+            if not contribution.can_publish():
+                messages.error(
+                    request,
+                    f'"{contribution.display_title}" has no text to make a record '
+                    f'from, or already has one. Nothing was changed.')
+                return redirect('contribution_inbox')
+            qasida = contribution.publish(by=request.user, note=note)
+            if qasida is None:
+                messages.warning(request, already)
+                return redirect('contribution_inbox')
             notify.contribution_decided(contribution, request)
             messages.success(
                 request,
                 f'Created a record from "{contribution.display_title}". Read it '
                 f'through and approve it, and it goes on the site.')
             return redirect('qasida_edit', slug=qasida.slug)
-        if action == 'accept':
-            contribution.accept(by=request.user, note=note)
+
+        decide = contribution.accept if action == 'accept' else contribution.decline
+        if decide(by=request.user, note=note):
             notify.contribution_decided(contribution, request)
-            messages.success(request, f'Accepted "{contribution.display_title}".')
+            verb = 'Accepted' if action == 'accept' else 'Declined'
+            messages.success(request, f'{verb} "{contribution.display_title}".')
         else:
-            contribution.decline(by=request.user, note=note)
-            notify.contribution_decided(contribution, request)
-            messages.success(request, f'Declined "{contribution.display_title}".')
+            messages.warning(request, already)
         return redirect('contribution_inbox')
 
     waiting = (Contribution.objects.filter(status=Contribution.STATUS_PENDING)

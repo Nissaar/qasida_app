@@ -2901,7 +2901,8 @@ class ContributionReviewTest(TestCase):
     def test_publishing_twice_does_not_make_two_records(self):
         first = self.contribution.publish(by=self.editor)
         second = self.contribution.publish(by=self.editor)
-        self.assertEqual(first.pk, second.pk)
+        self.assertIsNotNone(first)
+        self.assertIsNone(second)
         self.assertEqual(Qasida.objects.count(), 1)
 
     def test_a_request_has_nothing_to_publish(self):
@@ -2943,6 +2944,55 @@ class ContributionReviewTest(TestCase):
         self.assertContains(self.client.get(reverse('my_contributions')),
                             'Not this time, sorry.')
 
+    def test_publish_on_a_request_never_declines_it(self):
+        """The button that says "create a record" must not do something else."""
+        request = Contribution.objects.create(kind=Contribution.KIND_REQUEST,
+                                              title='Something missing',
+                                              user=self.reader)
+        self.client.login(username='editor', password=GOOD_PASSWORD)
+        self.client.post(reverse('contribution_inbox'), {
+            'contribution': request.pk, 'action': 'publish'})
+        request.refresh_from_db()
+        self.assertEqual(request.status, Contribution.STATUS_PENDING)
+        self.assertEqual(mail.outbox, [])
+
+    def test_an_unknown_action_is_refused(self):
+        self.client.login(username='editor', password=GOOD_PASSWORD)
+        response = self.client.post(reverse('contribution_inbox'), {
+            'contribution': self.contribution.pk, 'action': ''})
+        self.assertEqual(response.status_code, 400)
+        self.contribution.refresh_from_db()
+        self.assertEqual(self.contribution.status, Contribution.STATUS_PENDING)
+
+    def test_a_decision_is_not_overturned_or_resent(self):
+        self.assertTrue(self.contribution.accept(by=self.editor))
+        mail.outbox = []
+        self.assertFalse(self.contribution.decline(by=self.editor))
+        self.contribution.refresh_from_db()
+        self.assertEqual(self.contribution.status, Contribution.STATUS_ACCEPTED)
+
+        self.client.login(username='editor', password=GOOD_PASSWORD)
+        self.client.post(reverse('contribution_inbox'), {
+            'contribution': self.contribution.pk, 'action': 'decline'})
+        self.contribution.refresh_from_db()
+        self.assertEqual(self.contribution.status, Contribution.STATUS_ACCEPTED)
+        self.assertEqual(mail.outbox, [])
+
+    def test_the_admin_batch_skips_what_was_already_decided(self):
+        waiting = Contribution.objects.create(kind=Contribution.KIND_REQUEST,
+                                              title='Still waiting', user=self.reader)
+        self.contribution.accept(by=self.editor)
+        mail.outbox = []
+        self.client.login(username='editor', password=GOOD_PASSWORD)
+        self.client.post(reverse('admin:core_contribution_changelist'), {
+            'action': 'decline_selected',
+            '_selected_action': [self.contribution.pk, waiting.pk]})
+        self.contribution.refresh_from_db()
+        waiting.refresh_from_db()
+        self.assertEqual(self.contribution.status, Contribution.STATUS_ACCEPTED)
+        self.assertEqual(waiting.status, Contribution.STATUS_DECLINED)
+        self.assertEqual(len(mail.outbox), 1)
+
     def test_a_deleted_account_does_not_take_the_text_with_it(self):
         """
         A text someone brought has become part of the library's record of
@@ -2981,3 +3031,59 @@ class SuggestionNotificationTest(TestCase):
                 'note': 'The third line is missing a word.',
             })
         self.assertEqual(Suggestion.objects.count(), 1)
+
+
+class SuggestionDecidedOnceTest(TestCase):
+    """An old correction applied a second time writes stale text over newer work."""
+
+    def setUp(self):
+        self.qasida = make_qasida(title='Original')
+        self.suggestion = Suggestion.objects.create(
+            qasida=self.qasida, email='reader@example.com', suggested_title='First fix')
+
+    def test_applying_twice_does_not_undo_a_later_edit(self):
+        self.assertTrue(self.suggestion.apply())
+        self.qasida.refresh_from_db()
+        self.qasida.title = 'Edited since'
+        self.qasida.save()
+
+        self.assertFalse(self.suggestion.apply())
+        self.qasida.refresh_from_db()
+        self.assertEqual(self.qasida.title, 'Edited since')
+
+    def test_a_rejected_suggestion_cannot_then_be_applied(self):
+        self.assertTrue(self.suggestion.reject())
+        self.assertFalse(self.suggestion.apply())
+        self.qasida.refresh_from_db()
+        self.assertEqual(self.qasida.title, 'Original')
+
+    def test_an_overlong_tag_is_left_out_rather_than_failing(self):
+        self.suggestion.suggested_tags = f"naat, {'x' * 80}"
+        self.suggestion.save()
+        self.assertTrue(self.suggestion.apply())
+        self.assertEqual(list(self.qasida.tags.values_list('name', flat=True)), ['naat'])
+
+    def test_the_inbox_refuses_an_unknown_action(self):
+        User.objects.create_user('editor', 'e@example.com', GOOD_PASSWORD, is_staff=True,
+                                 is_superuser=True)
+        self.client.login(username='editor', password=GOOD_PASSWORD)
+        response = self.client.post(reverse('suggestion_inbox'),
+                                    {'suggestion': self.suggestion.pk})
+        self.assertEqual(response.status_code, 400)
+        self.suggestion.refresh_from_db()
+        self.assertFalse(self.suggestion.is_reviewed)
+
+
+class AdminActionPermissionTest(TestCase):
+    """Staff given only "view" can read the lists, not act on them."""
+
+    def test_a_view_only_editor_is_offered_no_actions(self):
+        from django.contrib.auth.models import Permission
+        viewer = User.objects.create_user('viewer', 'v@example.com', GOOD_PASSWORD,
+                                          is_staff=True)
+        viewer.user_permissions.add(Permission.objects.get(codename='view_qasida'))
+        make_qasida(title='Pending one', review_state=Qasida.REVIEW_PENDING)
+        self.client.login(username='viewer', password=GOOD_PASSWORD)
+        response = self.client.get(reverse('admin:core_qasida_changelist'))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'approve_for_display')

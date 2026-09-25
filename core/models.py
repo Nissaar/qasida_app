@@ -612,39 +612,75 @@ class Suggestion(models.Model):
                 })
         return listed
 
+    def _lock_if_unreviewed(self):
+        """
+        Take a row lock and re-read, reporting whether it is still undecided.
+
+        Must run inside a transaction. Two editors pressing a button at once,
+        or one pressing it twice, would otherwise each read "not reviewed" and
+        both act - and applying an old correction a second time writes its
+        stale text over whatever was corrected since.
+        """
+        type(self).objects.select_for_update().filter(pk=self.pk).first()
+        self.refresh_from_db(fields=['is_reviewed', 'is_approved'])
+        return not self.is_reviewed
+
     def apply(self):
-        """Fold this suggestion into its qasida and mark it approved."""
-        for field, target, _ in self.FIELDS:
-            proposed = getattr(self, field)
-            if not proposed.strip():
-                continue
-            # The poet is a relation; a reader proposes a name, which becomes
-            # a record of that poet if we do not already hold one.
-            if target == 'author':
-                setattr(self.qasida, target, Poet.named(proposed))
-            else:
-                setattr(self.qasida, target, proposed)
+        """
+        Fold this suggestion into its qasida and mark it approved.
 
-        # A translation a reader has corrected is no longer the machine's, and
-        # the page must stop warning that it might be. Nor is it the source's.
-        if self.suggested_translation.strip():
-            self.qasida.translation_origin = Qasida.TRANSLATION_READER
+        Returns False, and changes nothing, when it had already been decided.
+        """
+        with transaction.atomic():
+            if not self._lock_if_unreviewed():
+                return False
+            self.qasida.refresh_from_db()
+            for field, target, _ in self.FIELDS:
+                proposed = getattr(self, field)
+                if not proposed.strip():
+                    continue
+                # The poet is a relation; a reader proposes a name, which becomes
+                # a record of that poet if we do not already hold one.
+                if target == 'author':
+                    setattr(self.qasida, target, Poet.named(proposed))
+                else:
+                    setattr(self.qasida, target, proposed)
 
-        if self.suggested_tags:
-            for name in (t.strip() for t in self.suggested_tags.split(',')):
-                if name:
-                    tag, _ = Tag.objects.get_or_create(name=name)
-                    self.qasida.tags.add(tag)
+            # A translation a reader has corrected is no longer the machine's, and
+            # the page must stop warning that it might be. Nor is it the source's.
+            if self.suggested_translation.strip():
+                self.qasida.translation_origin = Qasida.TRANSLATION_READER
 
-        self.qasida.save()
-        self.is_approved = True
-        self.is_reviewed = True
-        self.save(update_fields=['is_approved', 'is_reviewed'])
+            self.qasida.save()
+            for name in self.tag_names():
+                tag, _ = Tag.objects.get_or_create(name=name)
+                self.qasida.tags.add(tag)
+
+            self.is_approved = True
+            self.is_reviewed = True
+            self.save(update_fields=['is_approved', 'is_reviewed'])
+        return True
 
     def reject(self):
-        self.is_approved = False
-        self.is_reviewed = True
-        self.save(update_fields=['is_approved', 'is_reviewed'])
+        """Mark it declined. Returns False when it had already been decided."""
+        with transaction.atomic():
+            if not self._lock_if_unreviewed():
+                return False
+            self.is_approved = False
+            self.is_reviewed = True
+            self.save(update_fields=['is_approved', 'is_reviewed'])
+        return True
+
+    def tag_names(self):
+        """
+        The proposed tags, each one short enough to be a tag.
+
+        Anything longer than a tag name can hold is left out rather than
+        failing the whole approval on a database error.
+        """
+        limit = Tag._meta.get_field('name').max_length
+        names = (t.strip() for t in self.suggested_tags.split(','))
+        return [name for name in names if name and len(name) <= limit]
 
     def __str__(self):
         return f"Suggestion for {self.qasida} by {self.email}"
@@ -967,7 +1003,20 @@ class Contribution(models.Model):
         """Whether there is a text here to make a record out of."""
         return bool(self.lyrics.strip()) and self.published_as_id is None
 
-    def publish(self, by=None):
+    def _lock_if_pending(self):
+        """
+        Take a row lock and re-read, reporting whether it still awaits a decision.
+
+        Must run inside a transaction. Without it a double-click on "create a
+        record" made two records from one submission, and a batch action in
+        the admin re-decided - and re-emailed - contributions that had long
+        since been answered.
+        """
+        type(self).objects.select_for_update().filter(pk=self.pk).first()
+        self.refresh_from_db(fields=['status', 'published_as'])
+        return self.status == self.STATUS_PENDING
+
+    def publish(self, by=None, note=None):
         """
         Turn a submission into a record of its own, awaiting review.
 
@@ -976,45 +1025,57 @@ class Contribution(models.Model):
         serves it, and text typed in by a reader is no different from text a
         crawler found. The editor who accepts it lands on the new record and
         approves it there, having read it.
+
+        Returns the new record, or None when there was nothing to make one
+        from or the contribution had already been decided.
         """
-        if not self.can_publish():
-            return self.published_as
+        with transaction.atomic():
+            if not self._lock_if_pending() or not self.can_publish():
+                return None
 
-        dedication = None
-        name = self.dedication_name.strip()
-        if name:
-            dedication = (Dedication.objects.filter(name__iexact=name).first()
-                          or Dedication.objects.create(name=name))
+            dedication = None
+            name = self.dedication_name.strip()
+            if name:
+                dedication = (Dedication.objects.filter(name__iexact=name).first()
+                              or Dedication.objects.create(name=name))
 
-        qasida = Qasida.objects.create(
-            title=self.title.strip(),
-            native_title=self.native_title.strip(),
-            author=Poet.named(self.poet_name),
-            dedicated_to=dedication,
-            language=self.language.strip(),
-            lyrics=self.lyrics,
-            transliteration=self.transliteration,
-            translation=self.translation,
-            # A reader who typed out a translation is the source of it, and
-            # the page must not warn that a machine wrote it.
-            translation_origin=(Qasida.TRANSLATION_READER
-                                if self.translation.strip() else Qasida.TRANSLATION_NONE),
-            source_url=self.source_url or None,
-            review_state=Qasida.REVIEW_PENDING,
-        )
-        self.published_as = qasida
-        self.accept(by=by)
+            qasida = Qasida.objects.create(
+                title=self.title.strip(),
+                native_title=self.native_title.strip(),
+                author=Poet.named(self.poet_name),
+                dedicated_to=dedication,
+                language=self.language.strip(),
+                lyrics=self.lyrics,
+                transliteration=self.transliteration,
+                translation=self.translation,
+                # A reader who typed out a translation is the source of it, and
+                # the page must not warn that a machine wrote it.
+                translation_origin=(Qasida.TRANSLATION_READER
+                                    if self.translation.strip() else Qasida.TRANSLATION_NONE),
+                source_url=self.source_url or None,
+                review_state=Qasida.REVIEW_PENDING,
+            )
+            self.published_as = qasida
+            self._close(self.STATUS_ACCEPTED, by, note)
         return qasida
 
     def accept(self, by=None, note=None):
-        self.status = self.STATUS_ACCEPTED
-        self._close(by, note)
+        """Accept without a record. Returns False when already decided."""
+        return self._decide(self.STATUS_ACCEPTED, by, note)
 
     def decline(self, by=None, note=None):
-        self.status = self.STATUS_DECLINED
-        self._close(by, note)
+        """Decline it. Returns False when already decided."""
+        return self._decide(self.STATUS_DECLINED, by, note)
 
-    def _close(self, by, note):
+    def _decide(self, status, by, note):
+        with transaction.atomic():
+            if not self._lock_if_pending():
+                return False
+            self._close(status, by, note)
+        return True
+
+    def _close(self, status, by, note):
+        self.status = status
         if note is not None:
             self.staff_note = note
         self.reviewed_at = timezone.now()
