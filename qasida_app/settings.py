@@ -125,6 +125,19 @@ MIDDLEWARE = [
 
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
+# Static files are served under names that carry a hash of their contents
+# (admin.3f9a1c.css). The service worker keeps anything under /static/ for
+# good, which is right for a file whose name changes when it does, and wrong
+# for one that keeps its name: editors were running week-old admin styling
+# and scripts because the worker never asked for them again. Compressed
+# copies come for free, since whitenoise is already serving these.
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
+
 ROOT_URLCONF = "qasida_app.urls"
 
 TEMPLATES = [

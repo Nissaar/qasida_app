@@ -35,10 +35,16 @@ GOOD_PASSWORD = 'Marmalade-7-Kettle'
 LOCAL_CACHE = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}}
 
 
-@override_settings(CACHES=LOCAL_CACHE)
+@override_settings(CACHES=LOCAL_CACHE, STORAGES={
+    'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+    'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+})
 class TestCase(DjangoTestCase):
     """
-    Every test starts with an empty, in-process cache.
+    Every test starts with an empty, in-process cache, and plain static names.
+
+    Production serves hashed static names from a manifest that collectstatic
+    writes; tests run without one, so they use the unhashed names.
 
     The rate limits count in the cache. Left on the configured Redis, a run
     would write its counters into whatever Redis the machine points at - the
@@ -3597,3 +3603,33 @@ class OfflineViewerTest(TestCase):
         self.sign_in(remember=True)
         response = self.client.post(reverse('logout'))
         self.assertEqual(response.cookies[COOKIE].value, '')
+
+
+class PageDetailFixTest(TestCase):
+    """Small things readers and editors could see going wrong."""
+
+    def test_a_work_with_a_scan_is_shared_with_its_scan(self):
+        work = make_qasida(title='Scanned')
+        QasidaImage.objects.create(qasida=work, image='qasida_scans/page.png')
+        response = self.client.get(work.get_absolute_url())
+        self.assertRegex(response.content.decode(),
+                         r'og:image" content="http://testserver/media/qasida_scans/page\.png"')
+
+    def test_a_work_without_a_scan_is_shared_with_the_icon(self):
+        work = make_qasida(title='Plain')
+        response = self.client.get(work.get_absolute_url())
+        self.assertRegex(response.content.decode(), r'og:image" content="[^"]*icon-192\.png"')
+
+    def test_the_find_panel_keeps_the_other_filters_search_and_order(self):
+        editor = User.objects.create_user('editor', 'e@example.com', GOOD_PASSWORD,
+                                          is_staff=True, is_superuser=True)
+        self.client.force_login(editor)
+        response = self.client.get(reverse('admin:core_qasida_changelist'), {
+            'review_state__exact': Qasida.REVIEW_PENDING, 'author_contains': 'busiri',
+            'q': 'burda', 'o': '2'})
+        page = response.content.decode()
+        self.assertIn('name="review_state__exact" value="pending"', page)
+        self.assertNotIn("[&#x27;pending&#x27;]", page)
+        self.assertIn('name="q" value="burda"', page)
+        self.assertIn('name="o" value="2"', page)
+        self.assertIn('href="?review_state__exact=pending&amp;q=burda&amp;o=2"', page)

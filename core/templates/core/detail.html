@@ -7,9 +7,13 @@
 {% block og_title %}{{ qasida.title|default:"Qasida" }}{% endblock %}
 {% block og_description %}{{ qasida.meta_description }}{% endblock %}
 {% block canonical_path %}{{ qasida.get_absolute_url }}{% endblock %}
-{% with scan=qasida.images.first %}{% if scan %}
-{% block og_image %}{{ request.scheme }}://{{ request.get_host }}{{ scan.image.url }}{% endblock %}
-{% endif %}{% endwith %}
+{% comment %}
+The choice has to be made inside the block. In a child template anything
+outside a block is thrown away, so a block wrapped in an {% if %} always
+overrides - here with no scan in scope, which shared every work as a bare
+host name with no picture at all.
+{% endcomment %}
+{% block og_image %}{% with scan=qasida.images.first %}{% if scan %}{{ request.scheme }}://{{ request.get_host }}{{ scan.image.url }}{% else %}{{ block.super }}{% endif %}{% endwith %}{% endblock %}
 
 {% block extra_head %}{% endblock %}
 

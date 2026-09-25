@@ -43,8 +43,6 @@ class TextSearchPanel(admin.SimpleListFilter):
         return ((None, None),)
 
     def choices(self, changelist):
-        active = changelist.get_filters_params()
-        consumed = set(self.expected_parameters())
         fields = []
         for label, (parameter, _) in TEXT_FILTERS.items():
             fields.append({
@@ -52,11 +50,22 @@ class TextSearchPanel(admin.SimpleListFilter):
                 'name': parameter,
                 'value': self.request.GET.get(parameter, ''),
             })
+
+        # Everything else on the page's query string, carried as hidden
+        # inputs so typing here keeps the other filters, the search box and
+        # the sort order. Read from the request rather than from the
+        # changelist's filter parameters: those hold lists, which rendered
+        # into the form as "['pending']" and broke the other filter, and they
+        # leave out the search and the ordering altogether.
+        others = self.request.GET.copy()
+        for parameter in self.expected_parameters():
+            others.pop(parameter, None)
+        others.pop('p', None)  # a new search starts from the first page
         return ({
             'fields': fields,
-            # Carried as hidden inputs so typing here keeps the other filters.
-            'other_params': [(key, value) for key, value in active.items()
-                             if key not in consumed],
+            'other_params': [(key, value) for key in others
+                             for value in others.getlist(key)],
+            'clear_query': others.urlencode(),
             'has_value': any(field['value'] for field in fields),
         },)
 
