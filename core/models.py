@@ -2,6 +2,7 @@ import uuid
 
 from django.conf import settings
 from django.contrib.postgres.indexes import GinIndex
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 from django.utils.text import slugify
@@ -155,8 +156,24 @@ class Collection(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.slug:
-            self.slug = slugify(self.name)[:220]
+            self.slug = self.build_slug()
         super().save(*args, **kwargs)
+
+    def build_slug(self):
+        """
+        A unique URL fragment for this collection.
+
+        A name in Arabic script slugifies to nothing, and two names differing
+        only in punctuation slugify to the same thing; either one used to fail
+        the insert or leave a collection whose page could not be linked to.
+        """
+        base = (slugify(self.name) or slugify(self.native_name) or 'collection')[:200]
+        candidate, suffix = base, 2
+        others = Collection.objects.exclude(pk=self.pk)
+        while others.filter(slug=candidate).exists():
+            candidate = f'{base}-{suffix}'
+            suffix += 1
+        return candidate
 
 
 class RenameRefreshesSearch:
@@ -587,7 +604,11 @@ class QasidaImage(models.Model):
     class Meta:
         ordering = ('position', 'id')
         constraints = [
+            # Only for scans with a source. One an editor uploads by hand has
+            # none, and a second hand upload was refused as a duplicate of
+            # the first.
             models.UniqueConstraint(fields=('qasida', 'source_url'),
+                                    condition=~models.Q(source_url=''),
                                     name='unique_qasida_image_source'),
         ]
 
@@ -615,8 +636,27 @@ class QasidaMedia(models.Model):
         verbose_name_plural = 'qasida media'
         constraints = [
             models.UniqueConstraint(fields=('qasida', 'video_id'),
+                                    condition=~models.Q(video_id=''),
                                     name='unique_qasida_video'),
         ]
+
+    def clean(self):
+        """
+        Refuse a link that is not a playable video, or one already attached.
+
+        video_id is not an editable field, so the admin never checked the
+        constraint on it: the same video added twice, or two links nothing
+        could be read from, reached the database and came back as an error
+        page instead of a message beside the field.
+        """
+        super().clean()
+        video_id = extract_youtube_id(self.url or '')
+        if not video_id:
+            raise ValidationError({'url': "That is not a YouTube link a player can be made from."})
+        if self.qasida_id and (QasidaMedia.objects.filter(qasida_id=self.qasida_id,
+                                                          video_id=video_id)
+                               .exclude(pk=self.pk).exists()):
+            raise ValidationError({'url': "This recording is already attached to this work."})
 
     def save(self, *args, **kwargs):
         self.video_id = extract_youtube_id(self.url) or ''

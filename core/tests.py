@@ -3462,3 +3462,92 @@ class SearchTextTest(TestCase):
         honoured.save()
         work.refresh_from_db()
         self.assertIn('النبي', work.search_text)
+
+
+class DataSafetyTest(TestCase):
+    """Edits that background work and constraints must not undo or refuse."""
+
+    def test_enrichment_does_not_overwrite_a_translation_typed_meanwhile(self):
+        from unittest import mock
+        from . import enrich
+        work = make_qasida(title='Work', language='Arabic', lyrics='مكتبة القصائد')
+
+        def slow_translation(lyrics, code):
+            # While the worker translates, an editor saves their own.
+            Qasida.objects.filter(pk=work.pk).update(translation='Typed by an editor')
+            return 'machine draft'
+
+        with mock.patch.object(enrich, 'available_source_codes', return_value={'ar'}), \
+                mock.patch.object(enrich, 'is_native_script', return_value=True), \
+                mock.patch.object(enrich, 'translate_verse', side_effect=slow_translation) as tr, \
+                mock.patch.object(enrich, 'can_transliterate', return_value=False):
+            enrich.enrich(Qasida.objects.get(pk=work.pk))
+        tr.assert_called_once()
+        work.refresh_from_db()
+        self.assertEqual(work.translation, 'Typed by an editor')
+
+    def test_enrichment_of_a_changed_text_is_dropped(self):
+        from unittest import mock
+        from . import enrich
+        work = make_qasida(title='Work', language='Arabic', lyrics='مكتبة القصائد')
+        stale = Qasida.objects.get(pk=work.pk)
+        Qasida.objects.filter(pk=work.pk).update(lyrics='نص مصحح')
+        with mock.patch.object(enrich, 'available_source_codes', return_value={'ar'}), \
+                mock.patch.object(enrich, 'is_native_script', return_value=True), \
+                mock.patch.object(enrich, 'translate_verse', return_value='draft') as tr, \
+                mock.patch.object(enrich, 'can_transliterate', return_value=False):
+            self.assertEqual(enrich.enrich(stale), [])
+        tr.assert_called_once()
+        work.refresh_from_db()
+        self.assertEqual(work.translation, '')
+
+    def test_enrichment_is_queued_only_after_the_save_commits(self):
+        from unittest import mock
+        from . import tasks
+        editor = User.objects.create_user('editor', 'e@example.com', GOOD_PASSWORD,
+                                          is_staff=True, is_superuser=True)
+        self.client.force_login(editor)
+        with mock.patch.object(tasks.enrich_qasida, 'delay') as delay:
+            with self.captureOnCommitCallbacks(execute=False) as callbacks:
+                self.client.post(reverse('admin:core_qasida_add'), {
+                    'title': 'New work', 'lyrics': 'verse', 'language': 'Arabic',
+                    'review_state': Qasida.REVIEW_PENDING, 'text_quality': Qasida.TEXT_OK,
+                    'translation_origin': Qasida.TRANSLATION_NONE,
+                    'media-TOTAL_FORMS': 0, 'media-INITIAL_FORMS': 0,
+                    'images-TOTAL_FORMS': 0, 'images-INITIAL_FORMS': 0,
+                })
+                delay.assert_not_called()
+            self.assertTrue(Qasida.objects.filter(title='New work').exists())
+            for callback in callbacks:
+                callback()
+            delay.assert_called_once()
+
+    def test_a_collection_named_in_arabic_gets_an_address(self):
+        from .models import Collection
+        first = Collection.objects.create(name='البردة')
+        second = Collection.objects.create(name='الهمزية')
+        self.assertTrue(first.slug)
+        self.assertNotEqual(first.slug, second.slug)
+        self.assertEqual(self.client.get(reverse('collections')).status_code, 200)
+
+    def test_names_that_differ_only_in_punctuation_both_get_an_address(self):
+        from .models import Collection
+        a = Collection.objects.create(name='Burdah')
+        b = Collection.objects.create(name='Burdah.')
+        self.assertNotEqual(a.slug, b.slug)
+
+    def test_a_second_hand_uploaded_scan_is_allowed(self):
+        work = make_qasida(title='Scanned')
+        QasidaImage.objects.create(qasida=work, image='qasida_scans/a.png', source_url='')
+        QasidaImage.objects.create(qasida=work, image='qasida_scans/b.png', source_url='')
+        self.assertEqual(work.images.count(), 2)
+
+    def test_a_link_that_is_not_a_video_is_a_message_not_a_crash(self):
+        from django.core.exceptions import ValidationError
+        from .models import QasidaMedia
+        work = make_qasida(title='Recorded')
+        with self.assertRaises(ValidationError):
+            QasidaMedia(qasida=work, url='https://example.com/not-a-video').full_clean()
+        QasidaMedia.objects.create(qasida=work, url='https://youtu.be/dQw4w9WgXcQ')
+        with self.assertRaises(ValidationError):
+            QasidaMedia(qasida=work, url='https://www.youtube.com/watch?v=dQw4w9WgXcQ').full_clean()

@@ -1,4 +1,5 @@
 from django import forms
+from django.db import transaction
 from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import (AuthenticationForm, PasswordChangeForm,
                                        PasswordResetForm, SetPasswordForm,
@@ -87,10 +88,12 @@ class QasidaForm(forms.ModelForm):
             tags = [Tag.objects.get_or_create(name=n)[0] for n in names]
             qasida.tags.set(tags)
             # Derive whatever is still missing, on the worker so the form
-            # returns immediately.
+            # returns immediately - and only once the save has committed, or
+            # a quick worker finds no row yet and quietly does nothing.
             if not qasida.transliteration or not qasida.translation:
                 from .tasks import enrich_qasida
-                enrich_qasida.delay(qasida.pk, False)
+                pk = qasida.pk
+                transaction.on_commit(lambda: enrich_qasida.delay(pk, False))
         return qasida
 
 

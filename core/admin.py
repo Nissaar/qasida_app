@@ -3,6 +3,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.shortcuts import redirect, render
 from django.urls import path, reverse
+from django.db import transaction
 from django.db.models import Count, Max
 from django.utils import timezone
 from django.utils.html import format_html
@@ -241,7 +242,11 @@ class QasidaAdmin(LibraryAdmin):
         """Derive the missing fields whenever an editor saves a work by hand."""
         super().save_model(request, obj, form, change)
         if not obj.transliteration or not obj.translation:
-            enrich_qasida.delay(obj.pk, False)
+            # After the admin's transaction commits: queued inside it, the
+            # worker could look for a brand-new work before it existed, find
+            # nothing, and the enrichment the editor was promised never ran.
+            pk = obj.pk
+            transaction.on_commit(lambda: enrich_qasida.delay(pk, False))
 
     @admin.action(description="Add selected to a collection…", permissions=['change'])
     def add_to_collection(self, request, queryset):
