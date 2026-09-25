@@ -18,9 +18,8 @@ admin.site.site_header = "Qasida Library"
 admin.site.site_title = "Qasida Library"
 admin.site.index_title = "Library administration"
 from .models import (Collection, ContactMessage, Contribution, Dedication,
-                     DuplicateLink, Favourite, Tag, Poet, Qasida, QasidaImage,
-                     QasidaMedia, ReadingHistory, ReaderProfile, Suggestion,
-                     SourceWebsite)
+                     DuplicateLink, Tag, Poet, Qasida, QasidaImage,
+                     QasidaMedia, ReaderProfile, Suggestion, SourceWebsite)
 
 class LibraryAdmin(admin.ModelAdmin):
     """

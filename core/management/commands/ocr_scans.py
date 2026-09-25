@@ -10,13 +10,8 @@ already holds.
 from django.core.management.base import BaseCommand
 
 from core.models import Qasida
-from core.tasks import (
-    SCAN_OCR_MIN_GAIN,
-    UNRELIABLE_TEXT_TAG,
-    _add_tags,
-    _arabic_len,
-    ocr_scanned_images,
-)
+from core.tasks import UNRELIABLE_TEXT_TAG, _add_tags
+from core.textrepair import SCAN_OCR_MIN_GAIN, arabic_len, ocr_scanned_images
 
 
 class Command(BaseCommand):
@@ -35,9 +30,9 @@ class Command(BaseCommand):
 
         counts = {'improved': 0, 'kept_existing': 0, 'nothing_read': 0}
         for qasida in targets:
-            before = _arabic_len(qasida.lyrics)
+            before = arabic_len(qasida.lyrics)
             text = ocr_scanned_images(qasida)
-            after = _arabic_len(text)
+            after = arabic_len(text)
 
             if not text:
                 counts['nothing_read'] += 1

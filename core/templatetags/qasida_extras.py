@@ -59,12 +59,6 @@ def _display_stanzas(text):
     return laid_out
 
 
-@register.filter
-def stanzas(text):
-    """Split verse text into stanza blocks for display."""
-    return _display_stanzas(text)
-
-
 def _lines(text):
     """The non-blank lines of a block, which is what a verse actually is."""
     return [line for line in text.splitlines() if line.strip()]
@@ -202,9 +196,27 @@ def stanza_rows(qasida):
     layers cannot be paired at all, the page still reads original, then Latin,
     then translation - just in whole blocks rather than verse by verse.
     """
+    return _layout(qasida)[0]
+
+
+def _layout(qasida):
+    """
+    (rows, loose): the page's rows, and the layers that could not be paired.
+
+    Worked out once per work and kept on it. The page asks for the rows and,
+    separately, for the layers left over, and each question used to run the
+    whole alignment again with its own copy of this loop.
+    """
+    # Keyed on the texts it is built from, so a work whose text changes
+    # after it was first laid out is laid out again rather than served stale.
+    key = (qasida.lyrics, qasida.transliteration, qasida.translation)
+    cached = getattr(qasida, '_verse_layout', None)
+    if cached is not None and cached[0] == key:
+        return cached[1]
+
     lyrics = qasida.lyrics or ''
     layers = _present_layers(qasida)
-
+    result = None
     for original, matcher in ((_display_stanzas(lyrics), _aligned_by_shape),
                               (_stanzas(lyrics), _aligned_by_count)):
         if not original:
@@ -213,18 +225,24 @@ def stanza_rows(qasida):
         # Use this granularity as soon as anything at all lines up at it; a
         # work with no layers to place simply reads at the finest one.
         if not layers or any(blocks is not None for blocks in aligned.values()):
-            return [{
+            rows = [{
                 'original': block,
                 'latin': (aligned.get('latin') or [''] * len(original))[index],
                 'translation': (aligned.get('translation') or [''] * len(original))[index],
             } for index, block in enumerate(original)]
+            result = (rows, {key for key, blocks in aligned.items() if blocks is None})
+            break
 
-    # Not one layer corresponds. Still the same layers in the same order.
-    return [{
-        'original': lyrics.strip(),
-        'latin': layers.get('latin', '').strip(),
-        'translation': layers.get('translation', '').strip(),
-    }]
+    if result is None:
+        # Not one layer corresponds. Still the same layers in the same order.
+        result = ([{
+            'original': lyrics.strip(),
+            'latin': layers.get('latin', '').strip(),
+            'translation': layers.get('translation', '').strip(),
+        }], set(layers))
+
+    qasida._verse_layout = (key, result)
+    return result
 
 
 def _present_layers(qasida):
@@ -237,29 +255,10 @@ def _present_layers(qasida):
 LAYER_LABELS = {'latin': 'Latin script', 'translation': 'Translation'}
 
 
-def _alignment(qasida):
-    """Which layers were set against the verses, and which could not be."""
-    layers = _present_layers(qasida)
-    if not layers:
-        return set(), set()
-
-    lyrics = qasida.lyrics or ''
-    for original, matcher in ((_display_stanzas(lyrics), _aligned_by_shape),
-                              (_stanzas(lyrics), _aligned_by_count)):
-        if not original:
-            continue
-        aligned = _interleave(original, layers, matcher)
-        if any(blocks is not None for blocks in aligned.values()):
-            return ({key for key, blocks in aligned.items() if blocks is not None},
-                    {key for key, blocks in aligned.items() if blocks is None})
-    return set(), set(layers)
-
-
 @register.filter
 def layers_are_paired(qasida):
     """True when every layer this work has was set verse by verse."""
-    _paired, loose = _alignment(qasida)
-    return not loose
+    return not _layout(qasida)[1]
 
 
 @register.filter
@@ -270,7 +269,7 @@ def unpaired_layers(qasida):
     Named, so the page can say which one does not correspond instead of
     implying that none of them do.
     """
-    _paired, loose = _alignment(qasida)
+    loose = _layout(qasida)[1]
     return [{
         'key': key,
         'label': LAYER_LABELS[key],

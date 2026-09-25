@@ -15,17 +15,19 @@ from core.fetching import polite_get
 from core.models import Qasida
 from core.tasks import (
     PDF_URL_RE,
-    _fetch_pdf_text,
-    _looks_shattered,
-    _ocr_is_improvement,
-    _ocr_pdf,
-    _reassemble_pdf_text,
-    _reassembly_is_improvement,
-    _pick_arabic_pdf,
-    _store_page_images,
-    _text_shatter_score,
     UNRELIABLE_TEXT_TAG,
     _add_tags,
+    _fetch_pdf_text,
+    _pick_arabic_pdf,
+    _store_page_images,
+)
+from core.textrepair import (
+    looks_shattered,
+    ocr_is_improvement,
+    ocr_pdf,
+    reassemble_pdf_text,
+    reassembly_is_improvement,
+    text_shatter_score,
 )
 
 DAMAS_API = 'https://damas.nur.nu/wp-json/wp/v2/qasida'
@@ -55,7 +57,7 @@ class Command(BaseCommand):
                 # rely on the stored page images, so they still look shattered.
                 # Skip them or every run would redo the same work.
                 candidates = candidates.filter(text_quality=Qasida.TEXT_OK)
-            targets = [q for q in candidates if _looks_shattered(q.lyrics)]
+            targets = [q for q in candidates if looks_shattered(q.lyrics)]
         if options['limit']:
             targets = targets[:options['limit']]
 
@@ -63,7 +65,7 @@ class Command(BaseCommand):
         stats = {'ocr': 0, 'reflow': 0, 'poor': 0, 'no_pdf': 0, 'errors': 0, 'pages': 0, 'unchanged': 0}
 
         for qasida in targets:
-            before = _text_shatter_score(qasida.lyrics)[0]
+            before = text_shatter_score(qasida.lyrics)[0]
             pdf_url = self._find_pdf(qasida)
             if not pdf_url:
                 stats['no_pdf'] += 1
@@ -77,10 +79,10 @@ class Command(BaseCommand):
                     continue
                 # Rebuilding from glyph coordinates is lossless and beats OCR
                 # on these layouts, so it is tried first.
-                transcript = _reassemble_pdf_text(pdf_bytes)
+                transcript = reassemble_pdf_text(pdf_bytes)
                 method = 'reflow'
-                if not _reassembly_is_improvement(transcript, qasida.lyrics):
-                    transcript = _ocr_pdf(pdf_bytes)
+                if not reassembly_is_improvement(transcript, qasida.lyrics):
+                    transcript = ocr_pdf(pdf_bytes)
                     method = 'ocr'
             except Exception as e:
                 stats['errors'] += 1
@@ -88,14 +90,14 @@ class Command(BaseCommand):
                     f"  failed {qasida.pk} ({type(e).__name__}): {qasida.title[:44]}"))
                 continue
 
-            after = _text_shatter_score(transcript)[0]
-            improved = (_reassembly_is_improvement(transcript, qasida.lyrics)
+            after = text_shatter_score(transcript)[0]
+            improved = (reassembly_is_improvement(transcript, qasida.lyrics)
                         if method == 'reflow'
-                        else _ocr_is_improvement(transcript, qasida.lyrics))
+                        else ocr_is_improvement(transcript, qasida.lyrics))
 
             if options['dry_run']:
-                tokens_before = _text_shatter_score(qasida.lyrics)[2]
-                tokens_after = _text_shatter_score(transcript)[2]
+                tokens_before = text_shatter_score(qasida.lyrics)[2]
+                tokens_after = text_shatter_score(transcript)[2]
                 self.stdout.write(
                     f"  {qasida.pk} single% {before:.0%}->{after:.0%} "
                     f"arabic-tokens {tokens_before}->{tokens_after} "

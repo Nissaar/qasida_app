@@ -2623,7 +2623,7 @@ class DiscoverabilityTest(TestCase):
 
     def test_every_page_declares_which_address_is_the_real_one(self):
         body = self.client.get(self.approved.get_absolute_url()).content.decode()
-        self.assertIn(f'rel="canonical"', body)
+        self.assertIn('rel="canonical"', body)
         self.assertIn(self.approved.get_absolute_url(), body)
 
     def test_the_numeric_url_redirects_rather_than_competing(self):
