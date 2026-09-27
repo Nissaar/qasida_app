@@ -3809,3 +3809,57 @@ class FormAccessibilityTest(TestCase):
         for ref in references:
             self.assertIn(f'id="{ref}"', page, f'{ref} is referenced but not on the page')
         self.assertIn('aria-invalid="true"', page)
+
+
+class DuplicateComparisonTest(TestCase):
+    """Reading a suspected pair side by side, with only the differences marked."""
+
+    def test_only_the_differing_words_are_marked_on_both_sides(self):
+        from .textdiff import highlight_differences
+        first, second, count = highlight_differences(
+            'first line of verse\nsecond line here', 'first line of verse\nsecond verse here')
+        self.assertEqual(count, 1)
+        self.assertIn('<mark class="q-diff">line</mark>', first)
+        self.assertIn('<mark class="q-diff">verse</mark>', second)
+        self.assertIn('first line of verse\n', first)  # unmarked, breaks kept
+
+    def test_vowel_marks_alone_are_not_a_difference(self):
+        from .textdiff import highlight_differences
+        _, _, count = highlight_differences('بِسْمِ اللَّهِ الرَّحْمَٰنِ', 'بسم الله الرحمن')
+        self.assertEqual(count, 0)
+
+    def test_scraped_markup_is_shown_as_text(self):
+        from .textdiff import highlight_differences
+        first, second, _ = highlight_differences('<script>x</script> a', 'b')
+        self.assertNotIn('<script>', first)
+        self.assertIn('&lt;script&gt;', first)
+
+    def test_the_list_offers_a_compare_button_and_the_page_marks_differences(self):
+        from .models import DuplicateLink
+        editor = User.objects.create_user('editor', 'e@example.com', GOOD_PASSWORD,
+                                          is_staff=True, is_superuser=True)
+        a = make_qasida(title='One', lyrics='ya nabi salam alayka\nya rasul salam alayka')
+        b = make_qasida(title='Two', lyrics='ya nabi salam alayka\nya habib salam alayka')
+        link = DuplicateLink.objects.create(first=a, second=b, score=0.9)
+        self.client.force_login(editor)
+
+        listing = self.client.get(reverse('admin:core_duplicatelink_changelist'))
+        change_url = reverse('admin:core_duplicatelink_change', args=[link.pk])
+        self.assertContains(listing, f'class="q-btn-primary q-compare" href="{change_url}"')
+
+        page = self.client.get(change_url)
+        self.assertContains(page, '1 difference marked')
+        self.assertContains(page, '<mark class="q-diff">rasul</mark>')
+        self.assertContains(page, '<mark class="q-diff">habib</mark>')
+
+    def test_different_layers_are_not_marked(self):
+        from .models import DuplicateLink
+        editor = User.objects.create_user('editor', 'e@example.com', GOOD_PASSWORD,
+                                          is_staff=True, is_superuser=True)
+        a = make_qasida(title='Original', lyrics='نص عربي هنا')
+        b = make_qasida(title='Latin only', lyrics='', transliteration='nass arabi huna')
+        link = DuplicateLink.objects.create(first=a, second=b, score=0.6)
+        self.client.force_login(editor)
+        page = self.client.get(reverse('admin:core_duplicatelink_change', args=[link.pk]))
+        self.assertContains(page, 'different layers')
+        self.assertNotContains(page, 'class="q-diff"')

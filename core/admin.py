@@ -13,6 +13,7 @@ from .admin_filters import MissingDetailFilter, TextSearchPanel
 from .forms import QasidaAdminForm
 from .ocr_tool import OcrUploadForm, run_ocr
 from .tasks import enrich_qasida
+from .textdiff import highlight_differences
 
 admin.site.site_header = "Qasida Library"
 admin.site.site_title = "Qasida Library"
@@ -328,8 +329,11 @@ class DuplicateLinkAdmin(LibraryAdmin):
     call costs nothing and can be put back.
     """
 
-    list_display = ('likeness', 'one_copy', 'the_other', 'matched_on', 'state',
-                    'created_at')
+    list_display = ('compare', 'likeness', 'one_copy', 'the_other', 'matched_on',
+                    'state', 'created_at')
+    # The titles open each work on its own; the Compare button, and the
+    # likeness beside it, open the pair.
+    list_display_links = ('likeness',)
     list_filter = ('state', 'matched_on')
     search_fields = ('first__title', 'second__title',
                      'first__native_title', 'second__native_title')
@@ -377,6 +381,17 @@ class DuplicateLinkAdmin(LibraryAdmin):
             len((work.lyrics or work.transliteration or '').strip()),
         )
 
+    @admin.display(description='')
+    def compare(self, obj):
+        """
+        The way into the side-by-side reading.
+
+        It used to be the likeness figure alone - a percentage that did not
+        look like a link, beside titles that did and opened something else.
+        """
+        return format_html('<a class="q-btn-primary q-compare" href="{}">Compare</a>',
+                           reverse('admin:core_duplicatelink_change', args=[obj.pk]))
+
     @admin.display(description='Likeness', ordering='score')
     def likeness(self, obj):
         return f'{obj.score:.0%}'
@@ -391,12 +406,38 @@ class DuplicateLinkAdmin(LibraryAdmin):
 
     @admin.display(description='')
     def comparison(self, obj):
+        text_a, layer_a = self._shown(obj.first)
+        text_b, layer_b = self._shown(obj.second)
+        if layer_a == layer_b:
+            # Only the words that differ are marked, so the eye goes to them.
+            html_a, html_b, differences = highlight_differences(text_a, text_b)
+            if differences is None:
+                summary = 'Too long to mark the differences; read the two in full.'
+            elif differences == 0:
+                summary = 'Identical text, once vowel marks and punctuation are set aside.'
+            else:
+                summary = (f'{differences} difference{"s" if differences != 1 else ""} '
+                           f'marked. Vowel marks and punctuation are not counted.')
+        else:
+            html_a, html_b = text_a, text_b
+            summary = ('The two copies hold different layers of the text, so '
+                       'their differences are not marked.')
         return format_html(
-            '<div class="q-dup-compare">{}{}</div>',
-            self._panel(obj.first), self._panel(obj.second))
+            '<p class="q-dup-summary">{}</p><div class="q-dup-compare">{}{}</div>',
+            summary,
+            self._panel(obj.first, text_a, layer_a, html_a),
+            self._panel(obj.second, text_b, layer_b, html_b))
 
     @staticmethod
-    def _panel(work):
+    def _shown(work):
+        """The text a panel shows for this copy, and which layer it is."""
+        text = (work.lyrics or '').strip()
+        if text:
+            return text, 'Original script'
+        return (work.transliteration or '').strip(), 'Transliteration (no original held)'
+
+    @staticmethod
+    def _panel(work, text, layer, html):
         """
         One copy, as a half of the screen.
 
@@ -407,12 +448,6 @@ class DuplicateLinkAdmin(LibraryAdmin):
         the direction from the text itself, so an Arabic copy reads
         right-to-left beside a Latin one without either being mislabelled.
         """
-        text = (work.lyrics or '').strip()
-        layer = 'Original script'
-        if not text:
-            text = (work.transliteration or '').strip()
-            layer = 'Transliteration (no original held)'
-
         return format_html(
             '<div class="q-dup-side">'
             '<div class="q-dup-head"><a href="{}"><strong>{}</strong></a>'
@@ -422,7 +457,7 @@ class DuplicateLinkAdmin(LibraryAdmin):
             reverse('admin:core_qasida_change', args=[work.pk]),
             work.title or f'#{work.pk}',
             work.source_site.name if work.source_site_id else 'source unknown',
-            len(text), layer, text)
+            len(text), layer, html)
 
     def _rule(self, request, queryset, state, message):
         updated = queryset.update(state=state, reviewed_at=timezone.now())
