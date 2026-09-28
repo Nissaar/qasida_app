@@ -3823,6 +3823,17 @@ class DuplicateComparisonTest(TestCase):
         self.assertIn('<mark class="q-diff">verse</mark>', second)
         self.assertIn('first line of verse\n', first)  # unmarked, breaks kept
 
+    def test_a_repeated_refrain_does_not_throw_the_marking_out_of_step(self):
+        """One changed word in a poem whose stanzas repeat marks one word."""
+        from .textdiff import highlight_differences
+        refrain = 'ya nabi salam alayka\nya rasul salam alayka'
+        first = '\n\n'.join([refrain] * 12)
+        second = first.replace('rasul', 'habib', 1) + '\n\na closing verse'
+        html_a, html_b, count = highlight_differences(first, second)
+        self.assertEqual(count, 2)
+        self.assertEqual(html_a.count('<mark'), 1)
+        self.assertEqual(html_b.count('<mark'), 2)
+
     def test_vowel_marks_alone_are_not_a_difference(self):
         from .textdiff import highlight_differences
         _, _, count = highlight_differences('بِسْمِ اللَّهِ الرَّحْمَٰنِ', 'بسم الله الرحمن')
@@ -3863,3 +3874,97 @@ class DuplicateComparisonTest(TestCase):
         page = self.client.get(reverse('admin:core_duplicatelink_change', args=[link.pk]))
         self.assertContains(page, 'different layers')
         self.assertNotContains(page, 'class="q-diff"')
+
+
+class DuplicateRulingTest(TestCase):
+    """Keeping one copy, keeping both, and taking a ruling back."""
+
+    def setUp(self):
+        from .models import DuplicateLink, QasidaMedia
+        self.editor = User.objects.create_user('editor', 'e@example.com', GOOD_PASSWORD,
+                                               is_staff=True, is_superuser=True)
+        self.reader = User.objects.create_user('reader', 'r@example.com', GOOD_PASSWORD)
+        self.live = make_qasida(title='Burda', lyrics='a line\nanother line')
+        self.better = make_qasida(title='Burda', lyrics='a line\nanother line, vocalised',
+                                  review_state=Qasida.REVIEW_PENDING)
+        self.live.tags.add(Tag.objects.create(name='madih'))
+        Favourite.objects.create(user=self.reader, qasida=self.live)
+        ReadingHistory.objects.create(user=self.reader, qasida=self.live)
+        QasidaMedia.objects.create(qasida=self.live, url='https://youtu.be/abcdefghij1')
+        self.link = DuplicateLink.objects.create(first=self.live, second=self.better, score=1)
+
+    def test_keeping_one_hides_the_other_without_deleting_it(self):
+        kept, hidden, approved_now = self.link.keep(self.better)
+        self.live.refresh_from_db()
+        self.better.refresh_from_db()
+        self.assertEqual(self.live.review_state, Qasida.REVIEW_REJECTED)
+        self.assertEqual(self.live.replaced_by, self.better)
+        # The one on the site was hidden, so the one kept takes its place.
+        self.assertTrue(approved_now)
+        self.assertEqual(self.better.review_state, Qasida.REVIEW_APPROVED)
+
+    def test_what_readers_attached_comes_across(self):
+        self.link.keep(self.better)
+        self.assertTrue(Favourite.objects.filter(user=self.reader, qasida=self.better).exists())
+        self.assertTrue(ReadingHistory.objects.filter(user=self.reader, qasida=self.better).exists())
+        self.assertEqual(self.better.media.count(), 1)
+        self.assertIn('madih', self.better.tags.values_list('name', flat=True))
+
+    def test_the_hidden_copy_s_address_leads_to_the_one_kept(self):
+        old_url = self.live.get_absolute_url()
+        self.link.keep(self.better)
+        self.better.refresh_from_db()
+        response = self.client.get(old_url)
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response['Location'], self.better.get_absolute_url())
+        response = self.client.get(reverse('qasida_by_id', args=[self.live.pk]))
+        self.assertEqual(response.status_code, 301)
+
+    def test_keeping_both_leaves_two_works_with_their_own_addresses(self):
+        self.link.keep_both()
+        self.live.refresh_from_db()
+        self.better.refresh_from_db()
+        self.assertEqual(self.live.review_state, Qasida.REVIEW_APPROVED)
+        self.assertNotEqual(self.live.slug, self.better.slug)
+        self.assertEqual(self.better.slug, 'burda-2')
+
+    def test_undo_puts_both_copies_back_exactly_as_they_were(self):
+        from .models import DuplicateLink
+        self.link.keep(self.better)
+        self.link.reopen()
+        self.live.refresh_from_db()
+        self.better.refresh_from_db()
+        # The one that was on the site is on the site again, and the one the
+        # ruling approved is back awaiting review.
+        self.assertEqual(self.live.review_state, Qasida.REVIEW_APPROVED)
+        self.assertEqual(self.better.review_state, Qasida.REVIEW_PENDING)
+        self.assertIsNone(self.live.replaced_by)
+        self.assertEqual(self.link.state, DuplicateLink.STATE_PENDING)
+        self.assertEqual(self.client.get(self.live.get_absolute_url()).status_code, 200)
+
+    def test_changing_one_s_mind_keeps_the_other_instead(self):
+        self.link.keep(self.better)
+        self.link.keep(self.live)
+        self.live.refresh_from_db()
+        self.better.refresh_from_db()
+        self.assertEqual(self.better.replaced_by, self.live)
+        self.assertIsNone(self.live.replaced_by)
+        self.assertEqual(self.better.review_state, Qasida.REVIEW_REJECTED)
+
+    def test_the_buttons_rule_and_move_on_to_the_next_pair(self):
+        from .models import DuplicateLink
+        a = make_qasida(title='Other A')
+        b = make_qasida(title='Other B')
+        waiting = DuplicateLink.objects.create(first=a, second=b, score=0.7)
+        self.client.force_login(self.editor)
+        url = reverse('admin:core_duplicatelink_change', args=[self.link.pk])
+        page = self.client.get(url)
+        self.assertContains(page, 'value="keep-first"')
+        self.assertContains(page, 'value="keep-both"')
+        self.assertContains(page, 'data-dup-sync')
+        response = self.client.post(url, {'note': 'second is vocalised', '_ruling': 'keep-second'})
+        self.assertRedirects(response, reverse('admin:core_duplicatelink_change', args=[waiting.pk]))
+        self.link.refresh_from_db()
+        self.assertEqual(self.link.kept, self.better)
+        self.assertEqual(self.link.note, 'second is vocalised')
+        self.assertContains(self.client.get(url), 'Undo this ruling')

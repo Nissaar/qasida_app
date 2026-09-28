@@ -345,4 +345,49 @@
         setUpStatusPills();
         setUpSearchShortcut();
     });
+
+    /*
+     * The duplicate comparison: the two copies scroll as one, so the stanza
+     * being read on one side is the stanza shown on the other. The two are
+     * rarely the same length, so each follows the other's position as a
+     * share of its own height rather than by pixels. A switch turns it off,
+     * and is remembered.
+     */
+    document.querySelectorAll('.q-dup-compare').forEach(function (compare) {
+        var panes = compare.querySelectorAll('.q-dup-text');
+        if (panes.length !== 2) return;
+        var toggle = compare.parentElement.querySelector('[data-dup-sync]');
+        var STORE = 'qadmin:dup-sync';
+        try {
+            if (toggle && localStorage.getItem(STORE) === '0') toggle.checked = false;
+        } catch (e) { /* private mode: keep the default */ }
+        if (toggle) {
+            toggle.addEventListener('change', function () {
+                try { localStorage.setItem(STORE, toggle.checked ? '1' : '0'); } catch (e) { /* ignore */ }
+            });
+        }
+
+        // Which pane the reader is moving. The other's scroll events are the
+        // echo of ours and must not be sent back, or the two fight.
+        var leader = null, release = null;
+        function follow(from, to) {
+            if (toggle && !toggle.checked) return;
+            if (leader && leader !== from) return;
+            leader = from;
+            var range = from.scrollHeight - from.clientHeight;
+            var share = range > 0 ? from.scrollTop / range : 0;
+            to.scrollTop = share * (to.scrollHeight - to.clientHeight);
+            clearTimeout(release);
+            release = setTimeout(function () { leader = null; }, 120);
+        }
+        panes[0].addEventListener('scroll', function () { follow(panes[0], panes[1]); }, { passive: true });
+        panes[1].addEventListener('scroll', function () { follow(panes[1], panes[0]); }, { passive: true });
+    });
+
+    /* A ruling moves or hides a work, so each button asks first. */
+    document.querySelectorAll('button[data-confirm]').forEach(function (button) {
+        button.addEventListener('click', function (event) {
+            if (!window.confirm(button.getAttribute('data-confirm'))) event.preventDefault();
+        });
+    });
 })();
