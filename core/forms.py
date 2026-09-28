@@ -1,5 +1,6 @@
 from django import forms
 from django.db import transaction
+from django.utils.text import slugify
 from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import (AuthenticationForm, PasswordChangeForm,
                                        PasswordResetForm, SetPasswordForm,
@@ -311,6 +312,19 @@ class QasidaAdminForm(forms.ModelForm):
     tags_condition = _axis_field(Tag.CATEGORY_CONDITION, _AXIS_LABELS[Tag.CATEGORY_CONDITION])
     tags_other = _axis_field(Tag.CATEGORY_OTHER, _AXIS_LABELS[Tag.CATEGORY_OTHER])
 
+    # Adding a tag the vocabulary does not have yet, without leaving the work
+    # to go and create it in Tags first - the way a poet or a dedication is
+    # added from the same form.
+    new_tags = forms.CharField(
+        required=False, label='Add new tags',
+        help_text="Separate several with commas. One that already exists is simply ticked.")
+    new_tags_axis = forms.ChoiceField(
+        required=False, label='File them under',
+        choices=[('', 'Decide from the name')] + [
+            (category, _AXIS_LABELS[category]) for _name, category in TAG_FIELDS],
+        help_text="From the name means maqam-… and bahr-… go to their axis, a "
+                  "language to Language, and anything else to Not yet filed.")
+
     class Meta:
         model = Qasida
         # Replaced by the per-axis fields above.
@@ -356,6 +370,36 @@ class QasidaAdminForm(forms.ModelForm):
 
         untouched = list(self.instance.tags.exclude(category__in=offered))
         self.instance.tags.set(chosen + untouched)
+        self.instance.tags.add(*self.new_tag_objects())
+
+    def clean_new_tags(self):
+        limit = Tag._meta.get_field('name').max_length
+        names = [slugify(part, allow_unicode=True)
+                 for part in (self.cleaned_data.get('new_tags') or '').split(',')]
+        names = [name for name in dict.fromkeys(names) if name]
+        too_long = [name for name in names if len(name) > limit]
+        if too_long:
+            raise forms.ValidationError(
+                f"A tag can be at most {limit} characters: {', '.join(too_long)}")
+        return names
+
+    def new_tag_objects(self):
+        """
+        The tags typed into "Add new tags", created where they do not exist.
+
+        Written the way the crawlers name tags - lowercase, hyphenated - so a
+        tag typed here is the same tag a source would bring. An existing one,
+        in any spelling of its case, is reused as it is and not re-filed.
+        """
+        axis = self.cleaned_data.get('new_tags_axis') or ''
+        tags = []
+        for name in self.cleaned_data.get('new_tags') or []:
+            tag = Tag.objects.filter(name__iexact=name).first()
+            if tag is None:
+                # Tag.save files a tag with no category by its name.
+                tag = Tag.objects.create(name=name, category=axis)
+            tags.append(tag)
+        return tags
 
 
 class ContributionForm(StyledFormMixin, forms.ModelForm):

@@ -139,6 +139,34 @@ class QasidaAdmin(LibraryAdmin):
     # of pagination controls as well.
     change_list_template = 'admin/core/qasida/change_list.html'
 
+    # The form in sections an editor works through in turn, each of which can
+    # be folded away once done (see admin.js). A field no section names still
+    # appears, under "Other details", so adding one to the model cannot make
+    # it vanish from the form.
+    SECTIONS = (
+        ('The work', ('title', 'slug', 'native_title', 'author', 'dedicated_to', 'language')),
+        ('The text', ('lyrics', 'transliteration', 'translation', 'translation_origin',
+                      'text_quality')),
+        ('Tags', tuple(name for name, _ in QasidaAdminForm.TAG_FIELDS)
+         + ('new_tags', 'new_tags_axis')),
+        ('Where it comes from', ('source_url', 'source_site')),
+        ('Collection', ('collection', 'collection_position')),
+        ('Review', ('review_state', 'reviewed_at')),
+    )
+
+    def get_fieldsets(self, request, obj=None):
+        fields = self.get_fields(request, obj)
+        fieldsets, placed = [], set()
+        for title, names in self.SECTIONS:
+            present = [name for name in names if name in fields]
+            placed.update(present)
+            if present:
+                fieldsets.append((title, {'fields': present, 'classes': ('q-form-section',)}))
+        rest = [name for name in fields if name not in placed]
+        if rest:
+            fieldsets.append(('Other details', {'fields': rest, 'classes': ('q-form-section',)}))
+        return fieldsets
+
     def get_fields(self, request, obj=None):
         """Leave out any tag axis nothing is filed under.
 

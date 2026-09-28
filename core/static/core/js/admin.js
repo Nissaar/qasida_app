@@ -347,6 +347,61 @@
     });
 
     /*
+     * The qasida form, in sections that fold. An editor works through a long
+     * form and folds away what is done, so what they fold is remembered for
+     * that work only: the next work opens with everything showing. A folded
+     * Tags section still says how many are ticked.
+     */
+    (function setUpSections() {
+        var sections = document.querySelectorAll('#content-main fieldset.q-form-section');
+        if (!sections.length) return;
+        var headings = [];
+        sections.forEach(function (fieldset, index) {
+            var heading = fieldset.querySelector('h2');
+            if (!heading) return;
+            var panel = document.createElement('div');
+            panel.className = 'q-section-body';
+            Array.prototype.slice.call(fieldset.children).forEach(function (node) {
+                if (node !== heading && node.tagName !== 'LEGEND') panel.appendChild(node);
+            });
+            fieldset.appendChild(panel);
+
+            var boxes = panel.querySelectorAll('div.q-tag-choices input[type="checkbox"]');
+            if (boxes.length) {
+                var note = document.createElement('span');
+                note.className = 'q-section-note';
+                heading.appendChild(note);
+                var count = function () {
+                    var ticked = panel.querySelectorAll('div.q-tag-choices input:checked').length;
+                    note.textContent = ticked + ' chosen';
+                };
+                panel.addEventListener('change', count);
+                count();
+            }
+            var title = (heading.firstChild && heading.firstChild.textContent || String(index)).trim();
+            makeCollapsible(heading, panel, 'section:' + location.pathname + ':' + title, false);
+            headings.push(heading);
+        });
+
+        if (headings.length < 2) return;
+        var tools = document.createElement('div');
+        tools.className = 'q-section-tools';
+        [['Fold all', true], ['Open all', false]].forEach(function (pair) {
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'q-btn-ghost';
+            button.textContent = pair[0];
+            button.addEventListener('click', function () {
+                headings.forEach(function (heading) {
+                    if (heading.classList.contains('q-collapsed') !== pair[1]) heading.click();
+                });
+            });
+            tools.appendChild(button);
+        });
+        sections[0].parentElement.insertBefore(tools, sections[0]);
+    })();
+
+    /*
      * The duplicate comparison: the two copies scroll as one, so the stanza
      * being read on one side is the stanza shown on the other. The two are
      * rarely the same length, so each follows the other's position as a
