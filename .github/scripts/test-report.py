@@ -41,8 +41,9 @@ AREAS = OrderedDict([
     ('Admin screens', [
         'AdminUserManagementTest', 'AdminListingTest', 'AdminWidgetTest',
         'TagAxisWidgetTest', 'MissingDetailFilterTest', 'PoetEditingTest',
-        'AdminActionPermissionTest', 'AddToCollectionTest']),
-    ('Duplicate detection and comparison', ['DuplicateScanTest', 'DuplicateComparisonTest']),
+        'AdminActionPermissionTest', 'AddToCollectionTest', 'QasidaEditFormTest']),
+    ('Duplicate detection and comparison', [
+        'DuplicateScanTest', 'DuplicateComparisonTest', 'DuplicateRulingTest']),
     ('Crawlers (fetching, extraction, safety)', [
         'CrawlerSafetyTest', 'PoliteFetchTest', 'ExtractionLineTest']),
     ('Security and abuse limits', [
