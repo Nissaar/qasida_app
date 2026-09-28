@@ -406,6 +406,13 @@ class Qasida(models.Model):
     review_state = models.CharField(max_length=8, choices=REVIEW_STATE_CHOICES,
                                     default=REVIEW_PENDING, db_index=True)
     reviewed_at = models.DateTimeField(null=True, blank=True)
+    # Set when an editor ruled this a duplicate and kept the other copy. The
+    # row is kept, hidden, and its address sends readers on to the copy that
+    # replaced it, so links already shared keep working.
+    replaced_by = models.ForeignKey(
+        'self', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='replaces', editable=False,
+        help_text="The copy kept in place of this one, when it was ruled a duplicate.")
     tags = models.ManyToManyField(Tag, blank=True, related_name='qasidas')
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -823,12 +830,16 @@ class DuplicateLink(models.Model):
     """
     Two works that read like the same poem, waiting on an editor's ruling.
 
-    Both rows are kept and both stay usable. The second copy is frequently the
-    better one - fuller, vocalised, carrying a translation - and just as often
-    the two turn out to be genuinely different poems that open on the same
-    formula, which this repertoire does constantly. Neither outcome can be
-    decided mechanically, so nothing is merged or hidden: this only says "these
-    two are worth looking at together".
+    The second copy is frequently the better one - fuller, vocalised,
+    carrying a translation - and just as often the two turn out to be
+    genuinely different poems that open on the same formula, which this
+    repertoire does constantly. Neither outcome can be decided mechanically,
+    so nothing happens until an editor reads the pair and rules:
+
+    - keep one: the other is hidden, never deleted, and its address redirects
+      to the one kept; what readers attached to it moves across;
+    - keep both: they are different poems, and stay two works;
+    - either can be undone, which brings a hidden copy back for review.
     """
 
     MATCH_OPENING = 'opening'
@@ -864,6 +875,14 @@ class DuplicateLink(models.Model):
                             help_text="Why you ruled the way you did.")
     created_at = models.DateTimeField(auto_now_add=True)
     reviewed_at = models.DateTimeField(null=True, blank=True)
+    # Which copy the editor kept, when they ruled the pair a duplicate.
+    kept = models.ForeignKey(Qasida, null=True, blank=True, on_delete=models.SET_NULL,
+                             related_name='+', editable=False)
+    # Each copy's review state before the ruling, so undoing it puts both
+    # back exactly as they were - the copy that was on the site goes back on
+    # the site, rather than into the review queue.
+    kept_was = models.CharField(max_length=8, blank=True, editable=False)
+    hidden_was = models.CharField(max_length=8, blank=True, editable=False)
 
     class Meta:
         # Unreviewed first, and within those the likeliest pairs at the top.
@@ -875,6 +894,121 @@ class DuplicateLink(models.Model):
 
     def __str__(self):
         return f"{self.first} / {self.second} ({self.score:.2f})"
+
+    def other_than(self, work):
+        return self.second if work.pk == self.first_id else self.first
+
+    def keep(self, work, note=None):
+        """
+        Rule the pair a duplicate and keep `work`, hiding the other copy.
+
+        Nothing is deleted. The other copy is marked rejected, so the site
+        stops serving it, and records `work` as its replacement, so its
+        address redirects there. Readers lose nothing: saved works, reading
+        history and recordings on the hidden copy move to the kept one, and
+        its tags are added. If the hidden copy was the one on the site and
+        the kept one was still awaiting review, the kept one is approved -
+        the editor has just read it against the other in full.
+
+        Returns (kept, hidden, approved_now).
+        """
+        if work.pk not in (self.first_id, self.second_id):
+            raise ValueError('That work is not part of this pair.')
+        with transaction.atomic():
+            # Changing one's mind from an earlier ruling on this pair starts
+            # from both copies as they were before it.
+            self._restore_hidden()
+            kept, hidden = (Qasida.objects.select_for_update()
+                            .filter(pk__in=[self.first_id, self.second_id])
+                            .order_by('pk'))
+            if hidden.pk == work.pk:
+                kept, hidden = hidden, kept
+
+            self.kept_was, self.hidden_was = kept.review_state, hidden.review_state
+            approved_now = (hidden.review_state == Qasida.REVIEW_APPROVED
+                            and kept.review_state != Qasida.REVIEW_APPROVED)
+            if approved_now:
+                kept.review_state = Qasida.REVIEW_APPROVED
+                kept.reviewed_at = timezone.now()
+                kept.save(update_fields=['review_state', 'reviewed_at'])
+
+            hidden.review_state = Qasida.REVIEW_REJECTED
+            hidden.reviewed_at = timezone.now()
+            hidden.replaced_by = kept
+            hidden.save(update_fields=['review_state', 'reviewed_at', 'replaced_by'])
+            # Anything that was pointing here, from an earlier ruling, now
+            # points straight at the copy that survives.
+            Qasida.objects.filter(replaced_by=hidden).update(replaced_by=kept)
+
+            _move_reader_rows(Favourite, hidden, kept)
+            _move_reader_rows(ReadingHistory, hidden, kept)
+            known = set(kept.media.values_list('video_id', flat=True))
+            hidden.media.exclude(video_id__in=known - {''}).update(qasida=kept)
+            kept.tags.add(*hidden.tags.all())
+            if kept.collection_id is None and hidden.collection_id is not None:
+                kept.collection_id = hidden.collection_id
+                kept.collection_position = hidden.collection_position
+                kept.save(update_fields=['collection', 'collection_position'])
+
+            self.state = self.STATE_DUPLICATE
+            self.kept = kept
+            self.reviewed_at = timezone.now()
+            if note is not None:
+                self.note = note
+            self.save(update_fields=['state', 'kept', 'kept_was', 'hidden_was',
+                                     'reviewed_at', 'note'])
+        return kept, hidden, approved_now
+
+    def keep_both(self, note=None):
+        """Rule them different poems: both stay, as two works."""
+        with transaction.atomic():
+            self._restore_hidden()
+            self.state = self.STATE_DISTINCT
+            self.reviewed_at = timezone.now()
+            if note is not None:
+                self.note = note
+            self.save(update_fields=['state', 'kept', 'kept_was', 'hidden_was',
+                                     'reviewed_at', 'note'])
+
+    def reopen(self):
+        """Take the ruling back, returning a hidden copy to the review queue."""
+        with transaction.atomic():
+            self._restore_hidden()
+            self.state = self.STATE_PENDING
+            self.reviewed_at = None
+            self.save(update_fields=['state', 'kept', 'kept_was', 'hidden_was',
+                                     'reviewed_at'])
+
+    def _restore_hidden(self):
+        """
+        Put both copies back as they were before a "keep one" ruling.
+
+        Each returns to the review state it had then; a copy ruled before
+        that was recorded goes back to awaiting review. What moved to the
+        kept copy stays there: a reader who saved the hidden one has it saved
+        on the other, and taking that away again would lose it.
+        """
+        if self.kept_id is None:
+            return
+        hidden_pk = self.second_id if self.kept_id == self.first_id else self.first_id
+        Qasida.objects.filter(pk=hidden_pk, replaced_by_id=self.kept_id).update(
+            review_state=self.hidden_was or Qasida.REVIEW_PENDING, replaced_by=None)
+        if self.kept_was:
+            Qasida.objects.filter(pk=self.kept_id).update(review_state=self.kept_was)
+        self.kept = None
+        self.kept_was = self.hidden_was = ''
+
+
+def _move_reader_rows(model, hidden, kept):
+    """
+    Move one reader's rows from the hidden copy to the kept one.
+
+    A reader can hold each work only once, so where they already have the kept
+    copy, the row for the hidden one is simply dropped.
+    """
+    already = model.objects.filter(qasida=kept).values('user_id')
+    model.objects.filter(qasida=hidden).exclude(user_id__in=already).update(qasida=kept)
+    model.objects.filter(qasida=hidden).delete()
 
 
 class SourceWebsite(models.Model):

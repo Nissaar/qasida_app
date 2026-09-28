@@ -337,12 +337,15 @@ class DuplicateLinkAdmin(LibraryAdmin):
     list_filter = ('state', 'matched_on')
     search_fields = ('first__title', 'second__title',
                      'first__native_title', 'second__native_title')
-    actions = ('mark_duplicate', 'mark_distinct', 'reopen')
-    readonly_fields = ('comparison', 'score', 'matched_on', 'created_at',
+    # No batch "same poem": ruling a pair a duplicate means choosing which
+    # copy to keep, which is a decision made with the two in front of you.
+    actions = ('mark_distinct', 'reopen')
+    readonly_fields = ('comparison', 'state', 'score', 'matched_on', 'created_at',
                        'reviewed_at')
     # The two copies come first and fill the width, because reading them
-    # against each other is the whole job; the ruling sits under them, and how
-    # the pair was found is folded away until someone wants to know.
+    # against each other is the whole job. The ruling is made with the buttons
+    # on them; the note sits under them, and how the pair was found is folded
+    # away until someone wants to know.
     fieldsets = (
         (None, {'fields': ('comparison',), 'classes': ('q-dup-fieldset',)}),
         ('Your ruling', {'fields': ('state', 'note')}),
@@ -404,6 +407,74 @@ class DuplicateLinkAdmin(LibraryAdmin):
     def the_other(self, obj):
         return self._heading(obj.second)
 
+    RULINGS = {'keep-first', 'keep-second', 'keep-both', 'reopen'}
+
+    def save_model(self, request, obj, form, change):
+        """Save the note, then carry out the ruling button that was pressed."""
+        super().save_model(request, obj, form, change)
+        ruling = request.POST.get('_ruling')
+        if ruling not in self.RULINGS:
+            return
+        note = form.cleaned_data.get('note')
+        if ruling in ('keep-first', 'keep-second'):
+            work = obj.first if ruling == 'keep-first' else obj.second
+            kept, hidden, approved_now = obj.keep(work, note=note)
+            message = (f'Kept “{kept}”. “{hidden}” is hidden, not deleted, and its '
+                       f'address now leads to the one kept; saved copies, reading '
+                       f'history, recordings and tags came across with it.')
+            if approved_now:
+                message += f' “{kept}” is now on the site in its place.'
+            elif kept.review_state != Qasida.REVIEW_APPROVED:
+                message += (f' “{kept}” is not on the site yet - it is '
+                            f'{kept.get_review_state_display().lower()}.')
+        elif ruling == 'keep-both':
+            obj.keep_both(note=note)
+            message = (f'Kept both as different works. Their addresses already '
+                       f'differ: /qasida/{obj.first.slug}/ and /qasida/{obj.second.slug}/.')
+        else:
+            obj.reopen()
+            message = 'Ruling undone: both copies are back as they were before it, and the pair is waiting for a ruling.'
+        request._q_ruling_message = message
+
+    def response_change(self, request, obj):
+        """After a ruling, straight on to the next pair waiting for one."""
+        message = getattr(request, '_q_ruling_message', None)
+        if message is None:
+            return super().response_change(request, obj)
+        self.message_user(request, message, django_messages.SUCCESS)
+        following = (DuplicateLink.objects.filter(state=DuplicateLink.STATE_PENDING)
+                     .exclude(pk=obj.pk).first())
+        if following is not None and request.POST.get('_ruling') != 'reopen':
+            return redirect('admin:core_duplicatelink_change', following.pk)
+        if request.POST.get('_ruling') == 'reopen':
+            return redirect('admin:core_duplicatelink_change', obj.pk)
+        return redirect('admin:core_duplicatelink_changelist')
+
+    def _ruling_bar(self, obj, summary):
+        """The pair's standing, and the choice that is not tied to one copy."""
+        if obj.state == DuplicateLink.STATE_PENDING:
+            standing = ''
+            action = format_html(
+                '<button type="submit" name="_ruling" value="keep-both" class="q-btn-ghost" '
+                'data-confirm="Keep both as two different works?">Keep both - different poems</button>')
+        else:
+            if obj.state == DuplicateLink.STATE_DUPLICATE and obj.kept_id:
+                standing = format_html('<strong>Ruled a duplicate:</strong> “{}” kept, the other hidden. ',
+                                       obj.kept)
+            elif obj.state == DuplicateLink.STATE_DUPLICATE:
+                standing = format_html('<strong>Ruled a duplicate</strong> (no copy chosen). ')
+            else:
+                standing = format_html('<strong>Ruled different works.</strong> ')
+            action = format_html(
+                '<button type="submit" name="_ruling" value="reopen" class="q-btn-ghost" '
+                'data-confirm="Undo this ruling? Both copies go back to how they were before it.">'
+                'Undo this ruling</button>')
+        return format_html(
+            '<div class="q-dup-bar"><p class="q-dup-summary">{}{}</p>'
+            '<div class="q-dup-bar-actions">'
+            '<label class="q-dup-sync"><input type="checkbox" data-dup-sync checked> Scroll together</label>'
+            '{}</div></div>', standing, summary, action)
+
     @admin.display(description='')
     def comparison(self, obj):
         text_a, layer_a = self._shown(obj.first)
@@ -423,10 +494,10 @@ class DuplicateLinkAdmin(LibraryAdmin):
             summary = ('The two copies hold different layers of the text, so '
                        'their differences are not marked.')
         return format_html(
-            '<p class="q-dup-summary">{}</p><div class="q-dup-compare">{}{}</div>',
-            summary,
-            self._panel(obj.first, text_a, layer_a, html_a),
-            self._panel(obj.second, text_b, layer_b, html_b))
+            '{}<div class="q-dup-compare">{}{}</div>',
+            self._ruling_bar(obj, summary),
+            self._panel(obj, obj.first, 'keep-first', text_a, layer_a, html_a),
+            self._panel(obj, obj.second, 'keep-second', text_b, layer_b, html_b))
 
     @staticmethod
     def _shown(work):
@@ -437,7 +508,7 @@ class DuplicateLinkAdmin(LibraryAdmin):
         return (work.transliteration or '').strip(), 'Transliteration (no original held)'
 
     @staticmethod
-    def _panel(work, text, layer, html):
+    def _panel(link, work, ruling, text, layer, html):
         """
         One copy, as a half of the screen.
 
@@ -448,39 +519,44 @@ class DuplicateLinkAdmin(LibraryAdmin):
         the direction from the text itself, so an Arabic copy reads
         right-to-left beside a Latin one without either being mislabelled.
         """
+        if link.kept_id == work.pk:
+            choice = format_html('<span class="q-dup-verdict q-dup-kept">Kept</span>')
+        elif link.kept_id:
+            choice = format_html('<span class="q-dup-verdict q-dup-hidden">Hidden, leads to the other</span>')
+        else:
+            other = link.other_than(work)
+            choice = format_html(
+                '<button type="submit" name="_ruling" value="{}" class="q-btn-primary q-dup-keep" '
+                'data-confirm="{}">Keep this one</button>',
+                ruling,
+                f'Keep “{work.title or work.pk}” and hide “{other.title or other.pk}”? '
+                f'Nothing is deleted, and this can be undone.')
         return format_html(
             '<div class="q-dup-side">'
-            '<div class="q-dup-head"><a href="{}"><strong>{}</strong></a>'
-            '<span class="q-dup-meta">{} &middot; {} characters</span>'
-            '<span class="q-dup-layer">{}</span></div>'
+            '<div class="q-dup-head"><div class="q-dup-head-row"><div>'
+            '<a href="{}"><strong>{}</strong></a>'
+            '<span class="q-dup-meta">{} &middot; {} &middot; {} characters</span>'
+            '<span class="q-dup-layer">{}</span></div>{}</div></div>'
             '<div class="q-dup-text q-rtl" dir="auto">{}</div></div>',
             reverse('admin:core_qasida_change', args=[work.pk]),
             work.title or f'#{work.pk}',
             work.source_site.name if work.source_site_id else 'source unknown',
-            len(text), layer, html)
+            work.get_review_state_display().lower(),
+            len(text), layer, choice, html)
 
-    def _rule(self, request, queryset, state, message):
-        updated = queryset.update(state=state, reviewed_at=timezone.now())
-        self.message_user(request, f'{updated} {message}',
-                          django_messages.SUCCESS)
-
-    @admin.action(description='These are the same poem', permissions=['change'])
-    def mark_duplicate(self, request, queryset):
-        self._rule(request, queryset, DuplicateLink.STATE_DUPLICATE,
-                   'pair(s) recorded as duplicates. Nothing was deleted - open '
-                   'either work to merge the two or remove one yourself.')
-
-    @admin.action(description='These are different poems', permissions=['change'])
+    @admin.action(description='These are different poems (keep both)', permissions=['change'])
     def mark_distinct(self, request, queryset):
-        self._rule(request, queryset, DuplicateLink.STATE_DISTINCT,
-                   'pair(s) recorded as different works; they will not be '
-                   'raised again.')
+        for link in queryset:
+            link.keep_both()
+        self.message_user(request, f'{queryset.count()} pair(s) recorded as different works; '
+                                   f'they will not be raised again.', django_messages.SUCCESS)
 
-    @admin.action(description='Put back for review', permissions=['change'])
+    @admin.action(description='Put back for review (undo the ruling)', permissions=['change'])
     def reopen(self, request, queryset):
-        updated = queryset.update(state=DuplicateLink.STATE_PENDING,
-                                  reviewed_at=None)
-        self.message_user(request, f'{updated} pair(s) back in the queue.',
+        for link in queryset:
+            link.reopen()
+        self.message_user(request, f'{queryset.count()} pair(s) back in the queue, each copy '
+                                   f'as it was before the ruling.',
                           django_messages.SUCCESS)
 
 

@@ -5,7 +5,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db.models import Count, Q
 from django.db.models.functions import Coalesce, Length
-from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
+from django.http import Http404, HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from . import notify, throttle
@@ -384,6 +384,25 @@ def search_suggest(request):
     return JsonResponse({'query': query, 'total': total, 'results': results})
 
 
+def _replacement(request, found):
+    """
+    Where a hidden duplicate's address should now lead, if anywhere.
+
+    A work an editor ruled a duplicate of another is hidden rather than
+    deleted, and remembers which copy was kept; links to it are out in the
+    world, so they are sent on rather than left to 404. Followed a few steps
+    at most, in case the kept copy was itself later ruled a duplicate.
+    """
+    work = found.select_related('replaced_by').first()
+    for _ in range(5):
+        if work is None or work.replaced_by_id is None:
+            return None
+        work = work.replaced_by
+        if _visible(request).filter(pk=work.pk).exists():
+            return work
+    return None
+
+
 def qasida_by_id(request, pk):
     """
     The old numeric URL, kept working.
@@ -393,7 +412,10 @@ def qasida_by_id(request, pk):
     """
     # Through the review gate like every other way in: an unapproved work's
     # slug is built from its title, so redirecting to it would read that out.
-    qasida = get_object_or_404(_visible(request), pk=pk)
+    qasida = _visible(request).filter(pk=pk).first() or _replacement(
+        request, Qasida.objects.filter(pk=pk))
+    if qasida is None:
+        raise Http404('No such qasida.')
     return redirect('qasida_detail', slug=qasida.slug, permanent=True)
 
 
@@ -433,10 +455,14 @@ def qasida_detail(request, slug):
     # Everything the page lists, fetched once: the template asks for the
     # recordings and scans a dozen times over - count, first, all - and each
     # of those was a query of its own.
-    qasida = get_object_or_404(
-        _visible(request).select_related('author', 'dedicated_to', 'collection')
-        .prefetch_related('media', 'images', 'tags'),
-        slug=slug)
+    qasida = (_visible(request).select_related('author', 'dedicated_to', 'collection')
+              .prefetch_related('media', 'images', 'tags')
+              .filter(slug=slug).first())
+    if qasida is None:
+        kept = _replacement(request, Qasida.objects.filter(slug=slug))
+        if kept is None:
+            raise Http404('No such qasida.')
+        return redirect(kept.get_absolute_url(), permanent=True)
 
     if request.method == 'POST':
         keys = throttle.keys_for(request, 'suggestion')

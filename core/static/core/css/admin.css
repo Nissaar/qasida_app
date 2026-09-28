@@ -1499,7 +1499,42 @@ html[data-theme="auto"],
     border-radius: 3px;
     padding: 0 .1em;
 }
-.q-dup-summary { margin: 0; padding: .75rem .9rem; font-size: .85rem; color: var(--q-muted); }
+/* Above the two copies: where the pair stands, the choice that is not tied
+   to one copy, and whether the two scroll as one. */
+.q-dup-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: .5rem 1rem;
+    padding: .6rem .9rem .8rem;
+}
+.q-dup-summary { margin: 0; font-size: .85rem; color: var(--q-muted); }
+.q-dup-bar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; }
+/* The fieldset hides its labels (the panels say what they are); this one is
+   a control, not a field label, so it is shown. */
+.q-dup-fieldset label.q-dup-sync,
+.q-dup-sync { display: inline-flex; align-items: center; gap: .35rem; font-size: .8rem; color: var(--q-muted); cursor: pointer; }
+.q-btn-ghost {
+    background: transparent;
+    color: var(--q-accent-ink);
+    border: 1px solid var(--q-accent-line);
+    border-radius: var(--q-radius-sm);
+    padding: .45rem .8rem;
+    font-weight: 600;
+    font-size: .78125rem;
+    font-family: inherit;
+    cursor: pointer;
+}
+.q-btn-ghost:hover { background: var(--q-accent-tint); }
+
+/* Each copy's header carries its own "keep this one", or the verdict. */
+.q-dup-head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: .75rem; }
+.q-dup-head-row > div:first-child { display: flex; flex-direction: column; gap: .15rem; min-width: 0; }
+.q-dup-keep { flex: none; cursor: pointer; white-space: nowrap; }
+.q-dup-verdict { flex: none; font-size: .75rem; font-weight: 600; border-radius: 999px; padding: .15rem .6rem; }
+.q-dup-kept { color: var(--q-accent-ink); background: var(--q-accent-tint); border: 1px solid var(--q-accent-line); }
+.q-dup-hidden { color: var(--q-muted); border: 1px dashed var(--q-line); }
 
 /* The way into a pair from the list: a button, because the likeness figure
    alone did not look like something to press. */
