@@ -3968,3 +3968,67 @@ class DuplicateRulingTest(TestCase):
         self.assertEqual(self.link.kept, self.better)
         self.assertEqual(self.link.note, 'second is vocalised')
         self.assertContains(self.client.get(url), 'Undo this ruling')
+
+
+class QasidaEditFormTest(TestCase):
+    """The admin's qasida form: sections, and tags added from it."""
+
+    def setUp(self):
+        self.editor = User.objects.create_user('editor', 'e@example.com', GOOD_PASSWORD,
+                                               is_staff=True, is_superuser=True)
+        self.client.force_login(self.editor)
+        Tag.objects.create(name='maqam-rast')
+        Tag.objects.create(name='naat')
+        self.work = make_qasida(title='Burda')
+
+    def post(self, **extra):
+        page = self.client.get(reverse('admin:core_qasida_change', args=[self.work.pk]))
+        form = page.context['adminform'].form
+        data = {name: form.initial.get(name, getattr(self.work, name, '')) or ''
+                for name in ('title', 'slug', 'native_title', 'language', 'lyrics',
+                             'transliteration', 'translation')}
+        data.update({
+            'review_state': self.work.review_state, 'text_quality': self.work.text_quality,
+            'translation_origin': self.work.translation_origin,
+            'media-TOTAL_FORMS': 0, 'media-INITIAL_FORMS': 0,
+            'images-TOTAL_FORMS': 0, 'images-INITIAL_FORMS': 0,
+            '_continue': '1',
+        })
+        data.update(extra)
+        return self.client.post(reverse('admin:core_qasida_change', args=[self.work.pk]), data)
+
+    def test_the_form_is_in_named_sections(self):
+        page = self.client.get(reverse('admin:core_qasida_change', args=[self.work.pk]))
+        titles = [title for title, _ in page.context['adminform'].fieldsets]
+        self.assertEqual(titles[:3], ['The work', 'The text', 'Tags'])
+        self.assertContains(page, 'q-form-section')
+
+    def test_every_field_is_in_some_section(self):
+        from django.contrib import admin as django_admin
+        model_admin = django_admin.site._registry[Qasida]
+        request = self.client.get('/').wsgi_request
+        request.user = self.editor
+        fields = set(model_admin.get_fields(request, self.work))
+        placed = {name for _, options in model_admin.get_fieldsets(request, self.work)
+                  for name in options['fields']}
+        self.assertEqual(fields, placed)
+
+    def test_new_tags_are_created_filed_and_ticked(self):
+        response = self.post(new_tags='Maqam Bayati, Burda season, naat')
+        self.assertEqual(response.status_code, 302, response.content[:500])
+        names = set(self.work.tags.values_list('name', flat=True))
+        self.assertEqual(names, {'maqam-bayati', 'burda-season', 'naat'})
+        self.assertEqual(Tag.objects.get(name='maqam-bayati').category, Tag.CATEGORY_MAQAM)
+        self.assertEqual(Tag.objects.get(name='burda-season').category, Tag.CATEGORY_OTHER)
+        self.assertEqual(Tag.objects.filter(name='naat').count(), 1)
+
+    def test_a_new_tag_can_be_filed_on_a_chosen_axis(self):
+        self.post(new_tags='Burda season', new_tags_axis=Tag.CATEGORY_FORM)
+        self.assertEqual(Tag.objects.get(name='burda-season').category, Tag.CATEGORY_FORM)
+        self.assertTrue(self.work.tags.filter(name='burda-season').exists())
+
+    def test_adding_tags_keeps_the_ones_already_chosen(self):
+        rast = Tag.objects.get(name='maqam-rast')
+        self.work.tags.add(rast)
+        self.post(tags_maqam=[rast.pk], new_tags='naat')
+        self.assertEqual(set(self.work.tags.values_list('name', flat=True)), {'maqam-rast', 'naat'})
