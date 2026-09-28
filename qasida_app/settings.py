@@ -483,3 +483,7 @@ LOGGING = {
 # https://docs.djangoproject.com/en/6.1/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Django's runner, which also writes each test's outcome to TEST_RESULTS_JSON
+# when that is set, for the report CI posts on a pull request.
+TEST_RUNNER = 'core.test_runner.RecordingRunner'
