@@ -3,6 +3,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.shortcuts import redirect, render
 from django.urls import path, reverse
+from django.db import transaction
 from django.db.models import Count, Max
 from django.utils import timezone
 from django.utils.html import format_html
@@ -12,14 +13,14 @@ from .admin_filters import MissingDetailFilter, TextSearchPanel
 from .forms import QasidaAdminForm
 from .ocr_tool import OcrUploadForm, run_ocr
 from .tasks import enrich_qasida
+from .textdiff import highlight_differences
 
 admin.site.site_header = "Qasida Library"
 admin.site.site_title = "Qasida Library"
 admin.site.index_title = "Library administration"
 from .models import (Collection, ContactMessage, Contribution, Dedication,
-                     DuplicateLink, Favourite, Tag, Poet, Qasida, QasidaImage,
-                     QasidaMedia, ReadingHistory, ReaderProfile, Suggestion,
-                     SourceWebsite)
+                     DuplicateLink, Tag, Poet, Qasida, QasidaImage,
+                     QasidaMedia, ReaderProfile, Suggestion, SourceWebsite)
 
 class LibraryAdmin(admin.ModelAdmin):
     """
@@ -64,7 +65,7 @@ class TagAdmin(LibraryAdmin):
     def use_count(self, obj):
         return obj._uses
 
-    @admin.action(description="Re-file by name (overwrites the current group)")
+    @admin.action(description="Re-file by name (overwrites the current group)", permissions=['change'])
     def refile_by_name(self, request, queryset):
         """
         Run the naming rules over the selected tags again.
@@ -153,11 +154,13 @@ class QasidaAdmin(LibraryAdmin):
 
     def get_queryset(self, request):
         # Annotated once for the whole page rather than counted per row.
-        return super().get_queryset(request).annotate(_saves=Count('favourited_by', distinct=True))
+        return super().get_queryset(request).annotate(
+            _saves=Count('favourited_by', distinct=True),
+            _scans=Count('images', distinct=True))
 
-    @admin.display(description='Scans')
+    @admin.display(description='Scans', ordering='_scans')
     def scan_count(self, obj):
-        return obj.images.count()
+        return obj._scans
 
     @admin.display(description='Saved by', ordering='_saves')
     def saved_count(self, obj):
@@ -173,18 +176,18 @@ class QasidaAdmin(LibraryAdmin):
     def has_translation(self, obj):
         return bool(obj.translation)
 
-    @admin.action(description="Approve for display on the site")
+    @admin.action(description="Approve for display on the site", permissions=['change'])
     def approve_for_display(self, request, queryset):
         count = queryset.update(review_state=Qasida.REVIEW_APPROVED,
                                 reviewed_at=timezone.now())
         self.message_user(request, f"{count} qasida(s) approved and now visible to readers.")
 
-    @admin.action(description="Send back to Awaiting review")
+    @admin.action(description="Send back to Awaiting review", permissions=['change'])
     def send_back_for_review(self, request, queryset):
         count = queryset.update(review_state=Qasida.REVIEW_PENDING, reviewed_at=None)
         self.message_user(request, f"{count} qasida(s) hidden again pending review.")
 
-    @admin.action(description="Transliterate and translate (fill blanks only)")
+    @admin.action(description="Transliterate and translate (fill blanks only)", permissions=['change'])
     def enrich_selected(self, request, queryset):
         for qasida in queryset:
             enrich_qasida.delay(qasida.pk, False)
@@ -193,7 +196,7 @@ class QasidaAdmin(LibraryAdmin):
             f"Queued {queryset.count()} qasida(s). The worker fills in the blanks; "
             f"reload in a moment to see them.")
 
-    @admin.action(description="Transliterate and translate (redo, overwrites)")
+    @admin.action(description="Transliterate and translate (redo, overwrites)", permissions=['change'])
     def enrich_selected_overwrite(self, request, queryset):
         for qasida in queryset:
             enrich_qasida.delay(qasida.pk, True)
@@ -241,9 +244,13 @@ class QasidaAdmin(LibraryAdmin):
         """Derive the missing fields whenever an editor saves a work by hand."""
         super().save_model(request, obj, form, change)
         if not obj.transliteration or not obj.translation:
-            enrich_qasida.delay(obj.pk, False)
+            # After the admin's transaction commits: queued inside it, the
+            # worker could look for a brand-new work before it existed, find
+            # nothing, and the enrichment the editor was promised never ran.
+            pk = obj.pk
+            transaction.on_commit(lambda: enrich_qasida.delay(pk, False))
 
-    @admin.action(description="Add selected to a collection…")
+    @admin.action(description="Add selected to a collection…", permissions=['change'])
     def add_to_collection(self, request, queryset):
         """
         Attach the selected works to a collection, creating one if asked.
@@ -268,15 +275,25 @@ class QasidaAdmin(LibraryAdmin):
                 return None
 
             start = (collection.parts.aggregate(top=Max('collection_position'))['top'] or 0)
-            for offset, qasida in enumerate(queryset.order_by('title'), start=1):
+            # Works already in this collection keep their place: renumbering
+            # them to the end would scramble a reading order someone set.
+            joining = list(queryset.select_related(None).exclude(collection=collection)
+                           .order_by('title').only('pk', 'title'))
+            for offset, qasida in enumerate(joining, start=1):
                 qasida.collection = collection
                 qasida.collection_position = start + offset
-                qasida.save(update_fields=['collection', 'collection_position'])
+            # One statement per batch rather than a full save per work: a save
+            # rebuilds the search text from the whole text, and none of that
+            # depends on which collection a work sits in.
+            Qasida.objects.bulk_update(joining, ['collection', 'collection_position'],
+                                       batch_size=500)
 
-            self.message_user(
-                request,
-                f"Added {queryset.count()} work(s) to “{collection.name}”, "
-                f"numbered from {start + 1}.")
+            already = queryset.count() - len(joining)
+            message = (f"Added {len(joining)} work(s) to “{collection.name}”, "
+                       f"numbered from {start + 1}.")
+            if already:
+                message += f" {already} were already in it and kept their place."
+            self.message_user(request, message)
             return redirect(request.get_full_path())
 
         return render(request, 'admin/core/qasida/add_to_collection.html', {
@@ -288,13 +305,13 @@ class QasidaAdmin(LibraryAdmin):
             'opts': self.model._meta,
         })
 
-    @admin.action(description="Remove selected from their collection")
+    @admin.action(description="Remove selected from their collection", permissions=['change'])
     def remove_from_collection(self, request, queryset):
         count = queryset.update(collection=None, collection_position=None)
         self.message_user(request, f"Removed {count} work(s) from their collection. "
                                    f"The works themselves are untouched.")
 
-    @admin.action(description="Reject (keep, never display)")
+    @admin.action(description="Reject (keep, never display)", permissions=['change'])
     def reject_qasidas(self, request, queryset):
         count = queryset.update(review_state=Qasida.REVIEW_REJECTED,
                                 reviewed_at=timezone.now())
@@ -312,8 +329,11 @@ class DuplicateLinkAdmin(LibraryAdmin):
     call costs nothing and can be put back.
     """
 
-    list_display = ('likeness', 'one_copy', 'the_other', 'matched_on', 'state',
-                    'created_at')
+    list_display = ('compare', 'likeness', 'one_copy', 'the_other', 'matched_on',
+                    'state', 'created_at')
+    # The titles open each work on its own; the Compare button, and the
+    # likeness beside it, open the pair.
+    list_display_links = ('likeness',)
     list_filter = ('state', 'matched_on')
     search_fields = ('first__title', 'second__title',
                      'first__native_title', 'second__native_title')
@@ -361,6 +381,17 @@ class DuplicateLinkAdmin(LibraryAdmin):
             len((work.lyrics or work.transliteration or '').strip()),
         )
 
+    @admin.display(description='')
+    def compare(self, obj):
+        """
+        The way into the side-by-side reading.
+
+        It used to be the likeness figure alone - a percentage that did not
+        look like a link, beside titles that did and opened something else.
+        """
+        return format_html('<a class="q-btn-primary q-compare" href="{}">Compare</a>',
+                           reverse('admin:core_duplicatelink_change', args=[obj.pk]))
+
     @admin.display(description='Likeness', ordering='score')
     def likeness(self, obj):
         return f'{obj.score:.0%}'
@@ -375,12 +406,38 @@ class DuplicateLinkAdmin(LibraryAdmin):
 
     @admin.display(description='')
     def comparison(self, obj):
+        text_a, layer_a = self._shown(obj.first)
+        text_b, layer_b = self._shown(obj.second)
+        if layer_a == layer_b:
+            # Only the words that differ are marked, so the eye goes to them.
+            html_a, html_b, differences = highlight_differences(text_a, text_b)
+            if differences is None:
+                summary = 'Too long to mark the differences; read the two in full.'
+            elif differences == 0:
+                summary = 'Identical text, once vowel marks and punctuation are set aside.'
+            else:
+                summary = (f'{differences} difference{"s" if differences != 1 else ""} '
+                           f'marked. Vowel marks and punctuation are not counted.')
+        else:
+            html_a, html_b = text_a, text_b
+            summary = ('The two copies hold different layers of the text, so '
+                       'their differences are not marked.')
         return format_html(
-            '<div class="q-dup-compare">{}{}</div>',
-            self._panel(obj.first), self._panel(obj.second))
+            '<p class="q-dup-summary">{}</p><div class="q-dup-compare">{}{}</div>',
+            summary,
+            self._panel(obj.first, text_a, layer_a, html_a),
+            self._panel(obj.second, text_b, layer_b, html_b))
 
     @staticmethod
-    def _panel(work):
+    def _shown(work):
+        """The text a panel shows for this copy, and which layer it is."""
+        text = (work.lyrics or '').strip()
+        if text:
+            return text, 'Original script'
+        return (work.transliteration or '').strip(), 'Transliteration (no original held)'
+
+    @staticmethod
+    def _panel(work, text, layer, html):
         """
         One copy, as a half of the screen.
 
@@ -391,12 +448,6 @@ class DuplicateLinkAdmin(LibraryAdmin):
         the direction from the text itself, so an Arabic copy reads
         right-to-left beside a Latin one without either being mislabelled.
         """
-        text = (work.lyrics or '').strip()
-        layer = 'Original script'
-        if not text:
-            text = (work.transliteration or '').strip()
-            layer = 'Transliteration (no original held)'
-
         return format_html(
             '<div class="q-dup-side">'
             '<div class="q-dup-head"><a href="{}"><strong>{}</strong></a>'
@@ -406,26 +457,26 @@ class DuplicateLinkAdmin(LibraryAdmin):
             reverse('admin:core_qasida_change', args=[work.pk]),
             work.title or f'#{work.pk}',
             work.source_site.name if work.source_site_id else 'source unknown',
-            len(text), layer, text)
+            len(text), layer, html)
 
     def _rule(self, request, queryset, state, message):
         updated = queryset.update(state=state, reviewed_at=timezone.now())
         self.message_user(request, f'{updated} {message}',
                           django_messages.SUCCESS)
 
-    @admin.action(description='These are the same poem')
+    @admin.action(description='These are the same poem', permissions=['change'])
     def mark_duplicate(self, request, queryset):
         self._rule(request, queryset, DuplicateLink.STATE_DUPLICATE,
                    'pair(s) recorded as duplicates. Nothing was deleted - open '
                    'either work to merge the two or remove one yourself.')
 
-    @admin.action(description='These are different poems')
+    @admin.action(description='These are different poems', permissions=['change'])
     def mark_distinct(self, request, queryset):
         self._rule(request, queryset, DuplicateLink.STATE_DISTINCT,
                    'pair(s) recorded as different works; they will not be '
                    'raised again.')
 
-    @admin.action(description='Put back for review')
+    @admin.action(description='Put back for review', permissions=['change'])
     def reopen(self, request, queryset):
         updated = queryset.update(state=DuplicateLink.STATE_PENDING,
                                   reviewed_at=None)
@@ -459,17 +510,23 @@ class SuggestionAdmin(LibraryAdmin):
         return obj.email or 'anonymous'
     actions = ['approve_suggestions', 'reject_suggestions']
 
+    @admin.action(description="Approve and apply selected suggestions",
+                  permissions=['change'])
     def approve_suggestions(self, request, queryset):
-        for suggestion in queryset:
-            suggestion.apply()
-        self.message_user(request, f"{queryset.count()} suggestions approved and applied.")
-    approve_suggestions.short_description = "Approve and apply selected suggestions"
+        applied = sum(1 for suggestion in queryset if suggestion.apply())
+        self._report(request, applied, queryset.count(), 'approved and applied')
 
+    @admin.action(description="Reject selected suggestions", permissions=['change'])
     def reject_suggestions(self, request, queryset):
-        for suggestion in queryset:
-            suggestion.reject()
-        self.message_user(request, f"{queryset.count()} suggestions rejected.")
-    reject_suggestions.short_description = "Reject selected suggestions"
+        rejected = sum(1 for suggestion in queryset if suggestion.reject())
+        self._report(request, rejected, queryset.count(), 'rejected')
+
+    def _report(self, request, done, selected, verb):
+        skipped = selected - done
+        message = f"{done} suggestion(s) {verb}."
+        if skipped:
+            message += f" {skipped} had already been decided and were left alone."
+        self.message_user(request, message)
 
 @admin.register(SourceWebsite)
 class SourceWebsiteAdmin(LibraryAdmin):
@@ -600,12 +657,12 @@ class UserAdmin(DjangoUserAdmin):
             return False
         return super().has_delete_permission(request, obj)
 
-    @admin.action(description="Let these accounts sign in again")
+    @admin.action(description="Let these accounts sign in again", permissions=['change'])
     def activate_accounts(self, request, queryset):
         count = queryset.update(is_active=True)
         self.message_user(request, f"{count} account(s) can sign in again.")
 
-    @admin.action(description="Suspend these accounts (they keep everything)")
+    @admin.action(description="Suspend these accounts (they keep everything)", permissions=['change'])
     def deactivate_accounts(self, request, queryset):
         """
         Stop an account signing in without destroying what it holds.
@@ -713,7 +770,7 @@ class ContributionAdmin(LibraryAdmin):
     def has_text(self, obj):
         return bool(obj.lyrics)
 
-    @admin.action(description="Create a record from each (leaves it awaiting review)")
+    @admin.action(description="Create a record from each (leaves it awaiting review)", permissions=['change'])
     def publish_selected(self, request, queryset):
         """
         Turn the selected submissions into qasidas.
@@ -725,31 +782,43 @@ class ContributionAdmin(LibraryAdmin):
         """
         made, skipped = 0, 0
         for contribution in queryset:
-            if not contribution.can_publish():
+            if contribution.publish(by=request.user) is None:
                 skipped += 1
                 continue
-            contribution.publish(by=request.user)
             notify.contribution_decided(contribution, request)
             made += 1
         self.message_user(
             request,
             f"Created {made} record(s), each awaiting review. "
-            f"{skipped} had no text to make one from, or already had one.",
+            f"{skipped} had no text to make one from, or had already been decided.",
             level=django_messages.WARNING if skipped and not made else django_messages.INFO)
 
-    @admin.action(description="Accept (without creating a record)")
+    @admin.action(description="Accept (without creating a record)", permissions=['change'])
     def accept_selected(self, request, queryset):
-        for contribution in queryset:
-            contribution.accept(by=request.user)
-            notify.contribution_decided(contribution, request)
-        self.message_user(request, f"Accepted {queryset.count()}, and told each sender.")
+        self._decide_each(request, queryset, 'accept', 'Accepted')
 
-    @admin.action(description="Decline")
+    @admin.action(description="Decline", permissions=['change'])
     def decline_selected(self, request, queryset):
+        self._decide_each(request, queryset, 'decline', 'Declined')
+
+    def _decide_each(self, request, queryset, method, verb):
+        """
+        Decide each pending contribution, and only those.
+
+        One already answered is skipped, so a batch that happens to include it
+        neither overturns the decision nor emails its sender a second time.
+        """
+        done, skipped = 0, 0
         for contribution in queryset:
-            contribution.decline(by=request.user)
-            notify.contribution_decided(contribution, request)
-        self.message_user(request, f"Declined {queryset.count()}, and told each sender.")
+            if getattr(contribution, method)(by=request.user):
+                notify.contribution_decided(contribution, request)
+                done += 1
+            else:
+                skipped += 1
+        message = f"{verb} {done}, and told each sender."
+        if skipped:
+            message += f" {skipped} had already been decided and were left alone."
+        self.message_user(request, message)
 
 
 @admin.register(ContactMessage)
@@ -782,7 +851,7 @@ class ContactMessageAdmin(LibraryAdmin):
         # message nobody sent.
         return False
 
-    @admin.action(description="Mark as dealt with")
+    @admin.action(description="Mark as dealt with", permissions=['change'])
     def mark_handled(self, request, queryset):
         count = queryset.update(is_handled=True)
         self.message_user(request, f"{count} message(s) marked as dealt with.")

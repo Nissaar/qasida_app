@@ -10,6 +10,7 @@ arrived on, which is what a site behind Traefik with one domain wants.
 """
 
 from django.contrib.sitemaps import Sitemap
+from django.db.models import BooleanField, Case, Q, Value, When
 from django.urls import reverse
 
 from .models import Collection, Dedication, Poet, Qasida
@@ -22,8 +23,15 @@ class QasidaSitemap(Sitemap):
     limit = 2000
 
     def items(self):
+        # Only what the three methods below read. The layers are reduced to a
+        # flag in the query: reading the fields themselves off a deferred row
+        # was a query per work - up to 6,000 on one page of the sitemap, most
+        # of them pulling whole translations just to see they were not empty.
         return (Qasida.objects.approved()
-                .only('slug', 'title', 'created_at')
+                .only('slug', 'created_at', 'reviewed_at')
+                .annotate(has_layer=Case(
+                    When(~Q(translation='') | ~Q(transliteration=''), then=Value(True)),
+                    default=Value(False), output_field=BooleanField()))
                 .order_by('-created_at'))
 
     def location(self, obj):
@@ -37,7 +45,7 @@ class QasidaSitemap(Sitemap):
     def priority(self, obj):
         # A work carrying a translation or a transliteration is more use to a
         # reader arriving from a search than one holding only the original.
-        return 0.8 if (obj.translation or obj.transliteration) else 0.6
+        return 0.8 if obj.has_layer else 0.6
 
 
 class PoetSitemap(Sitemap):

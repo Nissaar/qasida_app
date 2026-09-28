@@ -48,18 +48,3 @@ def normalize(text):
 def build_document(*fields):
     """Join the searchable fields of a qasida into one normalised document."""
     return normalize(' \n '.join(f for f in fields if f))
-
-
-TOKEN_RE = re.compile(r'[\w؀-ۿ]+', re.UNICODE)
-
-
-def to_tsquery(query):
-    """
-    Turn a user query into a prefix tsquery string.
-
-    Prefix matching ("burd:*" finding "burdah") is what makes a partial word
-    usable while still going through the index, so the terms are ANDed with a
-    trailing ':*' each. Returns '' when there is nothing searchable.
-    """
-    tokens = TOKEN_RE.findall(normalize(query))
-    return ' & '.join(f'{t}:*' for t in tokens if t)

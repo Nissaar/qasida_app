@@ -1,8 +1,8 @@
 {% comment %} Facet rail. Counts are scoped to the current filters, so an option that
    would return nothing is simply not listed. {% endcomment %}
 <form method="get" action="{% url 'search' %}" class="card p-4">
-    <label for="facet-q" class="eyebrow block mb-2">Search</label>
-    <input id="facet-q" type="search" name="q" dir="auto" value="{{ query }}" placeholder="Title, line or author" class="input">
+    <label for="{{ prefix }}facet-q" class="eyebrow block mb-2">Search</label>
+    <input id="{{ prefix }}facet-q" type="search" name="q" dir="auto" value="{{ query }}" placeholder="Title, line or author" class="input">
     {% if lang_filter %}<input type="hidden" name="lang" value="{{ lang_filter }}">{% endif %}
     {% if author_filter %}<input type="hidden" name="author" value="{{ author_filter }}">{% endif %}
     {% if dedication_filter %}<input type="hidden" name="dedication" value="{{ dedication_filter }}">{% endif %}

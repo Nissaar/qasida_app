@@ -40,11 +40,11 @@
             {% if qasida.author %}<span dir="auto">{{ qasida.author }}</span> &middot; {% endif %}{{ qasida.language|default:"Unknown" }}
         </p>
 
-        {% if qasida.translation or qasida.transliteration or qasida.media.exists %}
+        {% if qasida.translation or qasida.transliteration or qasida.media.all %}
         <p class="flex flex-wrap gap-1.5 mt-2">
             {% if qasida.translation %}<span class="chip">translated</span>{% endif %}
             {% if qasida.transliteration %}<span class="chip">latin script</span>{% endif %}
-            {% if qasida.media.exists %}<span class="chip">recording</span>{% endif %}
+            {% if qasida.media.all %}<span class="chip">recording</span>{% endif %}
         </p>
         {% endif %}
 

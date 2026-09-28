@@ -16,7 +16,7 @@ import re
 from django.core.management.base import BaseCommand
 
 from core.models import Qasida
-from core.tasks import MEGA_LINE_CHARS, reflow_run_together
+from core.textrepair import MEGA_LINE_CHARS, reflow_run_together
 
 NON_SPACE_RE = re.compile(r'\S')
 

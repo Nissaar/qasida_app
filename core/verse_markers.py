@@ -61,16 +61,17 @@ def normalise(text):
     lines = []
     for line in text.splitlines():
         line = _strip_emphasis(line)
-        # Whatever asterisks survive were never wrapping anything.
-        line = SEPARATOR_RE.sub('\n', line)
+        # Whatever asterisks survive were never wrapping anything. A divider
+        # at the start or end of a line would leave an empty line behind,
+        # which reads as a stanza break that is not there, so those ends are
+        # trimmed; a line that was nothing but a divider stays one blank line.
+        line = SEPARATOR_RE.sub('\n', line).strip('\n')
         lines.append(line)
 
     cleaned = '\n'.join(lines)
     cleaned = TRAILING_SPACE_RE.sub('', cleaned)
     cleaned = EXTRA_BLANKS_RE.sub('\n\n', cleaned)
-    # A divider at the start or end of a line leaves an empty one behind.
-    return '\n'.join(part for part in cleaned.split('\n')
-                     if part.strip() or True).strip()
+    return cleaned.strip()
 
 
 def has_markers(text):

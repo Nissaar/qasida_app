@@ -1,0 +1,25 @@
+# Kept out of the image build context.
+#
+# On the server the build runs inside the checkout, which is also where the
+# live state sits: .env with every secret, the Postgres and Redis data
+# directories, and the scans. Without this file `COPY . /app/` would bake all
+# of it into an image layer, where anyone who later pulls or exports the image
+# can read it - and a build would upload gigabytes of media every time.
+.env
+.env.*
+!.env.prod.example
+db/
+redis/
+beat/
+media/
+staticfiles/
+celerybeat-schedule
+docker-compose.prod.yml
+docker-compose.override.yml
+
+.git/
+.github/
+__pycache__/
+*.pyc
+.venv/
+venv/

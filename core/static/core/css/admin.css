@@ -37,6 +37,7 @@
     --q-accent-hover: #0b6148;
     --q-accent-ink: #065f46;
     --q-accent-tint: #e9f7f1;
+    --q-diff: #fde68a;
     --q-accent-line: #bfe6d6;
     --q-on-accent: #ffffff;
 
@@ -86,6 +87,7 @@
     --q-accent-hover: #4fcfa3;
     --q-accent-ink: #8fe3c4;
     --q-accent-tint: #10241d;
+    --q-diff: #5b4410;
     --q-accent-line: #1d4438;
     --q-on-accent: #07261c;
 
@@ -123,6 +125,7 @@
         --q-accent-hover: #4fcfa3;
         --q-accent-ink: #8fe3c4;
         --q-accent-tint: #10241d;
+        --q-diff: #5b4410;
         --q-accent-line: #1d4438;
         --q-on-accent: #07261c;
 
@@ -1487,6 +1490,21 @@ html[data-theme="auto"],
 /* The field is deliberately unlabelled - two titled panels say what it is. */
 .q-dup-fieldset label { display: none; }
 .q-dup-fieldset .readonly { padding: 0; width: 100%; }
+
+/* Where the two copies part. Only the differing words carry it, so a pair
+   that agrees for stanza after stanza shows a handful of marks, not a wall. */
+.q-diff {
+    background: var(--q-diff);
+    color: inherit;
+    border-radius: 3px;
+    padding: 0 .1em;
+}
+.q-dup-summary { margin: 0; padding: .75rem .9rem; font-size: .85rem; color: var(--q-muted); }
+
+/* The way into a pair from the list: a button, because the likeness figure
+   alone did not look like something to press. */
+.q-compare { display: inline-block; flex: none; text-decoration: none; white-space: nowrap; }
+.q-compare:hover { filter: brightness(1.08); }
 
 .q-dup-compare {
     display: grid;

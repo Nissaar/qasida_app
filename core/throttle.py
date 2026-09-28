@@ -11,26 +11,44 @@ keeps accepting messages, it simply stops counting. That is the right way
 round - a library that refuses to hear from anyone because a cache is down has
 failed worse than one that accepts a few too many.
 
-The same shape as the sign-in counters in core.account_views, which came
-first; kept here because these are used from two modules and are worth
-testing on their own.
+The sign-in counters in core.account_views count through these helpers too,
+so there is one idea of who a visitor is and one way of counting them.
 """
 
+import ipaddress
 import logging
 
+from django.conf import settings
 from django.core.cache import cache
 
 logger = logging.getLogger(__name__)
 
 
 def client_ip(request):
-    """The visitor's address, trusting the proxy header only behind a proxy."""
-    from django.conf import settings
-    if getattr(settings, 'USE_X_FORWARDED_HOST', False):
-        forwarded = request.META.get('HTTP_X_FORWARDED_FOR', '')
-        if forwarded:
-            return forwarded.split(',')[0].strip()
-    return request.META.get('REMOTE_ADDR', '')
+    """
+    The visitor's address, as the proxies in front of us saw it.
+
+    Each proxy appends the address it received the request from to
+    X-Forwarded-For, so the entry `TRUSTED_PROXY_COUNT` places from the right
+    is the one our own outermost proxy wrote. Everything to the left of it
+    arrived from the visitor and is whatever they chose to send: reading the
+    leftmost entry, as this used to, let anyone claim a fresh address on every
+    request and walk straight past every limit here.
+    """
+    trusted = getattr(settings, 'TRUSTED_PROXY_COUNT', 0)
+    remote = request.META.get('REMOTE_ADDR', '')
+    if not trusted:
+        return remote
+    hops = [hop.strip() for hop in
+            request.META.get('HTTP_X_FORWARDED_FOR', '').split(',') if hop.strip()]
+    if len(hops) < trusted:
+        return remote
+    candidate = hops[-trusted]
+    try:
+        ipaddress.ip_address(candidate)
+    except ValueError:
+        return remote
+    return candidate
 
 
 def over_limit(key, limit):
@@ -52,6 +70,14 @@ def record(key, window):
         cache.incr(key)
     except Exception:
         logger.warning('Rate limit for %s could not be recorded.', key)
+
+
+def clear(key):
+    """Forget the count for `key`, as after a successful sign-in."""
+    try:
+        cache.delete(key)
+    except Exception:
+        logger.warning('Rate limit for %s could not be cleared.', key)
 
 
 def keys_for(request, name):

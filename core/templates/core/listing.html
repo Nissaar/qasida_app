@@ -46,10 +46,11 @@ still followed.
                 <span>Filters</span>
                 <svg class="h-4 w-4 text-stone-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
             </summary>
-            <div class="mt-4">{% include 'core/_facets.html' %}</div>
+            {# The rail is drawn twice, once per layout, so each copy gets its own ids. #}
+            <div class="mt-4">{% include 'core/_facets.html' with prefix='drawer-' %}</div>
         </details>
         <div class="hidden lg:block lg:sticky lg:top-20 space-y-4">
-            {% include 'core/_facets.html' %}
+            {% include 'core/_facets.html' with prefix='rail-' %}
         </div>
     </aside>
 

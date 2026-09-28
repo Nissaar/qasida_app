@@ -171,6 +171,10 @@ def contribution_decided(contribution, request=None):
     """
     if not (contribution.user_id and contribution.user.email):
         return False
+    # An editor's reply goes only to an address its owner has confirmed.
+    from .verification import is_verified
+    if not is_verified(contribution.user):
+        return False
 
     accepted = contribution.status == contribution.STATUS_ACCEPTED
     what = contribution.display_title

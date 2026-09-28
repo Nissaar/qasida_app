@@ -15,7 +15,7 @@
     <div class="q-find-actions">
         <button type="submit" class="q-btn-primary">{% translate 'Apply' %}</button>
         {% if choice.has_value %}
-        <a class="q-btn-quiet" href="?{% for key, value in choice.other_params %}{{ key }}={{ value }}&amp;{% endfor %}">{% translate 'Clear' %}</a>
+        <a class="q-btn-quiet" href="?{{ choice.clear_query }}">{% translate 'Clear' %}</a>
         {% endif %}
     </div>
 </form>
