@@ -1493,6 +1493,164 @@ def scrape_wordpress_api(website, limit=None):
           f"{stats['errors']} errors.")
 
 
+# --- sites that print each naat in several scripts --------------------------
+#
+# naatenabi.com (WordPress) and naat-e-sarkar.com (Blogger) publish every text
+# in Roman letters, Devanagari and the Urdu original on one page. core.
+# multiscript sorts the lines by alphabet; this fetches the pages. Which
+# platform a site runs is worked out on the first request, so another site of
+# either kind needs a row in core/sources.py and no new code.
+
+# The kinds of work these sites file under that belong in the library. Other
+# categories exist on them - duas, prayer times - and are not verse.
+MULTISCRIPT_FORM_RE = re.compile(
+    r'\b(naat|na.?at|manqabat|manqbat|hamd|salam|salaam|kalam|kalaam|nasheed|qasida|qaseeda|marsiya|noha)\b', re.I)
+# Category names mapped onto the library's own form tags.
+MULTISCRIPT_FORM_TAGS = {'naat': 'naat', 'manqabat': 'manqabat', 'manqbat': 'manqabat',
+                         'hamd': 'hamd', 'nasheed': 'nasheed', 'salam': 'durood-o-salam',
+                         'salaam': 'durood-o-salam'}
+BLOGGER_PAGE_SIZE = 150
+
+
+def _multiscript_platform(root):
+    """
+    'wordpress' or 'blogger', from how the site's home page describes itself.
+
+    Asked of the home page rather than by trying each platform's API: Blogger
+    answers a path it does not know with a redirect to a hostname that does
+    not exist, which reads as the site being down.
+    """
+    home = polite_get(f"{root}/", timeout=60)
+    if 'api.w.org' in home.headers.get('Link', '') or '/wp-content/' in home.text[:200000]:
+        return 'wordpress'
+    if re.search(r'<meta[^>]+content=["\']blogger["\'][^>]*name=["\']generator', home.text) or \
+            re.search(r'<meta[^>]+name=["\']generator["\'][^>]*content=["\']blogger', home.text, re.I):
+        return 'blogger'
+    return None
+
+
+def _wordpress_multiscript_posts(root):
+    categories = _wp_terms(root, 'categories')
+    page = 1
+    while True:
+        posts = _wp_get(root, 'posts', per_page=WP_PAGE_SIZE, page=page,
+                        _fields='link,title,content,categories')
+        if not posts:
+            return
+        for post in posts:
+            yield {
+                'link': post.get('link') or '',
+                'title': _clean_title((post.get('title') or {}).get('rendered', '')),
+                'html': (post.get('content') or {}).get('rendered', ''),
+                'labels': [categories[c] for c in post.get('categories') or [] if c in categories],
+            }
+        if len(posts) < WP_PAGE_SIZE:
+            return
+        page += 1
+
+
+def _blogger_multiscript_posts(root):
+    start = 1
+    while True:
+        feed = polite_get(f"{root}/feeds/posts/default?alt=json&max-results={BLOGGER_PAGE_SIZE}"
+                          f"&start-index={start}", timeout=60).json().get('feed', {})
+        entries = feed.get('entry') or []
+        if not entries:
+            return
+        for entry in entries:
+            yield {
+                'link': next((l.get('href', '') for l in entry.get('link', [])
+                              if l.get('rel') == 'alternate'), ''),
+                'title': ((entry.get('title') or {}).get('$t') or '').strip(),
+                'html': (entry.get('content') or {}).get('$t', ''),
+                'labels': [c.get('term', '') for c in entry.get('category', [])],
+            }
+        start += len(entries)
+
+
+def _import_multiscript_post(website, post, known, source_tag, stats):
+    """Store the Urdu original and its Roman transliteration from one post."""
+    from . import multiscript
+
+    link = post['link']
+    if not _safe_source_url(link):
+        stats['bad_url'] += 1
+        return
+    if link in known:
+        stats['already_present'] += 1
+        return
+    labels = ' '.join(post['labels'])
+    if post['labels'] and not MULTISCRIPT_FORM_RE.search(labels):
+        stats['not_verse'] += 1  # a dua, a prayer-time page: not in this library
+        return
+
+    parts = multiscript.split(post['html'])
+    urdu, roman = parts['urdu'], parts['roman']
+    if len(urdu.splitlines()) < 2 and len(roman.splitlines()) < 2:
+        stats['no_text'] += 1
+        return
+
+    # The Roman title, where the site gives one; some titles are only in
+    # Devanagari, and then the first Roman line names the work instead.
+    title = multiscript.clean_title(post['title'])
+    if not re.search(r'[A-Za-z]', title):
+        title = next((line for line in roman.splitlines() if line.strip()), title)
+    native_title = next((line for line in urdu.splitlines() if line.strip()), '')
+
+    tags = ['urdu', source_tag]
+    for label in post['labels']:
+        found = MULTISCRIPT_FORM_RE.search(label)
+        if found and found.group(1).lower() in MULTISCRIPT_FORM_TAGS:
+            tags.append(MULTISCRIPT_FORM_TAGS[found.group(1).lower()])
+    if roman:
+        tags.append('transliterated')
+    if not urdu:
+        tags.append(NO_ORIGINAL_TAG)
+
+    work = _create_work(website, title=title, native_title=native_title,
+                        author=parts['poet'], language='Urdu',
+                        lyrics=urdu, transliteration=roman, source_url=link, tags=tags)
+    # The credit gives the poet's name in Urdu too; a poet first met here
+    # keeps it.
+    if work.author_id and parts['poet_native'] and not work.author.native_name:
+        work.author.native_name = parts['poet_native']
+        work.author.save(update_fields=['native_name'])
+    known.add(link)
+    stats['saved'] += 1
+    stats['with_original' if urdu else 'roman_only'] += 1
+
+
+def scrape_multiscript(website, limit=None):
+    """Scraper for a site printing each work in Roman, Devanagari and Urdu."""
+    parts = urlsplit(website.url)
+    root = f"{parts.scheme}://{parts.netloc}"
+    platform = _multiscript_platform(root)
+    print(f"Scraping {website.name} ({platform or 'unknown platform'}): {root}")
+    if platform is None:
+        print("  neither a WordPress API nor a Blogger feed answered; nothing crawled.")
+        return
+    posts = (_wordpress_multiscript_posts(root) if platform == 'wordpress'
+             else _blogger_multiscript_posts(root))
+    known = set(Qasida.objects.filter(source_site=website).values_list('source_url', flat=True))
+    source_tag = slugify(website.name)
+
+    stats = Counter()
+    for post in posts:
+        if limit is not None and stats['saved'] >= limit:
+            print(f"Stopping at the {limit}-post limit for this pass.")
+            break
+        try:
+            _import_multiscript_post(website, post, known, source_tag, stats)
+        except Exception as e:
+            stats['errors'] += 1
+            print(f"  failed ({type(e).__name__}): {post.get('link', '')[:90]}")
+
+    print(f"{website.name} done: {stats['saved']} saved ({stats['with_original']} with the Urdu "
+          f"original, {stats['roman_only']} Roman only), {stats['already_present']} already "
+          f"present, {stats['not_verse']} not verse, {stats['no_text']} without text, "
+          f"{stats['bad_url']} with an unusable URL, {stats['errors']} errors.")
+
+
 @shared_task
 def enrich_qasida(qasida_id, overwrite=False):
     """
@@ -1563,6 +1721,7 @@ def _run_crawlers():
         'generic': scrape_generic,
         'wayback': scrape_wayback,
         'wordpress_api': scrape_wordpress_api,
+        'multiscript': scrape_multiscript,
     }
 
     for website in active_websites:
