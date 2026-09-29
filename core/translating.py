@@ -1,9 +1,18 @@
 """
 Self-hosted translation.
 
-Uses Argos Translate, which runs entirely in-process from local model files -
-no external service and no API key. Models are installed into the image at
-build time so a fresh deployment translates without needing network access.
+Everything runs in-process from local model files - no external service, no
+API key, nothing sent anywhere. Two open-source engines are used:
+
+- OPUS-MT, from the University of Helsinki (CC BY 4.0), for Arabic: its
+  large Arabic-to-English model reads classical verse far better than the
+  small one Argos ships. It is converted at build time for CTranslate2, the
+  inference engine Argos already brings, so it adds a model and no packages.
+- Argos Translate (MIT) for everything else - Urdu and Persian - and for
+  Arabic too if the OPUS model is not present.
+
+Models are installed into the image at build time so a fresh deployment
+translates without needing network access.
 
 Verse is translated line by line rather than as one block. That costs more
 calls but keeps the blank-line structure, so a machine translation lines up
@@ -12,6 +21,9 @@ stanza for stanza with the original and can be shown beside it.
 
 import re
 import threading
+from pathlib import Path
+
+from django.conf import settings
 
 # Languages we hold text in, mapped to Argos codes. Punjabi has no Argos
 # package, so those rows are left untranslated rather than mislabelled.
@@ -44,8 +56,60 @@ LATIN_RE = re.compile(r'[A-Za-z]')
 MIN_NATIVE_CHARS = 40
 MIN_NATIVE_SHARE = 0.5
 
+# OPUS-MT models, by source language, as directories under
+# settings.TRANSLATION_MODELS_DIR. Each holds a CTranslate2 model.bin and the
+# SentencePiece source.spm and target.spm it was trained with.
+OPUS_MODELS = {'ar': 'opus-mt-tc-big-ar-en'}
+
+ENGINE_NAMES = {'opus': 'OPUS-MT (University of Helsinki)', 'argos': 'Argos Translate'}
+
 _translators = {}
 _lock = threading.Lock()
+
+
+class _OpusTranslator:
+    """One OPUS-MT model, answering .translate(text) the way Argos does."""
+
+    name = 'opus'
+
+    def __init__(self, directory):
+        import ctranslate2
+        import sentencepiece
+
+        self._model = ctranslate2.Translator(
+            str(directory), device='cpu', compute_type='int8',
+            inter_threads=1, intra_threads=2)
+        self._source = sentencepiece.SentencePieceProcessor(
+            model_file=str(directory / 'source.spm'))
+        self._target = sentencepiece.SentencePieceProcessor(
+            model_file=str(directory / 'target.spm'))
+
+    def translate(self, text):
+        # Marian models need the end-of-sentence marker spelled out; without
+        # it they never stop, and return a page of unrelated words.
+        tokens = self._source.encode(text, out_type=str) + ['</s>']
+        result = self._model.translate_batch([tokens], beam_size=4,
+                                             max_decoding_length=256)
+        return self._target.decode(result[0].hypotheses[0])
+
+
+class _ArgosTranslator:
+    name = 'argos'
+
+    def __init__(self, translation):
+        self._translation = translation
+
+    def translate(self, text):
+        return self._translation.translate(text)
+
+
+def _opus_directory(source_code):
+    name = OPUS_MODELS.get(source_code)
+    base = getattr(settings, 'TRANSLATION_MODELS_DIR', '')
+    if not name or not base:
+        return None
+    directory = Path(base) / name
+    return directory if (directory / 'model.bin').exists() else None
 
 
 def is_native_script(text):
@@ -58,13 +122,22 @@ def is_native_script(text):
 
 
 def available_source_codes():
-    """Argos codes installed in this container that we can translate from."""
-    from argostranslate import translate
+    """Languages this container can translate from, by either engine."""
+    codes = {code for code in OPUS_MODELS if _opus_directory(code)}
+    try:
+        from argostranslate import translate
+        installed = {language.code for language in translate.get_installed_languages()}
+    except ImportError:
+        installed = set()
+    if TARGET_CODE in installed:
+        codes |= {code for code in LANGUAGE_CODES.values() if code in installed}
+    return codes
 
-    installed = {language.code for language in translate.get_installed_languages()}
-    if TARGET_CODE not in installed:
-        return set()
-    return {code for code in LANGUAGE_CODES.values() if code in installed}
+
+def engine_for(source_code):
+    """The name of the engine that would translate this language, or None."""
+    engine = _translator(source_code)
+    return ENGINE_NAMES[engine.name] if engine is not None else None
 
 
 def code_for_language(name):
@@ -72,19 +145,33 @@ def code_for_language(name):
 
 
 def _translator(source_code):
-    """Cache one translator per language pair; loading a model is expensive."""
+    """
+    One translator per language, loaded once; loading a model is expensive.
+
+    OPUS-MT where there is a model for the language, else Argos.
+    """
     with _lock:
         if source_code in _translators:
             return _translators[source_code]
-        from argostranslate import translate
-
-        languages = {language.code: language for language in translate.get_installed_languages()}
-        source, target = languages.get(source_code), languages.get(TARGET_CODE)
-        if source is None or target is None:
-            _translators[source_code] = None
-        else:
-            _translators[source_code] = source.get_translation(target)
-        return _translators[source_code]
+        engine = None
+        directory = _opus_directory(source_code)
+        if directory is not None:
+            try:
+                engine = _OpusTranslator(directory)
+            except Exception:
+                engine = None  # a damaged model: fall back to Argos
+        if engine is None:
+            try:
+                from argostranslate import translate
+                languages = {language.code: language
+                             for language in translate.get_installed_languages()}
+            except ImportError:
+                languages = {}
+            source, target = languages.get(source_code), languages.get(TARGET_CODE)
+            if source is not None and target is not None:
+                engine = _ArgosTranslator(source.get_translation(target))
+        _translators[source_code] = engine
+        return engine
 
 
 def _split_long_line(line, limit=MAX_LINE_CHARS):
@@ -118,19 +205,28 @@ def translate_verse(text, source_code):
         return ''
 
     output = []
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            output.append('')
-            continue
-        if len(stripped) < MIN_LINE_CHARS:
-            output.append(stripped)
-            continue
-        try:
-            rendered = [engine.translate(piece).strip()
-                        for piece in _split_long_line(stripped)]
-            output.append(' '.join(p for p in rendered if p))
-        except Exception:
-            # One bad line should not lose the rest of the poem.
-            output.append('')
+    for stanza in re.split(r'\n\s*\n', text.strip()):
+        lines = [line.strip() for line in stanza.splitlines() if line.strip()]
+        if engine.name == 'opus' and len(lines) == 2:
+            # A couplet is one verse: in classical Arabic its two halves are
+            # one sentence, and translated apart each loses its sense ("He's
+            # the lover you're asking for. / Every hall of terror is broken
+            # into." against "He is the beloved whose intercession is hoped
+            # for..."). The larger model reads the whole bayt; the smaller
+            # Argos models do worse on the longer input, so they keep lines.
+            output.append(_translate_line(engine, ' '.join(lines), limit=2 * MAX_LINE_CHARS))
+        else:
+            output.extend(_translate_line(engine, line) for line in lines)
+        output.append('')
     return re.sub(r'\n{3,}', '\n\n', '\n'.join(output)).strip()
+
+
+def _translate_line(engine, line, limit=MAX_LINE_CHARS):
+    if len(line) < MIN_LINE_CHARS:
+        return line
+    try:
+        rendered = [engine.translate(piece).strip() for piece in _split_long_line(line, limit)]
+        return ' '.join(p for p in rendered if p)
+    except Exception:
+        # One bad line should not lose the rest of the poem.
+        return ''

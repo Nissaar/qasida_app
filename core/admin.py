@@ -1,6 +1,8 @@
 from django.contrib import admin, messages as django_messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
+from django.core.exceptions import PermissionDenied
+from django.http import HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import path, reverse
 from django.db import transaction
@@ -239,7 +241,61 @@ class QasidaAdmin(LibraryAdmin):
         return [
             path('ocr-tool/', self.admin_site.admin_view(self.ocr_tool_view),
                  name='core_qasida_ocr_tool'),
+            path('translate/', self.admin_site.admin_view(self.translate_start_view),
+                 name='core_qasida_translate'),
+            path('translate/<str:job>/', self.admin_site.admin_view(self.translate_status_view),
+                 name='core_qasida_translate_status'),
         ] + super().get_urls()
+
+    def translate_start_view(self, request):
+        """
+        Start translating the lyrics as they stand in the form.
+
+        Takes the text from the form rather than from the database, so an
+        edit made a moment ago and not yet saved is what gets translated.
+        Answers with the language it detected, which engine will translate
+        it, and a job to ask after.
+        """
+        from .langdetect import detect
+        from .tasks import translate_lyrics
+        from .translating import available_source_codes, engine_for
+
+        if request.method != 'POST':
+            return HttpResponseNotAllowed(['POST'])
+        if not self.has_change_permission(request):
+            raise PermissionDenied
+        text = (request.POST.get('lyrics') or '').strip()
+        field_says = (request.POST.get('language') or '').strip()
+        code, name, how = detect(text)
+        if code in (None, 'en', 'latin'):
+            return JsonResponse({'error': f'Nothing to translate: {how}.'}, status=400)
+        if code not in available_source_codes():
+            return JsonResponse({'error': f'The lyrics look {name}, and no {name} model '
+                                          f'is installed.'}, status=400)
+        note = f'Detected {name}, because {how}.'
+        if field_says and field_says.lower() != name.lower():
+            note += f' The Language field says {field_says}.'
+        job = translate_lyrics.delay(text, code)
+        return JsonResponse({'job': job.id, 'language': name, 'engine': engine_for(code),
+                             'note': note})
+
+    def translate_status_view(self, request, job):
+        """How a translation job is getting on, and its draft once done."""
+        from celery.result import AsyncResult
+
+        if not self.has_change_permission(request):
+            raise PermissionDenied
+        result = AsyncResult(job)
+        if result.state == 'SUCCESS':
+            value = result.result or {}
+            if not value.get('translation'):
+                return JsonResponse({'state': 'failed',
+                                     'error': 'The engine returned nothing for this text.'})
+            return JsonResponse({'state': 'done', **value})
+        if result.state in ('FAILURE', 'REVOKED'):
+            return JsonResponse({'state': 'failed',
+                                 'error': 'The translation failed on the worker; see its log.'})
+        return JsonResponse({'state': 'working'})
 
     def ocr_tool_view(self, request):
         """Read text off an uploaded PDF or screenshot, for pasting into a record."""

@@ -28,6 +28,7 @@ AREAS = OrderedDict([
         'LayerPairingTest', 'IndependentLayerAlignmentTest', 'VerseMarkerTest',
         'NativeScriptTest']),
     ('PDF downloads', ['ScansInThePdfTest']),
+    ('Translation (detecting the language, the translate button)', ['TranslateButtonTest']),
     ('Works, the review gate, data safety', [
         'QasidaModelTest', 'ReviewGateTest', 'DataSafetyTest']),
     ('Sign up, sign in, sessions', [
