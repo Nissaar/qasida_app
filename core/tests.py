@@ -3467,6 +3467,7 @@ class MultiscriptCrawlTest(TestCase):
         with mock.patch.object(tasks, 'polite_get', return_value=blogger):
             self.assertEqual(tasks._multiscript_platform('https://y.com'), 'blogger')
 
+
 class PoliteFetchTest(TestCase):
     """The guards every crawler request passes through."""
 
@@ -4147,4 +4148,3 @@ class QasidaEditFormTest(TestCase):
         self.work.tags.add(rast)
         self.post(tags_maqam=[rast.pk], new_tags='naat')
         self.assertEqual(set(self.work.tags.values_list('name', flat=True)), {'maqam-rast', 'naat'})
-
