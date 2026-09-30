@@ -117,10 +117,11 @@ def _keep_stanza_offline():
     Argos splits text with Stanza, and creates its Stanza pipeline with the
     default download setting, which fetches Stanza's resources index from
     GitHub every time a pipeline starts - even though every Argos package
-    ships that index alongside its model. On a worker with no route to the
-    internet each line then failed with a name-resolution error, and every
-    Urdu translation came back empty. Reusing the index already on disk needs
-    no network; Stanza only downloads if the file were missing.
+    ships a copy of that index. On a worker with no route to the internet
+    each line then failed with a name-resolution error, and every Urdu
+    translation came back empty. The index on disk is reused instead; the
+    Dockerfile makes it the full one at build time, since the copy Argos
+    ships lacks the section Stanza needs.
     """
     try:
         import stanza
@@ -130,16 +131,31 @@ def _keep_stanza_offline():
     if getattr(sbd.StanzaSentencizer, '_offline', False):
         return
 
+    # Argos logs half a dozen INFO lines for every line of verse, burying
+    # everything else the worker says. It sets that level itself when first
+    # imported, overriding the site's logging settings, so it is turned down
+    # here, after the import. Its warnings and errors still come through.
+    logging.getLogger('argostranslate.utils').setLevel(logging.WARNING)
+
     def lazy_pipeline(self):
         if self.stanza_pipeline is None:
-            self.stanza_pipeline = stanza.Pipeline(
-                lang=self.stanza_lang_code,
-                dir=str(self.pkg.package_path / 'stanza'),
-                processors='tokenize',
-                use_gpu=argos_settings.device == 'cuda',
-                logging_level='WARNING',
-                download_method=stanza.DownloadMethod.REUSE_RESOURCES,
-            )
+            options = dict(lang=self.stanza_lang_code,
+                           dir=str(self.pkg.package_path / 'stanza'),
+                           processors='tokenize',
+                           use_gpu=argos_settings.device == 'cuda',
+                           logging_level='WARNING')
+            try:
+                self.stanza_pipeline = stanza.Pipeline(
+                    download_method=stanza.DownloadMethod.REUSE_RESOURCES, **options)
+            except KeyError:
+                # The index on disk is the cut-down one Argos ships, which the
+                # Dockerfile replaces at build time. An image built before it
+                # did still has that one; fetching the full index is then the
+                # only way on, and needs the network once.
+                logger.warning('Stanza index for %s is incomplete; fetching the full one.',
+                               self.stanza_lang_code)
+                self.stanza_pipeline = stanza.Pipeline(
+                    download_method=stanza.DownloadMethod.DOWNLOAD_RESOURCES, **options)
         return self.stanza_pipeline
 
     sbd.StanzaSentencizer.lazy_pipeline = lazy_pipeline
