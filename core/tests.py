@@ -4238,6 +4238,53 @@ class TranslateButtonTest(TestCase):
         with mock.patch.object(translating, '_translator', return_value=argos):
             self.assertEqual(translating.translate_verse(couplets, 'ar'), '<1>\n<2>\n\n<3>\n<4>')
 
+    def test_a_failing_engine_says_why(self):
+        from unittest import mock
+        from . import tasks, translating
+
+        class Broken:
+            name = 'argos'
+
+            def translate(self, text):
+                raise RuntimeError('out of memory')
+
+        urdu = 'یہ تو زینب ہی بتا سکتی ہے\nلوٹ کر کیسے مدینے میں وہ آئی ہوگی\nتمہارے ذرے کے پرتو ستار ہائے فلک'
+        with mock.patch.object(translating, '_translator', return_value=Broken()), \
+                self.assertLogs('core.translating', level='ERROR') as logged:
+            result = tasks.translate_lyrics.run(urdu, 'ur')
+        self.assertEqual(result['error'], 'RuntimeError: out of memory')
+        self.assertEqual(len(logged.records), 1)  # once for the text, not per line
+
+        failed = mock.Mock(state='SUCCESS', result=result)
+        with mock.patch('celery.result.AsyncResult', return_value=failed):
+            data = self.client.get(reverse('admin:core_qasida_translate_status',
+                                           args=['job-1'])).json()
+        self.assertEqual(data['state'], 'failed')
+        self.assertIn('RuntimeError: out of memory', data['error'])
+
+    def test_argos_never_asks_the_internet_for_stanza_s_index(self):
+        """The worker has no route out; translating must not need one."""
+        import sys
+        import types
+        from unittest import mock
+        from . import translating
+
+        class StanzaSentencizer:
+            def __init__(self):
+                self.stanza_pipeline, self.stanza_lang_code = None, 'ur'
+                self.pkg = mock.Mock(package_path=__import__('pathlib').Path('/pkg'))
+
+        sbd = types.SimpleNamespace(StanzaSentencizer=StanzaSentencizer)
+        stanza = mock.Mock(DownloadMethod=mock.Mock(REUSE_RESOURCES='reuse'))
+        argos = types.ModuleType('argostranslate')
+        argos.sbd, argos.settings = sbd, types.SimpleNamespace(device='cpu')
+        with mock.patch.dict(sys.modules, {'argostranslate': argos, 'stanza': stanza,
+                                           'argostranslate.sbd': sbd,
+                                           'argostranslate.settings': argos.settings}):
+            translating._keep_stanza_offline()
+            StanzaSentencizer().lazy_pipeline()
+        self.assertEqual(stanza.Pipeline.call_args.kwargs['download_method'], 'reuse')
+
     def test_arabic_prefers_the_opus_model_when_it_is_there(self):
         import tempfile
         from pathlib import Path

@@ -289,8 +289,10 @@ class QasidaAdmin(LibraryAdmin):
         if result.state == 'SUCCESS':
             value = result.result or {}
             if not value.get('translation'):
+                reason = value.get('error') or 'it returned nothing for this text'
                 return JsonResponse({'state': 'failed',
-                                     'error': 'The engine returned nothing for this text.'})
+                                     'error': f'The translation failed: {reason}. The worker '
+                                              f'log has the details.'})
             return JsonResponse({'state': 'done', **value})
         if result.state in ('FAILURE', 'REVOKED'):
             return JsonResponse({'state': 'failed',
