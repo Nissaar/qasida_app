@@ -4262,6 +4262,29 @@ class TranslateButtonTest(TestCase):
         self.assertEqual(data['state'], 'failed')
         self.assertIn('RuntimeError: out of memory', data['error'])
 
+    def test_argos_never_asks_the_internet_for_stanza_s_index(self):
+        """The worker has no route out; translating must not need one."""
+        import sys
+        import types
+        from unittest import mock
+        from . import translating
+
+        class StanzaSentencizer:
+            def __init__(self):
+                self.stanza_pipeline, self.stanza_lang_code = None, 'ur'
+                self.pkg = mock.Mock(package_path=__import__('pathlib').Path('/pkg'))
+
+        sbd = types.SimpleNamespace(StanzaSentencizer=StanzaSentencizer)
+        stanza = mock.Mock(DownloadMethod=mock.Mock(REUSE_RESOURCES='reuse'))
+        argos = types.ModuleType('argostranslate')
+        argos.sbd, argos.settings = sbd, types.SimpleNamespace(device='cpu')
+        with mock.patch.dict(sys.modules, {'argostranslate': argos, 'stanza': stanza,
+                                           'argostranslate.sbd': sbd,
+                                           'argostranslate.settings': argos.settings}):
+            translating._keep_stanza_offline()
+            StanzaSentencizer().lazy_pipeline()
+        self.assertEqual(stanza.Pipeline.call_args.kwargs['download_method'], 'reuse')
+
     def test_arabic_prefers_the_opus_model_when_it_is_there(self):
         import tempfile
         from pathlib import Path

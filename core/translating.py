@@ -110,6 +110,42 @@ class _ArgosTranslator:
         return self._translation.translate(text)
 
 
+def _keep_stanza_offline():
+    """
+    Stop Argos's sentence splitter reaching for the internet.
+
+    Argos splits text with Stanza, and creates its Stanza pipeline with the
+    default download setting, which fetches Stanza's resources index from
+    GitHub every time a pipeline starts - even though every Argos package
+    ships that index alongside its model. On a worker with no route to the
+    internet each line then failed with a name-resolution error, and every
+    Urdu translation came back empty. Reusing the index already on disk needs
+    no network; Stanza only downloads if the file were missing.
+    """
+    try:
+        import stanza
+        from argostranslate import sbd, settings as argos_settings
+    except ImportError:
+        return
+    if getattr(sbd.StanzaSentencizer, '_offline', False):
+        return
+
+    def lazy_pipeline(self):
+        if self.stanza_pipeline is None:
+            self.stanza_pipeline = stanza.Pipeline(
+                lang=self.stanza_lang_code,
+                dir=str(self.pkg.package_path / 'stanza'),
+                processors='tokenize',
+                use_gpu=argos_settings.device == 'cuda',
+                logging_level='WARNING',
+                download_method=stanza.DownloadMethod.REUSE_RESOURCES,
+            )
+        return self.stanza_pipeline
+
+    sbd.StanzaSentencizer.lazy_pipeline = lazy_pipeline
+    sbd.StanzaSentencizer._offline = True
+
+
 def _opus_directory(source_code):
     name = OPUS_MODELS.get(source_code)
     base = getattr(settings, 'TRANSLATION_MODELS_DIR', '')
@@ -168,6 +204,7 @@ def _translator(source_code):
             except Exception:
                 engine = None  # a damaged model: fall back to Argos
         if engine is None:
+            _keep_stanza_offline()
             try:
                 from argostranslate import translate
                 languages = {language.code: language
