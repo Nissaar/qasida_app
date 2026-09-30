@@ -1,3 +1,30 @@
+# ---- the Arabic translation model -------------------------------------------
+#
+# OPUS-MT's large Arabic-to-English model (University of Helsinki, CC BY 4.0)
+# reads classical verse far better than the small one Argos ships. It is
+# published for PyTorch, and converted here for CTranslate2 - the inference
+# engine Argos already brings - so the running image gains a 235MB model and
+# not a single package: torch-for-conversion and transformers stay in this
+# stage and are thrown away.
+#
+# Pinned three ways, because each has broken this before it was pinned: the
+# model's revision; transformers below 5, which loads this model's weights
+# wrongly and yields nonsense; and ctranslate2 to the version requirements.txt
+# installs, so the converted model is one the runtime can read.
+FROM python:3.12-slim-trixie AS opus-mt
+RUN pip install --no-cache-dir torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir transformers==4.57.6 sentencepiece==0.2.2 ctranslate2==4.8.2
+RUN ct2-transformers-converter \
+        --model Helsinki-NLP/opus-mt-tc-big-ar-en \
+        --revision bcb4acd39ee8e3552e171653a8e31a10729b4330 \
+        --output_dir /models/opus-mt-tc-big-ar-en \
+        --quantization int8 \
+        --copy_files source.spm target.spm \
+    && rm -rf /root/.cache/huggingface
+
+
+# ---- the application --------------------------------------------------------
+#
 # Pinned to the Debian release as well as the Python minor version, so a
 # rebuild months from now gets the same system libraries (tesseract, the fonts)
 # rather than whatever the floating tag has moved on to. Patch releases of
@@ -76,6 +103,9 @@ USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
         fonts-hosny-amiri \
     && rm -rf /var/lib/apt/lists/*
+
+# The converted translation model from the stage above. See core/translating.py.
+COPY --from=opus-mt /models /opt/translation-models
 
 # Copy project. Owned by the app user so collectstatic can write STATIC_ROOT
 # at start-up.

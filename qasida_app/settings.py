@@ -196,6 +196,12 @@ CELERY_BEAT_SCHEDULE = {
 }
 
 
+# Where the OPUS-MT translation models are, converted at image build time (see
+# the Dockerfile). A missing directory is not an error: translation falls back
+# to Argos for every language. See core.translating.
+TRANSLATION_MODELS_DIR = os.environ.get("TRANSLATION_MODELS_DIR", "/opt/translation-models")
+
+
 # Password validation
 # https://docs.djangoproject.com/en/6.1/ref/settings/#auth-password-validators
 

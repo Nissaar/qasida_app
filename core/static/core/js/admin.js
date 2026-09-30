@@ -402,6 +402,94 @@
     })();
 
     /*
+     * "Translate from the lyrics", beside the translation box. Sends the
+     * lyrics as they stand in the form - saved or not - to be translated on
+     * the worker, asks after the job until the draft is ready, and puts it in
+     * the box marked as a machine translation. Nothing is saved until the
+     * editor presses Save, having read it.
+     */
+    (function setUpTranslateButton() {
+        var config = document.getElementById('q-translate-config');
+        var target = document.getElementById('id_translation');
+        var lyrics = document.getElementById('id_lyrics');
+        if (!config || !target || !lyrics) return;
+
+        var bar = document.createElement('div');
+        bar.className = 'q-translate-bar';
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'q-btn-ghost';
+        button.textContent = 'Translate from the lyrics';
+        var status = document.createElement('span');
+        status.className = 'q-translate-status';
+        status.setAttribute('role', 'status');
+        status.setAttribute('aria-live', 'polite');
+        bar.appendChild(button);
+        bar.appendChild(status);
+        target.insertAdjacentElement('afterend', bar);
+
+        function csrf() {
+            var field = document.querySelector('input[name=csrfmiddlewaretoken]');
+            return field ? field.value : '';
+        }
+        function say(text, isError) {
+            status.textContent = text;
+            status.classList.toggle('q-translate-error', !!isError);
+        }
+        function finish() { button.disabled = false; }
+
+        button.addEventListener('click', function () {
+            if (!lyrics.value.trim()) { say('The lyrics box is empty.', true); return; }
+            if (target.value.trim() && !window.confirm(
+                    'Replace the translation already in the box with a machine draft?')) return;
+
+            var language = document.getElementById('id_language');
+            var body = new URLSearchParams();
+            body.append('lyrics', lyrics.value);
+            body.append('language', language ? language.value : '');
+            button.disabled = true;
+            say('Working out the language\u2026');
+
+            fetch(config.dataset.start, {
+                method: 'POST', credentials: 'same-origin', body: body,
+                headers: {'X-CSRFToken': csrf()}
+            }).then(function (response) {
+                return response.json().then(function (data) { return [response.ok, data]; });
+            }).then(function (pair) {
+                var data = pair[1];
+                if (!pair[0]) { say(data.error || 'Could not start.', true); finish(); return; }
+                var started = Date.now();
+                say(data.note + ' Translating with ' + data.engine + '\u2026');
+                (function poll() {
+                    fetch(config.dataset.status.replace('JOB', data.job), {credentials: 'same-origin'})
+                        .then(function (response) { return response.json(); })
+                        .then(function (job) {
+                            if (job.state === 'done') {
+                                target.value = job.translation;
+                                target.dispatchEvent(new Event('input', {bubbles: true}));
+                                var origin = document.getElementById('id_translation_origin');
+                                if (origin) origin.value = config.dataset.machine;
+                                say('Translated from ' + data.language + ' with ' + job.engine +
+                                    '. A machine draft: read it through before saving.');
+                                finish();
+                            } else if (job.state === 'failed') {
+                                say(job.error, true); finish();
+                            } else if (Date.now() - started > 10 * 60 * 1000) {
+                                say('Still not done after ten minutes. Is the worker running?', true);
+                                finish();
+                            } else {
+                                var seconds = Math.round((Date.now() - started) / 1000);
+                                say(data.note + ' Translating with ' + data.engine +
+                                    '\u2026 ' + seconds + 's');
+                                setTimeout(poll, 1500);
+                            }
+                        }).catch(function () { setTimeout(poll, 3000); });
+                })();
+            }).catch(function () { say('Could not reach the server.', true); finish(); });
+        });
+    })();
+
+    /*
      * The duplicate comparison: the two copies scroll as one, so the stanza
      * being read on one side is the stanza shown on the other. The two are
      * rarely the same length, so each follows the other's position as a

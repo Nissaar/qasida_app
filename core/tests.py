@@ -4148,3 +4148,106 @@ class QasidaEditFormTest(TestCase):
         self.work.tags.add(rast)
         self.post(tags_maqam=[rast.pk], new_tags='naat')
         self.assertEqual(set(self.work.tags.values_list('name', flat=True)), {'maqam-rast', 'naat'})
+
+
+class TranslateButtonTest(TestCase):
+    """The button beside the translation box, and what it relies on."""
+
+    SAMPLES = {
+        'ar': 'مولاي صل وسلم دائما أبدا على حبيبك خير الخلق كلهم',
+        'ur': 'تمہارے ذرے کے پرتو ستار ہائے فلک تمہارے نعل کی ناقص مثل ضیائے فلک',
+        'fa': 'بشنو این نی چون شکایت می‌کند از جدایی‌ها حکایت می‌کند',
+        'en': 'O my Lord, bless the beloved, the best of all creation',
+        'latin': 'Mustafa jaane rehmat pe laakhon salaam, shamme bazme hidayat pe laakhon salaam',
+    }
+
+    def setUp(self):
+        self.editor = User.objects.create_user('editor', 'e@example.com', GOOD_PASSWORD,
+                                               is_staff=True, is_superuser=True)
+        self.client.force_login(self.editor)
+        self.url = reverse('admin:core_qasida_translate')
+
+    def test_the_language_is_told_apart_by_its_letters(self):
+        from .langdetect import detect
+        for code, text in self.SAMPLES.items():
+            self.assertEqual(detect(text)[0], code, text)
+        self.assertIsNone(detect('يا')[0])
+
+    def test_the_button_is_on_the_form(self):
+        work = make_qasida(title='Burda')
+        page = self.client.get(reverse('admin:core_qasida_change', args=[work.pk]))
+        self.assertContains(page, 'id="q-translate-config"')
+        self.assertContains(page, self.url)
+
+    def test_starting_detects_and_queues_the_text_from_the_form(self):
+        from unittest import mock
+        from . import tasks
+        with mock.patch('core.translating.available_source_codes', return_value={'ar', 'ur'}), \
+                mock.patch('core.translating.engine_for', return_value='OPUS-MT'), \
+                mock.patch.object(tasks.translate_lyrics, 'delay',
+                                  return_value=mock.Mock(id='job-1')) as delay:
+            response = self.client.post(self.url, {'lyrics': self.SAMPLES['ur'],
+                                                   'language': 'Arabic'})
+        data = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual((data['job'], data['language']), ('job-1', 'Urdu'))
+        self.assertIn('The Language field says Arabic', data['note'])
+        delay.assert_called_once_with(self.SAMPLES['ur'], 'ur')
+
+    def test_nothing_is_queued_for_english_or_a_transliteration(self):
+        from unittest import mock
+        from . import tasks
+        with mock.patch.object(tasks.translate_lyrics, 'delay') as delay:
+            for key in ('en', 'latin'):
+                response = self.client.post(self.url, {'lyrics': self.SAMPLES[key]})
+                self.assertEqual(response.status_code, 400)
+        delay.assert_not_called()
+
+    def test_a_finished_job_hands_back_the_draft(self):
+        from unittest import mock
+        done = mock.Mock(state='SUCCESS', result={'translation': 'My Lord', 'engine': 'OPUS-MT'})
+        with mock.patch('celery.result.AsyncResult', return_value=done):
+            data = self.client.get(reverse('admin:core_qasida_translate_status',
+                                           args=['job-1'])).json()
+        self.assertEqual(data, {'state': 'done', 'translation': 'My Lord', 'engine': 'OPUS-MT'})
+
+    def test_readers_cannot_use_it(self):
+        reader = User.objects.create_user('reader', 'r@example.com', GOOD_PASSWORD)
+        self.client.force_login(reader)
+        response = self.client.post(self.url, {'lyrics': self.SAMPLES['ar']})
+        self.assertNotEqual(response.status_code, 200)
+
+    def test_the_big_arabic_model_reads_a_couplet_whole(self):
+        from unittest import mock
+        from . import translating
+
+        class Engine:
+            def __init__(self, name):
+                self.name, self.seen = name, []
+
+            def translate(self, text):
+                self.seen.append(text)
+                return f'<{len(self.seen)}>'
+
+        couplets = ('مولاي صل وسلم دائما أبدا\nعلى حبيبك خير الخلق كلهم\n\n'
+                    'طلع البدر علينا من ثنيات الوداع\nوجب الشكر علينا ما دعا لله داع')
+        opus, argos = Engine('opus'), Engine('argos')
+        with mock.patch.object(translating, '_translator', return_value=opus):
+            self.assertEqual(translating.translate_verse(couplets, 'ar'), '<1>\n\n<2>')
+        self.assertEqual(opus.seen[0], 'مولاي صل وسلم دائما أبدا على حبيبك خير الخلق كلهم')
+        with mock.patch.object(translating, '_translator', return_value=argos):
+            self.assertEqual(translating.translate_verse(couplets, 'ar'), '<1>\n<2>\n\n<3>\n<4>')
+
+    def test_arabic_prefers_the_opus_model_when_it_is_there(self):
+        import tempfile
+        from pathlib import Path
+        from . import translating
+        with tempfile.TemporaryDirectory() as base:
+            with override_settings(TRANSLATION_MODELS_DIR=base):
+                self.assertIsNone(translating._opus_directory('ar'))
+                model = Path(base) / 'opus-mt-tc-big-ar-en'
+                model.mkdir()
+                (model / 'model.bin').write_bytes(b'')
+                self.assertEqual(translating._opus_directory('ar'), model)
+                self.assertIsNone(translating._opus_directory('ur'))
+

@@ -1669,6 +1669,24 @@ def enrich_qasida(qasida_id, overwrite=False):
     return f"qasida {qasida_id}: {', '.join(changed) if changed else 'nothing to add'}"
 
 
+@shared_task(time_limit=15 * 60)
+def translate_lyrics(text, source_code):
+    """
+    Translate a text for the button on the qasida form.
+
+    On the worker, because a long poem through Argos takes a minute or more
+    and a web process held that long is one the site cannot use. Returns the
+    draft and which engine wrote it; nothing is saved - the editor reads the
+    draft in the form and saves it if it will do.
+    """
+    from .translating import engine_for, translate_verse
+
+    engine = engine_for(source_code)
+    if engine is None:
+        return {'translation': '', 'engine': None}
+    return {'translation': translate_verse(text, source_code), 'engine': engine}
+
+
 # How long one crawl may run before the worker kills it. The schedule starts a
 # crawl every midnight, so one still going the following evening has stalled,
 # and would otherwise run into the next.

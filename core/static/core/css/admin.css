@@ -1248,6 +1248,12 @@ div.q-tag-choices label:has(input:checked) {
     font-weight: 600;
 }
 
+/* ---- translating from the lyrics --------------------------------------- */
+.q-translate-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; margin-top: .5rem; }
+.q-translate-bar .q-btn-ghost[disabled] { opacity: .55; cursor: progress; }
+.q-translate-status { font-size: .8rem; color: var(--q-muted); }
+.q-translate-status.q-translate-error { color: var(--q-danger, #b91c1c); }
+
 /* ---- the qasida form in sections --------------------------------------
  * Each section folds away from its heading once it is done. A folded one
  * keeps a line saying what is in it, so nothing is hidden without trace.

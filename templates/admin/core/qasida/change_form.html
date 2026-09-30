@@ -1,0 +1,13 @@
+{% extends "admin/change_form.html" %}
+{% comment %}
+Where the "Translate from the lyrics" button beside the translation box sends
+its requests. admin.js adds the button when this is on the page; without the
+script the form works exactly as before.
+{% endcomment %}
+{% block admin_change_form_document_ready %}
+{{ block.super }}
+<div id="q-translate-config" hidden
+     data-start="{% url 'admin:core_qasida_translate' %}"
+     data-status="{% url 'admin:core_qasida_translate_status' 'JOB' %}"
+     data-machine="machine"></div>
+{% endblock %}
