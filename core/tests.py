@@ -3352,6 +3352,122 @@ class CrawlerSafetyTest(TestCase):
         self.assertIsNone(cache.get(tasks.CRAWL_LOCK))
 
 
+class MultiscriptCrawlTest(TestCase):
+    """Sites printing each naat in Roman, Devanagari and Urdu on one page."""
+
+    WORDPRESS_PAGE = """
+        <div class="sws_supernormalaction"><button>Share</button></div>
+        <h2 id="english-section">Mere Maalik-Naat Lyrics in Roman English</h2><hr />
+        <p><span>Khuda ki raza chaahte hain</span><br /><span>Khuda chaahta hai raza</span></p>
+        <p><span>Mere Maalik! Teri raza ke liye</span></p>
+        <p><strong>Shayar:</strong><br /><span>Muhammad Shahabuddin Saifi</span></p>
+        <p><strong>Naat-Khwaan:</strong><br /><span>Umar Muneer Qadri</span></p>
+        <div id="hindi-section"><hr />
+        <p>ख़ुदा की रज़ा चाहते हैं<br />ख़ुदा चाहता है रज़ा</p>
+        <p>मेरे मालिक! तेरी रज़ा के लिए</p>
+        <p><strong>शायर:</strong><br />मुहम्मद शहाबुद्दीन सैफ़ी</p>
+        <div id="urdu-section"><hr />
+        <p>خدا کی رضا چاہتے ہیں<br />خدا چاہتا ہے رضا</p>
+        <p>میرے مالک! تیری رضا کے لیے</p>
+        <p><strong>شاعر:</strong><br />محمد شہاب الدین سیفی</p>
+        <hr /><p><a href="https://naatenabi.com/duas/">100 Masnoon Duas PDF</a></p>
+        <p>Mere Maalik is a heartfelt Naat expressing devotion and love.</p>
+        <div><a href="#english-section">Roman English</a> | <a href="#urdu-section">اردو</a></div>
+        </div></div>"""
+
+    BLOGGER_PAGE = """
+        <div class="naat-post" id="top">
+        <div class="naat-header"><h1>milta hai kya madine mein</h1></div>
+        <div class="naat-language-nav"><a href="#roman">Roman</a> | <a href="#urdu">اردو</a></div>
+        <!--Roman Urdu-->
+        <div class="naat-section" id="roman"><h2>Roman</h2><div class="naat-lyrics">
+          <p>milta hai kya madine mein<br />
+          karte hein maala-maal wo</p>
+          <p class="repeated-ashaar">milta hai kya madine mein</p>
+          unki gali mein maangte<br />
+          tu bhi usi kareem ke</div></div>
+        <div class="naat-section" id="hindi"><h2>हिन्दी</h2><div class="naat-lyrics">
+          <p>मिलता है क्या मदीने में<br />करते हैं माला-माल वो</p></div></div>
+        <div class="naat-section" id="urdu"><h2>اردو</h2><div class="naat-lyrics naat-urdu">
+          <p>ملتا ہے کیا مدینے میں<br />
+          کرتے ہیں مالا مال وہ</p>
+          <p class="repeated-ashaar">ملتا ہے کیا مدینے میں</p>
+          ان کی گلی میں مانگتے<br />
+          تو بھی اسی کریم کے</div></div>
+        <div class="naat-back-top"><a href="#top">↑ Back to Top</a></div></div>"""
+
+    def test_a_wordpress_page_splits_into_original_transliteration_and_poet(self):
+        from .multiscript import split
+        parts = split(self.WORDPRESS_PAGE)
+        self.assertEqual(parts['urdu'], 'خدا کی رضا چاہتے ہیں\nخدا چاہتا ہے رضا\n\n'
+                                        'میرے مالک! تیری رضا کے لیے')
+        self.assertEqual(parts['roman'], 'Khuda ki raza chaahte hain\nKhuda chaahta hai raza\n\n'
+                                         'Mere Maalik! Teri raza ke liye')
+        self.assertEqual(parts['poet'], 'Muhammad Shahabuddin Saifi')
+        self.assertEqual(parts['poet_native'], 'محمد شہاب الدین سیفی')
+        # The site's own links and blurb after the poem stay out of it.
+        self.assertNotIn('Masnoon', parts['roman'])
+        self.assertNotIn('heartfelt', parts['roman'])
+
+    def test_a_blogger_page_keeps_its_couplets_and_refrains(self):
+        from .multiscript import split
+        parts = split(self.BLOGGER_PAGE)
+        self.assertEqual(parts['roman'].split('\n\n'), [
+            'milta hai kya madine mein\nkarte hein maala-maal wo',
+            'milta hai kya madine mein',
+            'unki gali mein maangte\ntu bhi usi kareem ke'])
+        self.assertEqual(len(parts['urdu'].split('\n\n')), 3)
+        self.assertNotIn('Roman Urdu', parts['roman'])  # an HTML comment, not a line
+        self.assertNotIn('मिलता', parts['urdu'] + parts['roman'])
+
+    def test_titles_lose_the_site_s_description(self):
+        from .multiscript import clean_title
+        self.assertEqual(clean_title('Mere Maalik Teri Raza Ke Liye-Naat Lyrics in Roman English, '
+                                     'Hindi and Urdu || मेरे मालिक'), 'Mere Maalik Teri Raza Ke Liye')
+        self.assertEqual(clean_title('Milta hai Kya Madine mein Lyrics / मिलता है'),
+                         'Milta hai Kya Madine mein')
+
+    def import_post(self, **post):
+        from collections import Counter
+        from .tasks import _import_multiscript_post
+        site = SourceWebsite.objects.create(name='Naat-e-Nabi', url='https://naatenabi.com/',
+                                            parser_type='multiscript')
+        stats = Counter()
+        _import_multiscript_post(site, {'link': 'https://naatenabi.com/mere-maalik/',
+                                        'title': 'Mere Maalik-Naat Lyrics in Roman English',
+                                        'html': self.WORDPRESS_PAGE, 'labels': ['Naat'], **post},
+                                 set(), 'naat-e-nabi', stats)
+        return stats
+
+    def test_a_naat_is_stored_pending_with_both_layers_and_its_poet(self):
+        stats = self.import_post()
+        self.assertEqual(stats['saved'], 1)
+        work = Qasida.objects.get()
+        self.assertEqual(work.review_state, Qasida.REVIEW_PENDING)
+        self.assertEqual(work.title, 'Mere Maalik')
+        self.assertTrue(work.lyrics.startswith('خدا کی رضا'))
+        self.assertTrue(work.transliteration.startswith('Khuda ki raza'))
+        self.assertEqual(work.author.name, 'Muhammad Shahabuddin Saifi')
+        self.assertEqual(work.author.native_name, 'محمد شہاب الدین سیفی')
+        self.assertTrue({'naat', 'urdu', 'transliterated'} <= set(work.tags.values_list('name', flat=True)))
+
+    def test_a_dua_is_not_taken_in(self):
+        stats = self.import_post(labels=['Masnoon Duas'])
+        self.assertEqual(stats['not_verse'], 1)
+        self.assertFalse(Qasida.objects.exists())
+
+    def test_the_platform_is_read_off_the_home_page(self):
+        from unittest import mock
+        from . import tasks
+        wordpress = mock.Mock(headers={'Link': '<https://x.com/wp-json/>; rel="https://api.w.org/"'},
+                              text='')
+        blogger = mock.Mock(headers={}, text="<meta content='blogger' name='generator'/>")
+        with mock.patch.object(tasks, 'polite_get', return_value=wordpress):
+            self.assertEqual(tasks._multiscript_platform('https://x.com'), 'wordpress')
+        with mock.patch.object(tasks, 'polite_get', return_value=blogger):
+            self.assertEqual(tasks._multiscript_platform('https://y.com'), 'blogger')
+
+
 class PoliteFetchTest(TestCase):
     """The guards every crawler request passes through."""
 

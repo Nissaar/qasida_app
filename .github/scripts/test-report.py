@@ -45,7 +45,7 @@ AREAS = OrderedDict([
     ('Duplicate detection and comparison', [
         'DuplicateScanTest', 'DuplicateComparisonTest', 'DuplicateRulingTest']),
     ('Crawlers (fetching, extraction, safety)', [
-        'CrawlerSafetyTest', 'PoliteFetchTest', 'ExtractionLineTest']),
+        'CrawlerSafetyTest', 'PoliteFetchTest', 'ExtractionLineTest', 'MultiscriptCrawlTest']),
     ('Security and abuse limits', [
         'AbuseLimitTest', 'ClientAddressTest', 'ReferrerPolicyTest']),
     ('Offline reading', ['OfflineViewerTest']),

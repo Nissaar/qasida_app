@@ -51,6 +51,23 @@ DEFAULT_SOURCES = [
         'parser_type': 'wayback',
         'is_active': True,
     },
+    {
+        # Prints every naat in Roman letters, Devanagari and the Urdu
+        # original, and credits the poet: the original script and a matched
+        # transliteration from one page. See core.multiscript.
+        'url': 'https://naatenabi.com/',
+        'name': 'Naat-e-Nabi',
+        'parser_type': 'multiscript',
+        'is_active': True,
+    },
+    {
+        # The same three scripts, on Blogger. Older posts carry only Roman and
+        # Devanagari; those arrive as transliterations awaiting an original.
+        'url': 'https://www.naat-e-sarkar.com/',
+        'name': 'Naat-e-Sarkar',
+        'parser_type': 'multiscript',
+        'is_active': True,
+    },
 ]
 
 

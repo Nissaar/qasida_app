@@ -1024,7 +1024,8 @@ class SourceWebsite(models.Model):
             ('midhah', 'Midhah lyrics (Next.js, JSON-LD)'),
             ('generic', 'Generic (JSON-LD, else densest text block)'),
             ('wayback', 'Internet Archive snapshots of a blocked site'),
-            ('wordpress_api', 'WordPress REST API (wp-json)')
+            ('wordpress_api', 'WordPress REST API (wp-json)'),
+            ('multiscript', 'Roman, Hindi and Urdu on one page (WordPress or Blogger)'),
         ],
         default='mynaatbook'
     )
