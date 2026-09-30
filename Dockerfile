@@ -90,6 +90,20 @@ wanted = [('ar','en'), ('ur','en'), ('fa','en')]; \
 [pkg.install_from_path(p.download()) for p in available \
  if (p.from_code, p.to_code) in wanted]; \
 print('argos models installed')"
+
+# Stanza, which Argos uses to split text into sentences, reads an index of its
+# resources. The copy each Argos package ships is cut down - it lacks the
+# "packages" section Stanza looks up - so Stanza fetches the full one from
+# GitHub whenever a pipeline starts, and without a network every Urdu and
+# Persian translation failed. The full index is fetched here, once, while the
+# build has a network; the app then only ever reads it. See core/translating.py.
+RUN python -c "\
+import stanza; \
+from argostranslate import package; \
+[stanza.Pipeline(lang=p.from_code, dir=str(p.package_path / 'stanza'), processors='tokenize', \
+  logging_level='WARNING', download_method=stanza.DownloadMethod.DOWNLOAD_RESOURCES) \
+ for p in package.get_installed_packages() if (p.package_path / 'stanza').is_dir()]; \
+print('stanza indexes ready')"
 USER root
 
 # The font the downloadable PDFs are set in: Amiri, a naskh face drawn for

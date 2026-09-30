@@ -4283,7 +4283,15 @@ class TranslateButtonTest(TestCase):
                                            'argostranslate.settings': argos.settings}):
             translating._keep_stanza_offline()
             StanzaSentencizer().lazy_pipeline()
-        self.assertEqual(stanza.Pipeline.call_args.kwargs['download_method'], 'reuse')
+            self.assertEqual(stanza.Pipeline.call_args.kwargs['download_method'], 'reuse')
+
+            # An incomplete index on disk (an image built before the Dockerfile
+            # fetched the full one) falls back to fetching it.
+            stanza.DownloadMethod.DOWNLOAD_RESOURCES = 'download'
+            stanza.Pipeline.side_effect = [KeyError('packages'), mock.Mock()]
+            with self.assertLogs('core.translating', level='WARNING'):
+                StanzaSentencizer().lazy_pipeline()
+            self.assertEqual(stanza.Pipeline.call_args.kwargs['download_method'], 'download')
 
     def test_arabic_prefers_the_opus_model_when_it_is_there(self):
         import tempfile
