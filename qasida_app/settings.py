@@ -481,6 +481,14 @@ LOGGING = {
             "level": LOG_LEVEL,
             "propagate": False,
         },
+        # Argos logs three INFO lines for every line of verse it translates,
+        # which buries everything else the worker says. Its warnings and
+        # errors still come through.
+        "argostranslate": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
     },
 }
 

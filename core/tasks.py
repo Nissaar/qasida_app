@@ -1679,12 +1679,18 @@ def translate_lyrics(text, source_code):
     draft and which engine wrote it; nothing is saved - the editor reads the
     draft in the form and saves it if it will do.
     """
-    from .translating import engine_for, translate_verse
+    from .translating import TranslationFailed, engine_for, translate_verse
 
     engine = engine_for(source_code)
     if engine is None:
-        return {'translation': '', 'engine': None}
-    return {'translation': translate_verse(text, source_code), 'engine': engine}
+        return {'translation': '', 'engine': None, 'error': 'No model is installed for it.'}
+    try:
+        return {'translation': translate_verse(text, source_code, strict=True),
+                'engine': engine}
+    except TranslationFailed as failure:
+        # Handed back to the form, so the editor sees why rather than
+        # "returned nothing"; the full traceback is in the worker's log.
+        return {'translation': '', 'engine': engine, 'error': str(failure)}
 
 
 # How long one crawl may run before the worker kills it. The schedule starts a

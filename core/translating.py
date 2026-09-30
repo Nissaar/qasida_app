@@ -19,6 +19,7 @@ calls but keeps the blank-line structure, so a machine translation lines up
 stanza for stanza with the original and can be shown beside it.
 """
 
+import logging
 import re
 import threading
 from pathlib import Path
@@ -65,6 +66,12 @@ ENGINE_NAMES = {'opus': 'OPUS-MT (University of Helsinki)', 'argos': 'Argos Tran
 
 _translators = {}
 _lock = threading.Lock()
+
+logger = logging.getLogger(__name__)
+
+
+class TranslationFailed(Exception):
+    """Every line the engine was given failed; carries the first reason."""
 
 
 class _OpusTranslator:
@@ -190,12 +197,15 @@ def _split_long_line(line, limit=MAX_LINE_CHARS):
     return pieces
 
 
-def translate_verse(text, source_code):
+def translate_verse(text, source_code, strict=False):
     """
     Translate verse, preserving its line and stanza structure.
 
     Returns '' when no model is installed for the language, so callers can
-    tell "not translated" from "translated to nothing".
+    tell "not translated" from "translated to nothing". A line the engine
+    fails on is left blank so one bad line does not lose the poem; with
+    `strict`, a text on which every line failed raises TranslationFailed
+    with the engine's own error, rather than quietly returning nothing.
     """
     engine = _translator(source_code)
     if engine is None or not text:
@@ -204,6 +214,7 @@ def translate_verse(text, source_code):
         # Latin-script transliteration: the model would produce nonsense.
         return ''
 
+    errors = []
     output = []
     for stanza in re.split(r'\n\s*\n', text.strip()):
         lines = [line.strip() for line in stanza.splitlines() if line.strip()]
@@ -214,19 +225,32 @@ def translate_verse(text, source_code):
             # into." against "He is the beloved whose intercession is hoped
             # for..."). The larger model reads the whole bayt; the smaller
             # Argos models do worse on the longer input, so they keep lines.
-            output.append(_translate_line(engine, ' '.join(lines), limit=2 * MAX_LINE_CHARS))
+            output.append(_translate_line(engine, ' '.join(lines), errors,
+                                          limit=2 * MAX_LINE_CHARS))
         else:
-            output.extend(_translate_line(engine, line) for line in lines)
+            output.extend(_translate_line(engine, line, errors) for line in lines)
         output.append('')
-    return re.sub(r'\n{3,}', '\n\n', '\n'.join(output)).strip()
+    result = re.sub(r'\n{3,}', '\n\n', '\n'.join(output)).strip()
+
+    if errors:
+        # Once per text, with the traceback: a failure that is the same on
+        # every line is one fault, not forty.
+        first = errors[0]
+        logger.error('Translating %s with %s: %d line(s) failed; the first: %s: %s',
+                     source_code, engine.name, len(errors), type(first).__name__, first,
+                     exc_info=(type(first), first, first.__traceback__))
+        if strict and not re.search(r'[A-Za-z]', result):
+            raise TranslationFailed(f'{type(first).__name__}: {first}') from first
+    return result
 
 
-def _translate_line(engine, line, limit=MAX_LINE_CHARS):
+def _translate_line(engine, line, errors, limit=MAX_LINE_CHARS):
     if len(line) < MIN_LINE_CHARS:
         return line
     try:
         rendered = [engine.translate(piece).strip() for piece in _split_long_line(line, limit)]
         return ' '.join(p for p in rendered if p)
-    except Exception:
+    except Exception as error:
         # One bad line should not lose the rest of the poem.
+        errors.append(error)
         return ''
