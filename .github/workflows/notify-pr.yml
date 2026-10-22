@@ -1,0 +1,56 @@
+# Push a notification to ntfy (topic "updates", same one as Nissaar/self-hosted) when a pull
+# request is opened. GitHub's own notification (the PR is assigned to you) works regardless;
+# this adds the phone push. It does nothing until the NTFY_TOKEN secret exists:
+#   gh secret set NTFY_TOKEN -R <owner>/<repo>
+# (Renovate's PRs, yours and everyone else's all read this one secret.)
+#
+# SECURITY: pull_request_target runs this file from the default branch. It never checks out
+# or runs PR code; the PR's title and author arrive as env vars and go through jq --arg.
+name: Notify on new pull request
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ntfy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
+      NTFY_URL: https://ntfy.nissaar.com
+      NTFY_TOPIC: updates
+      NTFY_ORIGIN_IP: ${{ vars.NTFY_ORIGIN_IP }}   # optional: Cloudflare fallback, see Nissaar/self-hosted UPDATING.md
+      REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_TITLE: ${{ github.event.pull_request.title }}
+      PR_URL: ${{ github.event.pull_request.html_url }}
+      PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+      PR_DRAFT: ${{ github.event.pull_request.draft }}
+    steps:
+      - name: Push to ntfy
+        run: |
+          set -euo pipefail
+          if [ -z "${NTFY_TOKEN:-}" ]; then
+            echo "NTFY_TOKEN is not set: skipping the phone push (the GitHub notification still applies)."
+            exit 0
+          fi
+          [ "${PR_DRAFT:-false}" = "true" ] && { echo "draft PR: skipping"; exit 0; }
+          if [ -z "${PR_NUMBER:-}" ]; then
+            payload=$(jq -n --arg t "$NTFY_TOPIC" --arg m "Test message from $REPO" '{topic:$t,title:"✅ GitHub notifications work",message:$m,tags:["white_check_mark"]}')
+          else
+            payload=$(jq -n --arg t "$NTFY_TOPIC" --arg title "📦 $REPO #$PR_NUMBER" \
+              --arg m "$PR_TITLE"$'\n'"by $PR_AUTHOR" --arg c "$PR_URL" \
+              '{topic:$t,title:$title,message:$m,click:$c,tags:["package"]}')
+          fi
+          post() { curl -sS -m 20 -o /dev/null -w '%{http_code}' -A 'github-actions-notify/1.0' \
+            -H "Authorization: Bearer $NTFY_TOKEN" -H 'Content-Type: application/json' -d "$payload" "$@" || true; }
+          code=$(post "${NTFY_URL%/}/")
+          if [ "$code" != "200" ] && [ -n "${NTFY_ORIGIN_IP:-}" ]; then
+            host=${NTFY_URL#*://}; host=${host%%/*}
+            code=$(post -k --resolve "${host}:443:${NTFY_ORIGIN_IP}" "${NTFY_URL%/}/")
+          fi
+          if [ "$code" = "200" ]; then echo "notified ntfy topic '$NTFY_TOPIC'"; else echo "::warning::ntfy answered HTTP ${code:-none}; no phone push sent"; fi

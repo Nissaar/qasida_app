@@ -1,0 +1,97 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "timezone": "Indian/Mauritius",
+  "schedule": [
+    "before 7am on monday"
+  ],
+  "assignees": [
+    "Nissaar"
+  ],
+  "labels": [
+    "dependencies"
+  ],
+  "semanticCommits": "enabled",
+  "semanticCommitType": "chore",
+  "semanticCommitScope": "deps",
+  "prConcurrentLimit": 5,
+  "automerge": false,
+  "dependencyDashboard": true,
+  "packageRules": [
+    {
+      "description": "One PR for all python minor and patch updates; majors stay separate",
+      "matchManagers": [
+        "pip_requirements"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "groupName": "python minor and patch updates"
+    },
+    {
+      "description": "One PR for all docker minor and patch updates; majors stay separate",
+      "matchManagers": [
+        "dockerfile"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "groupName": "docker minor and patch updates"
+    },
+    {
+      "description": "One PR for all docker compose minor and patch updates; majors stay separate",
+      "matchManagers": [
+        "docker-compose"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "groupName": "docker compose minor and patch updates"
+    },
+    {
+      "description": "One PR for all github actions minor and patch updates; majors stay separate",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest",
+        "pin",
+        "pinDigest"
+      ],
+      "groupName": "github actions minor and patch updates"
+    },
+    {
+      "description": "Label majors so they stand out; read the release notes before merging",
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "addLabels": [
+        "major"
+      ]
+    },
+    {
+      "description": "Database/search major versions need a dump/restore or reindex: never bump by tag",
+      "matchPackageNames": [
+        "postgres",
+        "mariadb",
+        "mysql",
+        "redis",
+        "valkey/valkey",
+        "mongo",
+        "getmeili/meilisearch"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "enabled": false
+    }
+  ]
+}
