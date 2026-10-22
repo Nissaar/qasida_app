@@ -11,7 +11,7 @@
 # model's revision; transformers below 5, which loads this model's weights
 # wrongly and yields nonsense; and ctranslate2 to the version requirements.txt
 # installs, so the converted model is one the runtime can read.
-FROM python:3.12-slim-trixie AS opus-mt
+FROM python:3.15-slim-trixie AS opus-mt
 RUN pip install --no-cache-dir torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir transformers==4.57.6 sentencepiece==0.2.2 ctranslate2==4.8.2
 RUN ct2-transformers-converter \
@@ -29,7 +29,7 @@ RUN ct2-transformers-converter \
 # rebuild months from now gets the same system libraries (tesseract, the fonts)
 # rather than whatever the floating tag has moved on to. Patch releases of
 # both still arrive, which is what a rebuild is for.
-FROM python:3.12-slim-trixie
+FROM python:3.15-slim-trixie
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
