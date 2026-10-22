@@ -1,0 +1,131 @@
+# Posts ONE sticky comment on every pull request: what the PR changes, and the result of
+# every check that ran on it. It never merges, approves or labels anything — you decide.
+#
+# Runs on `workflow_run`, i.e. from the default branch with write access to PR comments,
+# so it also works for Dependabot PRs (whose own workflows get a read-only token). It never
+# checks out or executes code from the PR: it only reads the GitHub API and writes a comment.
+# When a repo gains a new PR workflow, add its `name:` to the list below.
+name: PR report
+
+on:
+  workflow_run:
+    workflows: ["Tests"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: read
+
+concurrency:
+  group: pr-report-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  report:
+    name: PR report
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const { owner, repo } = context.repo;
+            const MARK = '<!-- pr-report -->';
+
+            let number = run.pull_requests && run.pull_requests[0] && run.pull_requests[0].number;
+            if (!number) {
+              const { data } = await github.rest.repos.listPullRequestsAssociatedWithCommit({ owner, repo, commit_sha: run.head_sha });
+              const hit = data.find((p) => p.state === 'open' && p.head.sha === run.head_sha);
+              number = hit && hit.number;
+            }
+            if (!number) { core.info('No open PR for this run.'); return; }
+
+            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+            if (pr.head.sha !== run.head_sha) { core.info('A newer commit exists; its own runs will report.'); return; }
+
+            // ---- dependency changes (from the PR title/body Dependabot or Renovate wrote) ----
+            const nums = (v) => (String(v).replace(/^v/, '').match(/^\d+(?:\.\d+){0,2}(?![0-9a-zA-Z])/) || [null])[0];
+            function bump(from, to) {
+              const a = nums(from), b = nums(to);
+              if (!a || !b) return 'update';
+              const [x, y] = [a, b].map((s) => s.split('.').map(Number));
+              if (x[0] !== y[0]) return y[0] > x[0] ? 'major' : 'downgrade';
+              if ((x[1] || 0) !== (y[1] || 0)) return 'minor';
+              return 'patch';
+            }
+            const clean = (s) => String(s).replace(/[`\[\]]/g, '').replace(/\([^)]*\)/g, '').trim();
+            function parseUpdates(title, body) {
+              const out = [];
+              const seen = new Set();
+              const add = (name, from, to) => {
+                name = clean(name); from = clean(from); to = clean(to);
+                if (!name || seen.has(name + from + to)) return;
+                seen.add(name + from + to);
+                out.push({ name, from, to, kind: bump(from, to) });
+              };
+              for (const line of String(body || '').split(/\r?\n/)) {
+                const m = line.match(/^\|\s*(\[[^\]]+\]\([^)]*\)|[^|]+?)\s*\|\s*`?([^`|\s]+)`?\s*\|\s*`?([^`|\s]+)`?\s*\|/);
+                if (m && !/^(package|dependency|-+|:?-+:?)$/i.test(clean(m[1])) && !/^-+$/.test(m[2])) add(m[1], m[2], m[3]);
+              }
+              if (!out.length) {
+                for (const m of String(body || '').matchAll(/Updates? `([^`]+)` from ([^\s]+) to ([^\s]+)/g)) add(m[1], m[2], m[3]);
+              }
+              if (!out.length) {
+                const m = String(title).match(/bump (\S+) from (\S+) to (\S+)/i) || String(title).match(/update (\S+) (?:docker tag )?to (\S+)/i);
+                if (m) m.length === 4 ? add(m[1], m[2], m[3]) : add(m[1], '?', m[2]);
+              }
+              return out;
+            }
+            const updates = parseUpdates(pr.title, pr.body);
+            const majors = updates.filter((u) => u.kind === 'major' || u.kind === 'downgrade');
+
+            // ---- checks that ran on this commit ----
+            const SKIP = /mirror to gitlab|^pr report$|^notify/i;
+            const runs = (await github.paginate(github.rest.checks.listForRef, { owner, repo, ref: pr.head.sha, per_page: 100 }))
+              .filter((c) => !SKIP.test(c.name));
+            const BAD = new Set(['failure', 'cancelled', 'timed_out', 'action_required', 'startup_failure']);
+            const failed = runs.filter((c) => c.status === 'completed' && BAD.has(c.conclusion));
+            const pending = runs.filter((c) => c.status !== 'completed');
+            const skipped = runs.filter((c) => c.status === 'completed' && c.conclusion === 'skipped');
+            const passed = runs.filter((c) => c.status === 'completed' && (c.conclusion === 'success' || c.conclusion === 'neutral'));
+            const icon = (c) => c.status !== 'completed' ? '⏳' : c.conclusion === 'success' ? '✅' : c.conclusion === 'skipped' ? '⏭️' : c.conclusion === 'neutral' ? '➖' : '❌';
+
+            let verdict;
+            if (!runs.length) verdict = '⚠️ **No checks ran on this PR.** Nothing has validated it — test it by hand before merging.';
+            else if (failed.length) verdict = `❌ **Do not merge yet — ${failed.length} check${failed.length > 1 ? 's' : ''} failing.**`;
+            else if (pending.length) verdict = `⏳ **Checks still running** (${pending.length} left). This comment updates when they finish.`;
+            else verdict = `✅ **All ${passed.length} check${passed.length === 1 ? '' : 's'} passed.** Review the changes below, then merge if you are happy.`;
+            if (majors.length && !failed.length) verdict += `\n\n⚠️ Includes a **major** version change (${majors.map((u) => '`' + u.name + '`').join(', ')}): read the release notes — passing tests do not prove nothing else changed.`;
+
+            // ---- what changed ----
+            const files = await github.paginate(github.rest.pulls.listFiles, { owner, repo, pull_number: number, per_page: 100 });
+            const MANIFEST = /(^|\/)(package(-lock)?\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|requirements[^/]*\.txt|poetry\.lock|pyproject\.toml|composer\.(json|lock)|go\.(mod|sum)|Dockerfile[^/]*|docker-compose[^/]*\.ya?ml|compose\.ya?ml|build\.gradle(\.kts)?|libs\.versions\.toml|gradle-wrapper\.properties)$|^\.github\/workflows\//;
+            const depFiles = files.filter((f) => MANIFEST.test(f.filename));
+            const other = files.length - depFiles.length;
+
+            let md = `${MARK}\n## 📋 PR report\n\n${verdict}\n\n`;
+            if (updates.length) {
+              md += `### Dependency changes\n| Package | From | To | Change |\n|---|---|---|---|\n`;
+              for (const u of updates.slice(0, 40)) md += `| \`${u.name}\` | \`${u.from}\` | \`${u.to}\` | ${u.kind === 'major' ? '⚠️ major' : u.kind === 'downgrade' ? '⚠️ downgrade' : u.kind} |\n`;
+              if (updates.length > 40) md += `| … | | | +${updates.length - 40} more |\n`;
+              md += '\n';
+            }
+            md += `### Checks\n`;
+            if (runs.length) {
+              md += `| | Check | Result |\n|---|---|---|\n`;
+              for (const c of runs.sort((a, b) => a.name.localeCompare(b.name))) {
+                md += `| ${icon(c)} | [${c.name}](${c.html_url}) | ${c.status === 'completed' ? c.conclusion : c.status} |\n`;
+              }
+              if (skipped.length) md += `\n_${skipped.length} skipped check${skipped.length > 1 ? 's' : ''} did not run (path or condition filters)._\n`;
+            } else md += '_none_\n';
+            md += `\n### Files\n${files.length} changed${depFiles.length ? ` — dependency/build files: ${depFiles.slice(0, 12).map((f) => '`' + f.filename + '`').join(', ')}${depFiles.length > 12 ? ', …' : ''}` : ''}${other > 0 && depFiles.length ? `; ${other} other` : ''}.\n`;
+            md += `\n<sub>Updated for \`${pr.head.sha.slice(0, 7)}\` · nothing here is merged automatically · [workflow run](${run.html_url})</sub>\n`;
+
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: number, per_page: 100 });
+            const mine = comments.find((c) => c.user.type === 'Bot' && c.body.includes(MARK));
+            if (mine) await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body: md });
+            else await github.rest.issues.createComment({ owner, repo, issue_number: number, body: md });
+            core.summary.addRaw(md).write();
