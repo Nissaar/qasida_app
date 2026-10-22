@@ -1,9 +1,8 @@
 # Push a notification to ntfy (topic "updates", same one as Nissaar/self-hosted) when a pull
 # request is opened. GitHub's own notification (the PR is assigned to you) works regardless;
 # this adds the phone push. It does nothing until the NTFY_TOKEN secret exists:
-#   gh secret set NTFY_TOKEN -R <owner>/<repo>                    # PRs you open
-#   gh secret set NTFY_TOKEN -R <owner>/<repo> --app dependabot   # PRs Dependabot opens
-# (Dependabot PRs read the *Dependabot* secret store, a separate one.)
+#   gh secret set NTFY_TOKEN -R <owner>/<repo>
+# (Renovate's PRs, yours and everyone else's all read this one secret.)
 #
 # SECURITY: pull_request_target runs this file from the default branch. It never checks out
 # or runs PR code; the PR's title and author arrive as env vars and go through jq --arg.
