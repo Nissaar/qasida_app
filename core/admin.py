@@ -9,6 +9,7 @@ from django.db import transaction
 from django.db.models import Count, Max
 from django.utils import timezone
 from django.utils.html import format_html
+from django.utils.safestring import mark_safe
 
 from . import notify
 from .admin_filters import MissingDetailFilter, TextSearchPanel
@@ -540,7 +541,7 @@ class DuplicateLinkAdmin(LibraryAdmin):
         """The pair's standing, and the choice that is not tied to one copy."""
         if obj.state == DuplicateLink.STATE_PENDING:
             standing = ''
-            action = format_html(
+            action = mark_safe(
                 '<button type="submit" name="_ruling" value="keep-both" class="q-btn-ghost" '
                 'data-confirm="Keep both as two different works?">Keep both - different poems</button>')
         else:
@@ -548,10 +549,10 @@ class DuplicateLinkAdmin(LibraryAdmin):
                 standing = format_html('<strong>Ruled a duplicate:</strong> “{}” kept, the other hidden. ',
                                        obj.kept)
             elif obj.state == DuplicateLink.STATE_DUPLICATE:
-                standing = format_html('<strong>Ruled a duplicate</strong> (no copy chosen). ')
+                standing = mark_safe('<strong>Ruled a duplicate</strong> (no copy chosen). ')
             else:
-                standing = format_html('<strong>Ruled different works.</strong> ')
-            action = format_html(
+                standing = mark_safe('<strong>Ruled different works.</strong> ')
+            action = mark_safe(
                 '<button type="submit" name="_ruling" value="reopen" class="q-btn-ghost" '
                 'data-confirm="Undo this ruling? Both copies go back to how they were before it.">'
                 'Undo this ruling</button>')
@@ -606,9 +607,9 @@ class DuplicateLinkAdmin(LibraryAdmin):
         right-to-left beside a Latin one without either being mislabelled.
         """
         if link.kept_id == work.pk:
-            choice = format_html('<span class="q-dup-verdict q-dup-kept">Kept</span>')
+            choice = mark_safe('<span class="q-dup-verdict q-dup-kept">Kept</span>')
         elif link.kept_id:
-            choice = format_html('<span class="q-dup-verdict q-dup-hidden">Hidden, leads to the other</span>')
+            choice = mark_safe('<span class="q-dup-verdict q-dup-hidden">Hidden, leads to the other</span>')
         else:
             other = link.other_than(work)
             choice = format_html(
