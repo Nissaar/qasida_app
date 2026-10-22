@@ -92,6 +92,17 @@
         "major"
       ],
       "enabled": false
+    },
+    {
+      "description": "Python itself (docker tag and CI version): a new minor/major only when every pinned dependency ships wheels for it. ctranslate2 has none for 3.15, so the Docker build would fail on the server while CI stays green (CI does not build the image). Bump by hand.",
+      "matchPackageNames": [
+        "python"
+      ],
+      "matchUpdateTypes": [
+        "major",
+        "minor"
+      ],
+      "enabled": false
     }
   ]
 }
