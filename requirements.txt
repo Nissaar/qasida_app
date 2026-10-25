@@ -12,4 +12,4 @@ pytesseract==0.3.13
 argostranslate==1.11.0
 # Already installed by argostranslate; pinned so it matches the version the
 # Dockerfile converts the OPUS-MT model with.
-ctranslate2==4.8.3
+ctranslate2==4.8.4
