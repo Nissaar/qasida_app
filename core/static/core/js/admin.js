@@ -467,6 +467,11 @@
                             if (job.state === 'done') {
                                 target.value = job.translation;
                                 target.dispatchEvent(new Event('input', {bubbles: true}));
+                                var romanised = document.getElementById('id_transliteration');
+                                if (romanised && job.transliteration && !romanised.value.trim()) {
+                                    romanised.value = job.transliteration;
+                                    romanised.dispatchEvent(new Event('input', {bubbles: true}));
+                                }
                                 var origin = document.getElementById('id_translation_origin');
                                 if (origin) origin.value = config.dataset.machine;
                                 say('Translated from ' + data.language + ' with ' + job.engine +

@@ -1,3 +1,4 @@
+import logging
 import hashlib
 import html
 import io
@@ -24,6 +25,8 @@ from .textrepair import (arabic_len, looks_shattered, ocr_is_improvement, ocr_pd
                          pdf_page_pngs, pdf_text, reassemble_pdf_text,
                          reassembly_is_improvement, strip_viewer_chrome)
 from .titles import split_title
+
+logger = logging.getLogger(__name__)
 
 PDF_URL_RE = re.compile(r'https?://[^\s"\'<>]+?\.pdf')
 
@@ -1679,7 +1682,21 @@ def translate_lyrics(text, source_code):
     draft and which engine wrote it; nothing is saved - the editor reads the
     draft in the form and saves it if it will do.
     """
+    from . import gemini
     from .translating import TranslationFailed, engine_for, translate_verse
+
+    if gemini.enabled():
+        try:
+            out = gemini.process(text, want_translation=True, want_transliteration=True)
+            if out['translation']:
+                return {'translation': out['translation'], 'transliteration': out['transliteration'],
+                        'engine': out['engine']}
+            # Already English: nothing to translate, but a transliteration may still be wanted.
+            if out['transliteration']:
+                return {'translation': '', 'transliteration': out['transliteration'], 'engine': out['engine'],
+                        'error': 'the text is already English'}
+        except gemini.GeminiFailed as failure:
+            logger.warning('Gemini translation failed (%s); trying the offline engine.', failure)
 
     engine = engine_for(source_code)
     if engine is None:

@@ -266,7 +266,18 @@ class QasidaAdmin(LibraryAdmin):
             raise PermissionDenied
         text = (request.POST.get('lyrics') or '').strip()
         field_says = (request.POST.get('language') or '').strip()
+        from . import gemini
+
         code, name, how = detect(text)
+        if gemini.enabled():
+            # Gemini reads any language or script, a romanised text included.
+            if not text:
+                return JsonResponse({'error': 'Nothing to translate: the lyrics are empty.'}, status=400)
+            if code == 'en':
+                return JsonResponse({'error': f'Nothing to translate: {how}.'}, status=400)
+            job = translate_lyrics.delay(text, code or '')
+            return JsonResponse({'job': job.id, 'language': name or 'unknown', 'engine': gemini.engine_label(),
+                                 'note': f'Sent to {gemini.engine_label()} (any language, English out).'})
         if code in (None, 'en', 'latin'):
             return JsonResponse({'error': f'Nothing to translate: {how}.'}, status=400)
         if code not in available_source_codes():

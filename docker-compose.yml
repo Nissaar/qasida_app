@@ -37,6 +37,8 @@ services:
       - DB_PORT=5432
       - CELERY_BROKER_URL=redis://127.0.0.1:6379/0
       - CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/0
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
     depends_on:
       - db
       - redis
@@ -58,6 +60,8 @@ services:
       - DB_PORT=5432
       - CELERY_BROKER_URL=redis://127.0.0.1:6379/0
       - CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/0
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
     depends_on:
       - db
       - redis
@@ -79,6 +83,8 @@ services:
       - DB_PORT=5432
       - CELERY_BROKER_URL=redis://127.0.0.1:6379/0
       - CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/0
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
     depends_on:
       - db
       - redis
