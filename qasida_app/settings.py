@@ -204,7 +204,7 @@ TRANSLATION_MODELS_DIR = os.environ.get("TRANSLATION_MODELS_DIR", "/opt/translat
 # Translation and transliteration with the Gemini API (core/gemini.py). Empty key = the site's own offline engines, as before.
 # Create the key in Google AI Studio (aistudio.google.com/apikey) and put it in the environment of the web AND the worker.
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite").strip() or "gemini-3.5-flash-lite"
 GEMINI_TIMEOUT = int(os.environ.get("GEMINI_TIMEOUT", "90") or 90)
 GEMINI_MAX_CHARS = int(os.environ.get("GEMINI_MAX_CHARS", "6000") or 6000)
 

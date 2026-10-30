@@ -25,7 +25,7 @@ import urllib.request
 logger = logging.getLogger(__name__)
 
 ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
-DEFAULT_MODEL = 'gemini-2.5-flash'
+DEFAULT_MODEL = 'gemini-3.5-flash-lite'
 DEFAULT_TIMEOUT = 90
 DEFAULT_MAX_CHARS = 6000
 RETRY_STATUS = {429, 500, 502, 503, 504}

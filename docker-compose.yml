@@ -38,7 +38,7 @@ services:
       - CELERY_BROKER_URL=redis://127.0.0.1:6379/0
       - CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/0
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.5-flash-lite}
     depends_on:
       - db
       - redis
@@ -61,7 +61,7 @@ services:
       - CELERY_BROKER_URL=redis://127.0.0.1:6379/0
       - CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/0
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.5-flash-lite}
     depends_on:
       - db
       - redis
@@ -84,7 +84,7 @@ services:
       - CELERY_BROKER_URL=redis://127.0.0.1:6379/0
       - CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/0
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.5-flash-lite}
     depends_on:
       - db
       - redis

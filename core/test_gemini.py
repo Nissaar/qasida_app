@@ -17,7 +17,7 @@ def _answer(**fields):
     return response
 
 
-@override_settings(GEMINI_API_KEY='sekret', GEMINI_MODEL='gemini-2.5-flash-lite')
+@override_settings(GEMINI_API_KEY='sekret', GEMINI_MODEL='gemini-3.5-flash-lite')
 class GeminiTests(SimpleTestCase):
     def test_disabled_without_key(self):
         with override_settings(GEMINI_API_KEY=''):
@@ -31,9 +31,9 @@ class GeminiTests(SimpleTestCase):
         req = op.call_args[0][0]
         self.assertNotIn('sekret', req.full_url)
         self.assertEqual(req.get_header('X-goog-api-key'), 'sekret')
-        self.assertIn('gemini-2.5-flash-lite', req.full_url)
+        self.assertIn('gemini-3.5-flash-lite', req.full_url)
         self.assertEqual((out['translation'], out['transliteration'], out['engine']),
-                         ('Hello', 'salam', 'Gemini (gemini-2.5-flash-lite)'))
+                         ('Hello', 'salam', 'Gemini (gemini-3.5-flash-lite)'))
 
     def test_only_what_was_asked_is_returned(self):
         with mock.patch('urllib.request.urlopen', return_value=_answer(translation='Hi', transliteration='x')):
