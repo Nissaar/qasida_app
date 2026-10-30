@@ -10,7 +10,7 @@ A searchable library of qasidas, naats and other devotional poetry. It collects 
 
 ## Stack
 
-Django 5.2, PostgreSQL 15, Redis, Celery (worker + beat), gunicorn behind nginx / Traefik, WhiteNoise for static files.
+Django 6.1, PostgreSQL 15, Redis, Celery (worker + beat), gunicorn behind nginx / Traefik, WhiteNoise for static files.
 
 ## Run it locally
 
