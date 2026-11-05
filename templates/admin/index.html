@@ -1,7 +1,7 @@
 {% extends "admin/base_site.html" %}
 {% load i18n static %}
 
-{% block coltype %}colMS{% endblock %}
+{% block coltype %}colM{% endblock %}
 {% block bodyclass %}{{ block.super }} dashboard{% endblock %}
 {% block breadcrumbs %}{% endblock %}
 {% block content_title %}{% endblock %}
@@ -73,6 +73,26 @@
         </a>
     </div>
 
+    {% load log %}
+    <h2 class="q-section">{% translate 'Recent activity' %}</h2>
+    {% get_admin_log 12 as admin_log for_user user %}
+        {% if not admin_log %}
+        <p class="q-empty">{% translate 'Nothing yet.' %}</p>
+        {% else %}
+        <ul class="q-activity">
+            {% for entry in admin_log %}
+            <li>
+                {% if entry.is_deletion or not entry.get_admin_url %}
+                <span>{{ entry.object_repr }}</span>
+                {% else %}
+                <a href="{{ entry.get_admin_url }}">{{ entry.object_repr }}</a>
+                {% endif %}
+                <em>{{ entry.content_type.name|capfirst }}{% if entry.is_addition %} · added{% elif entry.is_change %} · changed{% elif entry.is_deletion %} · deleted{% endif %} · {{ entry.action_time|timesince }} ago</em>
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+
     {# One borderless list rather than a card per app. #}
     <h2 class="q-section">{% translate 'Everything else' %}</h2>
     <div class="q-manage">
@@ -95,26 +115,4 @@
 </div>
 {% endblock %}
 
-{% block sidebar %}
-<div id="content-related" class="q-aside">
-    <h2 class="q-section">{% translate 'Recent activity' %}</h2>
-    {% load log %}
-    {% get_admin_log 12 as admin_log for_user user %}
-    {% if not admin_log %}
-    <p class="q-empty">{% translate 'Nothing yet.' %}</p>
-    {% else %}
-    <ul class="q-activity">
-        {% for entry in admin_log %}
-        <li>
-            {% if entry.is_deletion or not entry.get_admin_url %}
-            <span>{{ entry.object_repr }}</span>
-            {% else %}
-            <a href="{{ entry.get_admin_url }}">{{ entry.object_repr }}</a>
-            {% endif %}
-            <em>{{ entry.content_type.name|capfirst }}{% if entry.is_addition %} · added{% elif entry.is_change %} · changed{% elif entry.is_deletion %} · deleted{% endif %} · {{ entry.action_time|timesince }} ago</em>
-        </li>
-        {% endfor %}
-    </ul>
-    {% endif %}
-</div>
-{% endblock %}
+{% block sidebar %}{% endblock %}
