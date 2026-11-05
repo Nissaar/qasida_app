@@ -208,6 +208,8 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite").strip() o
 # Several models, comma separated, best first: the editor can pick one on the form, and a model that fails is
 # followed by the next. Empty = just GEMINI_MODEL.
 GEMINI_MODELS = os.environ.get("GEMINI_MODELS", "").strip()
+# ChatOps reads the Gemini usage (per day and model) at /gemini-usage/ with this token as a Bearer header. Empty = the endpoint is off (404).
+GEMINI_USAGE_TOKEN = os.environ.get("GEMINI_USAGE_TOKEN", "").strip()
 GEMINI_TIMEOUT = int(os.environ.get("GEMINI_TIMEOUT", "90") or 90)
 GEMINI_MAX_CHARS = int(os.environ.get("GEMINI_MAX_CHARS", "6000") or 6000)
 

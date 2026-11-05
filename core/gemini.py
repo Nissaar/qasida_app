@@ -169,6 +169,44 @@ def _request(payload, model, key, timeout):
     raise GeminiFailed(last)
 
 
+def _generate(payload, model, key, timeout):
+    """One request, with its token use put on the books (best effort: counting never breaks a translation)."""
+    data = _request(payload, model, key, timeout)
+    try:
+        meta = data.get('usageMetadata') or {}
+        record_usage(model, int(meta.get('promptTokenCount') or 0),
+                     int(meta.get('candidatesTokenCount') or 0) + int(meta.get('thoughtsTokenCount') or 0))
+    except Exception:
+        logger.warning('Could not record Gemini usage', exc_info=True)
+    return data
+
+
+def record_usage(model, tokens_in, tokens_out):
+    """Add one call to today's row (the day runs on Mauritius time, like ChatOps)."""
+    import datetime
+    from django.db import transaction
+    from django.db.models import F
+    from .models import GeminiUsage
+
+    day = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=4))).date()
+    with transaction.atomic():
+        row, _ = GeminiUsage.objects.get_or_create(day=day, model=model)
+        GeminiUsage.objects.filter(pk=row.pk).update(calls=F('calls') + 1, tokens_in=F('tokens_in') + tokens_in,
+                                                     tokens_out=F('tokens_out') + tokens_out)
+
+
+def usage_report(days=31):
+    """-> {'YYYY-MM-DD': {model: {'calls', 'in', 'out'}}} for the last `days` days; what the usage endpoint sends."""
+    import datetime
+    from .models import GeminiUsage
+
+    since = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=4))).date() - datetime.timedelta(days=days - 1)
+    report = {}
+    for row in GeminiUsage.objects.filter(day__gte=since).order_by('day', 'model'):
+        report.setdefault(row.day.isoformat(), {})[row.model] = {'calls': row.calls, 'in': row.tokens_in, 'out': row.tokens_out}
+    return report
+
+
 def _clean(text, key):
     return text.replace(key, '***') if key else text
 
@@ -182,7 +220,7 @@ def _one(chunk, want_translation, want_transliteration, model, key, timeout):
         'contents': [{'role': 'user', 'parts': [{'text': f"Give {' and '.join(asked)}.\n<<<\n{chunk}\n>>>"}]}],
         'generationConfig': {'temperature': 0.2, 'responseMimeType': 'application/json', 'responseSchema': SCHEMA, **_thinking(model)},
     }
-    out = _parse(_request(payload, model, key, timeout))
+    out = _parse(_generate(payload, model, key, timeout))
     return {k: str(out.get(k) or '').strip() for k in ('language', 'translation', 'transliteration')}
 
 
@@ -252,7 +290,7 @@ def _one_script(chunk, language, model, key, timeout):
         'contents': [{'role': 'user', 'parts': [{'text': f"Language: {language}. Write it in the original script.\n<<<\n{chunk}\n>>>"}]}],
         'generationConfig': {'temperature': 0.2, 'responseMimeType': 'application/json', 'responseSchema': SCRIPT_SCHEMA, **_thinking(model)},
     }
-    out = _parse(_request(payload, model, key, timeout))
+    out = _parse(_generate(payload, model, key, timeout))
     return str(out.get('text') or '').strip()
 
 

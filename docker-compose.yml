@@ -40,6 +40,7 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.5-flash-lite}
       - GEMINI_MODELS=${GEMINI_MODELS:-}
+      - GEMINI_USAGE_TOKEN=${GEMINI_USAGE_TOKEN:-}
     depends_on:
       - db
       - redis
@@ -64,6 +65,7 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.5-flash-lite}
       - GEMINI_MODELS=${GEMINI_MODELS:-}
+      - GEMINI_USAGE_TOKEN=${GEMINI_USAGE_TOKEN:-}
     depends_on:
       - db
       - redis
@@ -88,6 +90,7 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.5-flash-lite}
       - GEMINI_MODELS=${GEMINI_MODELS:-}
+      - GEMINI_USAGE_TOKEN=${GEMINI_USAGE_TOKEN:-}
     depends_on:
       - db
       - redis

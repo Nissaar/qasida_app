@@ -120,6 +120,7 @@ urlpatterns = [
     path('my/history/clear/', account_views.clear_history, name='clear_history'),
     path('my/corrections/', account_views.my_corrections, name='my_corrections'),
     path('my/contributions/', account_views.my_contributions, name='my_contributions'),
+    path('gemini-usage/', views.gemini_usage, name='gemini_usage'),
     path('my/settings/', account_views.account_settings, name='account_settings'),
     path('my/settings/delete/', account_views.delete_account, name='delete_account'),
     path('my/settings/verify/resend/', account_views.resend_verification,

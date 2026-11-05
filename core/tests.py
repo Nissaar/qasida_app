@@ -4347,3 +4347,44 @@ class TranslateButtonTest(TestCase):
                 self.assertEqual(translating._opus_directory('ar'), model)
                 self.assertIsNone(translating._opus_directory('ur'))
 
+
+
+class GeminiUsageTest(TestCase):
+    """The Gemini token count ChatOps reads, per day and model."""
+
+    def setUp(self):
+        self.url = reverse('gemini_usage')
+
+    def test_usage_is_added_up_per_day_and_model(self):
+        from . import gemini
+        gemini.record_usage('m-a', 100, 20)
+        gemini.record_usage('m-a', 50, 5)
+        gemini.record_usage('m-b', 7, 1)
+        day = next(iter(gemini.usage_report()))
+        self.assertEqual(gemini.usage_report()[day], {'m-a': {'calls': 2, 'in': 150, 'out': 25},
+                                                      'm-b': {'calls': 1, 'in': 7, 'out': 1}})
+
+    def test_a_call_is_counted_from_the_answers_usage_metadata(self):
+        from unittest import mock
+        from . import gemini
+        body = {'candidates': [{'finishReason': 'STOP', 'content': {'parts': [{'text': '{"language":"Urdu","translation":"Hi","transliteration":""}'}]}}],
+                'usageMetadata': {'promptTokenCount': 40, 'candidatesTokenCount': 10, 'thoughtsTokenCount': 5}}
+        with override_settings(GEMINI_API_KEY='k', GEMINI_MODELS='m-a', GEMINI_MODEL=''), \
+                mock.patch.object(gemini, '_request', return_value=body):
+            gemini.process('سلام')
+        self.assertEqual(list(gemini.usage_report().values())[0], {'m-a': {'calls': 1, 'in': 40, 'out': 15}})
+
+    def test_the_endpoint_is_off_without_a_token(self):
+        with override_settings(GEMINI_USAGE_TOKEN=''):
+            self.assertEqual(self.client.get(self.url).status_code, 404)
+
+    def test_the_endpoint_wants_the_token(self):
+        from . import gemini
+        gemini.record_usage('m-a', 1, 2)
+        with override_settings(GEMINI_USAGE_TOKEN='tok'):
+            self.assertEqual(self.client.get(self.url).status_code, 401)
+            self.assertEqual(self.client.get(self.url, HTTP_AUTHORIZATION='Bearer wrong').status_code, 401)
+            ok = self.client.get(self.url, HTTP_AUTHORIZATION='Bearer tok')
+        self.assertEqual(ok.status_code, 200)
+        self.assertEqual(ok.json()['project'], 'qasida')
+        self.assertEqual(list(ok.json()['days'].values())[0]['m-a']['out'], 2)

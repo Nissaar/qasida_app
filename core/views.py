@@ -917,3 +917,19 @@ def contribution_inbox(request):
         'decided': decided,
         'waiting_count': waiting.count(),
     })
+
+
+def gemini_usage(request):
+    """Gemini token use per day and model, for ChatOps. Needs the GEMINI_USAGE_TOKEN as a Bearer token; off (404) without one."""
+    import hmac
+    from . import gemini
+
+    token = (getattr(settings, 'GEMINI_USAGE_TOKEN', '') or '').strip()
+    if not token:
+        raise Http404
+    sent = request.headers.get('Authorization', '').removeprefix('Bearer ').strip()
+    if not sent or not hmac.compare_digest(sent.encode(), token.encode()):
+        return JsonResponse({'error': 'unauthorised'}, status=401)
+    response = JsonResponse({'project': 'qasida', 'days': gemini.usage_report()})
+    response['Cache-Control'] = 'no-store'
+    return response
