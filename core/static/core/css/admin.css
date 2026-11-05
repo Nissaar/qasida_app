@@ -1141,11 +1141,21 @@ ul.messagelist li {
     font-size: .8125rem;
     background-image: none;
 }
+/* Django 6.1 paints each level with background-image (the icon) and background-color at a higher specificity than
+   the box above, so the icon tiled and the success green showed through. Say all of it for every level. */
+ul.messagelist li, ul.messagelist li.debug, ul.messagelist li.info, ul.messagelist li.success,
+ul.messagelist li.warning, ul.messagelist li.error {
+    background-image: none;
+    background-repeat: no-repeat;
+}
+ul.messagelist li.debug, ul.messagelist li.info, ul.messagelist li.success {
+    border-color: var(--q-accent-line); background-color: var(--q-accent-tint); color: var(--q-accent-ink);
+}
 ul.messagelist li.warning {
-    border-color: var(--q-warn-line); background: var(--q-warn-tint); color: var(--q-warn);
+    border-color: var(--q-warn-line); background-color: var(--q-warn-tint); color: var(--q-warn);
 }
 ul.messagelist li.error {
-    border-color: var(--q-danger-line); background: var(--q-danger-tint); color: var(--q-danger);
+    border-color: var(--q-danger-line); background-color: var(--q-danger-tint); color: var(--q-danger);
 }
 
 .inline-related h3 {
