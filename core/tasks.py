@@ -1673,7 +1673,7 @@ def enrich_qasida(qasida_id, overwrite=False):
 
 
 @shared_task(time_limit=15 * 60)
-def translate_lyrics(text, source_code):
+def translate_lyrics(text, source_code, model=None):
     """
     Translate a text for the button on the qasida form.
 
@@ -1687,7 +1687,7 @@ def translate_lyrics(text, source_code):
 
     if gemini.enabled():
         try:
-            out = gemini.process(text, want_translation=True, want_transliteration=True)
+            out = gemini.process(text, want_translation=True, want_transliteration=True, model=model)
             if out['translation']:
                 return {'translation': out['translation'], 'transliteration': out['transliteration'],
                         'engine': out['engine']}
@@ -1708,6 +1708,24 @@ def translate_lyrics(text, source_code):
         # Handed back to the form, so the editor sees why rather than
         # "returned nothing"; the full traceback is in the worker's log.
         return {'translation': '', 'engine': engine, 'error': str(failure)}
+
+
+@shared_task(time_limit=15 * 60)
+def restore_script(text, language, model=None):
+    """
+    Write a Latin-letter transliteration back in the poem's original script, for the form's button.
+    Nothing is saved: the editor reads the draft and saves it if it will do.
+    """
+    from . import gemini
+
+    if not gemini.enabled():
+        return {'script': '', 'engine': None, 'error': 'Gemini is not set up (no GEMINI_API_KEY)'}
+    try:
+        out = gemini.to_script(text, language, model=model)
+    except gemini.GeminiFailed as failure:
+        logger.warning('Gemini script restoration failed (%s)', failure)
+        return {'script': '', 'engine': None, 'error': str(failure)}
+    return {'script': out['text'], 'engine': out['engine']}
 
 
 # How long one crawl may run before the worker kills it. The schedule starts a

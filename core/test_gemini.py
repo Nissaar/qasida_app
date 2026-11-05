@@ -65,3 +65,53 @@ class GeminiTests(SimpleTestCase):
         with mock.patch('urllib.request.urlopen', return_value=blocked):
             with self.assertRaises(gemini.GeminiFailed):
                 gemini.process('سلام')
+
+
+@override_settings(GEMINI_API_KEY='sekret', GEMINI_MODEL='', GEMINI_MODELS='model-a, model-b')
+class GeminiModelsTests(SimpleTestCase):
+    def _models_called(self, op):
+        return [c[0][0].full_url.split('/models/')[1].split(':')[0] for c in op.call_args_list]
+
+    def test_models_come_from_the_list_in_order(self):
+        self.assertEqual(gemini.models(), ['model-a', 'model-b'])
+        self.assertEqual(gemini.model_name(), 'model-a')
+
+    def test_single_model_setting_still_works(self):
+        with override_settings(GEMINI_MODELS='', GEMINI_MODEL='solo'):
+            self.assertEqual(gemini.models(), ['solo'])
+
+    def test_next_model_answers_when_the_first_fails(self):
+        err = urllib.error.HTTPError('u', 404, 'gone', {}, io.BytesIO(b''))
+        with mock.patch('urllib.request.urlopen', side_effect=[err, _answer(translation='ok')]) as op:
+            out = gemini.process('سلام')
+        self.assertEqual(self._models_called(op), ['model-a', 'model-b'])
+        self.assertEqual((out['translation'], out['engine']), ('ok', 'Gemini (model-b)'))
+
+    def test_a_chosen_model_is_the_only_one_tried(self):
+        err = urllib.error.HTTPError('u', 404, 'gone', {}, io.BytesIO(b''))
+        with mock.patch('urllib.request.urlopen', side_effect=err) as op:
+            with self.assertRaises(gemini.GeminiFailed):
+                gemini.process('سلام', model='model-b')
+        self.assertEqual(set(self._models_called(op)), {'model-b'})
+
+    def test_an_unconfigured_model_is_refused(self):
+        with mock.patch('urllib.request.urlopen') as op:
+            with self.assertRaises(gemini.GeminiFailed):
+                gemini.process('سلام', model='other')
+        op.assert_not_called()
+
+    def test_to_script_writes_the_original_script(self):
+        with mock.patch('urllib.request.urlopen', return_value=_answer(text='سلام')) as op:
+            out = gemini.to_script('salam', 'Urdu')
+        self.assertEqual((out['text'], out['engine']), ('سلام', 'Gemini (model-a)'))
+        sent = json.loads(op.call_args[0][0].data)
+        self.assertIn('Urdu', sent['contents'][0]['parts'][0]['text'])
+
+    def test_to_script_needs_a_language(self):
+        with self.assertRaises(gemini.GeminiFailed):
+            gemini.to_script('salam', '')
+
+    def test_to_script_rejects_an_empty_answer(self):
+        with mock.patch('urllib.request.urlopen', return_value=_answer(text='')):
+            with self.assertRaises(gemini.GeminiFailed):
+                gemini.to_script('salam', 'Urdu')
