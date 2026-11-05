@@ -4211,6 +4211,47 @@ class TranslateButtonTest(TestCase):
                                            args=['job-1'])).json()
         self.assertEqual(data, {'state': 'done', 'translation': 'My Lord', 'engine': 'OPUS-MT'})
 
+    def test_a_chosen_gemini_model_goes_to_the_worker(self):
+        from unittest import mock
+        from . import tasks
+        with override_settings(GEMINI_API_KEY='k', GEMINI_MODELS='m-a,m-b'), \
+                mock.patch.object(tasks.translate_lyrics, 'delay', return_value=mock.Mock(id='job-1')) as delay:
+            response = self.client.post(self.url, {'lyrics': self.SAMPLES['ur'], 'model': 'm-b'})
+            bad = self.client.post(self.url, {'lyrics': self.SAMPLES['ur'], 'model': 'nope'})
+        self.assertEqual(response.json()['engine'], 'Gemini (m-b)')
+        delay.assert_called_once_with(self.SAMPLES['ur'], 'ur', 'm-b')
+        self.assertEqual(bad.status_code, 400)
+
+    def test_the_form_offers_the_models(self):
+        work = make_qasida(title='Burda')
+        with override_settings(GEMINI_API_KEY='k', GEMINI_MODELS='m-a,m-b'):
+            page = self.client.get(reverse('admin:core_qasida_change', args=[work.pk]))
+        self.assertContains(page, 'data-models="m-a,m-b"')
+
+    def test_writing_the_original_script_queues_the_transliteration(self):
+        from unittest import mock
+        from . import tasks
+        url = reverse('admin:core_qasida_to_script')
+        with override_settings(GEMINI_API_KEY='k', GEMINI_MODELS='m-a'), \
+                mock.patch.object(tasks.restore_script, 'delay', return_value=mock.Mock(id='job-2')) as delay:
+            missing = self.client.post(url, {'text': 'salam', 'language': ''})
+            ok = self.client.post(url, {'text': 'salam', 'language': 'Urdu'})
+        self.assertEqual(missing.status_code, 400)
+        self.assertEqual(ok.json()['job'], 'job-2')
+        delay.assert_called_once_with('salam', 'Urdu', None)
+
+    def test_writing_the_original_script_needs_gemini(self):
+        with override_settings(GEMINI_API_KEY=''):
+            response = self.client.post(reverse('admin:core_qasida_to_script'), {'text': 'salam', 'language': 'Urdu'})
+        self.assertEqual(response.status_code, 400)
+
+    def test_a_finished_script_job_hands_back_the_draft(self):
+        from unittest import mock
+        done = mock.Mock(state='SUCCESS', result={'script': 'سلام', 'engine': 'Gemini (m-a)'})
+        with mock.patch('celery.result.AsyncResult', return_value=done):
+            data = self.client.get(reverse('admin:core_qasida_translate_status', args=['job-2'])).json()
+        self.assertEqual((data['state'], data['script']), ('done', 'سلام'))
+
     def test_readers_cannot_use_it(self):
         reader = User.objects.create_user('reader', 'r@example.com', GOOD_PASSWORD)
         self.client.force_login(reader)

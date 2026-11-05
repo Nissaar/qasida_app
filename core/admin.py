@@ -244,6 +244,8 @@ class QasidaAdmin(LibraryAdmin):
                  name='core_qasida_ocr_tool'),
             path('translate/', self.admin_site.admin_view(self.translate_start_view),
                  name='core_qasida_translate'),
+            path('to-script/', self.admin_site.admin_view(self.to_script_start_view),
+                 name='core_qasida_to_script'),
             path('translate/<str:job>/', self.admin_site.admin_view(self.translate_status_view),
                  name='core_qasida_translate_status'),
         ] + super().get_urls()
@@ -267,7 +269,23 @@ class QasidaAdmin(LibraryAdmin):
             raise PermissionDenied
         text = (request.POST.get('lyrics') or '').strip()
         field_says = (request.POST.get('language') or '').strip()
+        from . import gemini
+
+        model = (request.POST.get('model') or '').strip() or None
+        if model and model not in gemini.models():
+            return JsonResponse({'error': f'Unknown model {model}.'}, status=400)
+
         code, name, how = detect(text)
+        if gemini.enabled():
+            # Gemini reads any language or script, a romanised text included.
+            if not text:
+                return JsonResponse({'error': 'Nothing to translate: the lyrics are empty.'}, status=400)
+            if code == 'en':
+                return JsonResponse({'error': f'Nothing to translate: {how}.'}, status=400)
+            job = translate_lyrics.delay(text, code or '', model)
+            label = gemini.engine_label(model)
+            return JsonResponse({'job': job.id, 'language': name or 'unknown', 'engine': label,
+                                 'note': f'Sent to {label} (any language, English out).'})
         if code in (None, 'en', 'latin'):
             return JsonResponse({'error': f'Nothing to translate: {how}.'}, status=400)
         if code not in available_source_codes():
@@ -280,6 +298,36 @@ class QasidaAdmin(LibraryAdmin):
         return JsonResponse({'job': job.id, 'language': name, 'engine': engine_for(code),
                              'note': note})
 
+    def to_script_start_view(self, request):
+        """Start writing a transliteration back in the poem's original script (Arabic, Urdu ...), with Gemini."""
+        from . import gemini
+        from .tasks import restore_script
+
+        if request.method != 'POST':
+            return HttpResponseNotAllowed(['POST'])
+        if not self.has_change_permission(request):
+            raise PermissionDenied
+        if not gemini.enabled():
+            return JsonResponse({'error': 'This needs Gemini: GEMINI_API_KEY is not set.'}, status=400)
+        text = (request.POST.get('text') or '').strip()
+        language = (request.POST.get('language') or '').strip()
+        model = (request.POST.get('model') or '').strip() or None
+        if not text:
+            return JsonResponse({'error': 'Nothing to convert: the transliteration is empty.'}, status=400)
+        if not language:
+            return JsonResponse({'error': 'Fill in the Language field first (Arabic, Urdu ...).'}, status=400)
+        if model and model not in gemini.models():
+            return JsonResponse({'error': f'Unknown model {model}.'}, status=400)
+        job = restore_script.delay(text, language, model)
+        label = gemini.engine_label(model)
+        return JsonResponse({'job': job.id, 'language': language, 'engine': label,
+                             'note': f'Sent to {label}.'})
+
+    def render_change_form(self, request, context, *args, **kwargs):
+        from . import gemini
+        context['gemini_models'] = gemini.models() if gemini.enabled() else []
+        return super().render_change_form(request, context, *args, **kwargs)
+
     def translate_status_view(self, request, job):
         """How a translation job is getting on, and its draft once done."""
         from celery.result import AsyncResult
@@ -289,6 +337,8 @@ class QasidaAdmin(LibraryAdmin):
         result = AsyncResult(job)
         if result.state == 'SUCCESS':
             value = result.result or {}
+            if value.get('script'):
+                return JsonResponse({'state': 'done', **value})
             if not value.get('translation'):
                 reason = value.get('error') or 'it returned nothing for this text'
                 return JsonResponse({'state': 'failed',

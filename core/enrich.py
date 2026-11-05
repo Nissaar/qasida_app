@@ -7,7 +7,11 @@ draft for review - romanisation of unvocalised script loses the short vowels,
 and machine translation of devotional verse is rough.
 """
 
+import logging
+
 from django.db import transaction
+
+from . import gemini
 
 from .models import Qasida
 from .transliterate import can_transliterate, transliterate
@@ -17,6 +21,9 @@ from .translating import (
     is_native_script,
     translate_verse,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def enrich(qasida, overwrite=False):
@@ -32,19 +39,9 @@ def enrich(qasida, overwrite=False):
     an editor typed in the meantime, and rebuilt the search text from lyrics
     that had since been corrected.
     """
-    drafts = {}
-
-    if (overwrite or not qasida.transliteration) and can_transliterate(qasida.lyrics):
-        draft = transliterate(qasida.lyrics)
-        if draft:
-            drafts['transliteration'] = draft
-
-    if _wants_translation(qasida, overwrite) and is_native_script(qasida.lyrics):
-        code = code_for_language(qasida.language)
-        if code and code in available_source_codes():
-            english = translate_verse(qasida.lyrics, code)
-            if english:
-                drafts['translation'] = english
+    drafts = _gemini_drafts(qasida, overwrite) if gemini.enabled() else None
+    if drafts is None:
+        drafts = _local_drafts(qasida, overwrite)
 
     if not drafts:
         return []
@@ -70,6 +67,47 @@ def enrich(qasida, overwrite=False):
             # this fresh copy, and adds them to update_fields.
             fresh.save(update_fields=changed)
     return changed
+
+
+def _local_drafts(qasida, overwrite):
+    """The offline engines: rule-based romaniser and OPUS-MT / Argos."""
+    drafts = {}
+    if (overwrite or not qasida.transliteration) and can_transliterate(qasida.lyrics):
+        draft = transliterate(qasida.lyrics)
+        if draft:
+            drafts['transliteration'] = draft
+
+    if _wants_translation(qasida, overwrite) and is_native_script(qasida.lyrics):
+        code = code_for_language(qasida.language)
+        if code and code in available_source_codes():
+            english = translate_verse(qasida.lyrics, code)
+            if english:
+                drafts['translation'] = english
+    return drafts
+
+
+def _gemini_drafts(qasida, overwrite):
+    """
+    Gemini, for any source language or script; always English out.
+
+    None when it cannot answer (API down, quota, blocked), so the caller
+    falls back to the offline engines and the work is still enriched.
+    """
+    want_tr = _wants_translation(qasida, overwrite)
+    want_tl = overwrite or not qasida.transliteration
+    if not (qasida.lyrics or '').strip() or not (want_tr or want_tl):
+        return {}
+    try:
+        out = gemini.process(qasida.lyrics, want_translation=want_tr, want_transliteration=want_tl)
+    except gemini.GeminiFailed as failure:
+        logger.warning('Gemini enrichment of qasida %s failed (%s); using the offline engines.', qasida.pk, failure)
+        return None
+    drafts = {}
+    if want_tl and out['transliteration']:
+        drafts['transliteration'] = out['transliteration']
+    if want_tr and out['translation']:
+        drafts['translation'] = out['translation']
+    return drafts
 
 
 def _wants_translation(qasida, overwrite):

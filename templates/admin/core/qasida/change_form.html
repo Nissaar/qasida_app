@@ -9,5 +9,7 @@ script the form works exactly as before.
 <div id="q-translate-config" hidden
      data-start="{% url 'admin:core_qasida_translate' %}"
      data-status="{% url 'admin:core_qasida_translate_status' 'JOB' %}"
+     data-to-script="{% url 'admin:core_qasida_to_script' %}"
+     data-models="{{ gemini_models|join:',' }}"
      data-machine="machine"></div>
 {% endblock %}

@@ -424,9 +424,34 @@
         status.className = 'q-translate-status';
         status.setAttribute('role', 'status');
         status.setAttribute('aria-live', 'polite');
+        var models = (config.dataset.models || '').split(',').filter(Boolean);
+        var picker = null;
+        if (models.length > 1) {
+            picker = document.createElement('select');
+            picker.setAttribute('aria-label', 'Gemini model');
+            var auto = document.createElement('option');
+            auto.value = ''; auto.textContent = 'Model: automatic (' + models.join(' \u2192 ') + ')';
+            picker.appendChild(auto);
+            models.forEach(function (name) {
+                var option = document.createElement('option');
+                option.value = name; option.textContent = name;
+                picker.appendChild(option);
+            });
+            bar.appendChild(picker);
+        }
         bar.appendChild(button);
         bar.appendChild(status);
         target.insertAdjacentElement('afterend', bar);
+
+        // "Write in the original script": the transliteration (or Latin lyrics) back into Arabic, Urdu ...
+        var scriptButton = null;
+        if (config.dataset.toScript) {
+            scriptButton = document.createElement('button');
+            scriptButton.type = 'button';
+            scriptButton.className = 'q-btn-ghost';
+            scriptButton.textContent = 'Write the lyrics in the original script';
+            button.insertAdjacentElement('afterend', scriptButton);
+        }
 
         function csrf() {
             var field = document.querySelector('input[name=csrfmiddlewaretoken]');
@@ -436,7 +461,52 @@
             status.textContent = text;
             status.classList.toggle('q-translate-error', !!isError);
         }
-        function finish() { button.disabled = false; }
+        function finish() { button.disabled = false; if (scriptButton) scriptButton.disabled = false; }
+
+        if (scriptButton) scriptButton.addEventListener('click', function () {
+            var romanised = document.getElementById('id_transliteration');
+            var language = document.getElementById('id_language');
+            var source = romanised && romanised.value.trim() ? romanised.value : lyrics.value;
+            if (!source.trim()) { say('The transliteration box is empty.', true); return; }
+            if (!language || !language.value.trim()) { say('Fill in the Language field first.', true); return; }
+            if (lyrics.value.trim() && !window.confirm(
+                    'Replace the lyrics already in the box with a machine draft in the original script?')) return;
+            var body = new URLSearchParams();
+            body.append('text', source);
+            body.append('language', language.value);
+            body.append('model', picker ? picker.value : '');
+            button.disabled = true; scriptButton.disabled = true;
+            say('Starting\u2026');
+            fetch(config.dataset.toScript, {
+                method: 'POST', credentials: 'same-origin', body: body, headers: {'X-CSRFToken': csrf()}
+            }).then(function (response) {
+                return response.json().then(function (data) { return [response.ok, data]; });
+            }).then(function (pair) {
+                var data = pair[1];
+                if (!pair[0]) { say(data.error || 'Could not start.', true); finish(); return; }
+                var started = Date.now();
+                (function poll() {
+                    fetch(config.dataset.status.replace('JOB', data.job), {credentials: 'same-origin'})
+                        .then(function (response) { return response.json(); })
+                        .then(function (job) {
+                            if (job.state === 'done') {
+                                lyrics.value = job.script;
+                                lyrics.dispatchEvent(new Event('input', {bubbles: true}));
+                                say('Written in ' + data.language + ' script with ' + job.engine +
+                                    '. A machine draft: read it through before saving.');
+                                finish();
+                            } else if (job.state === 'failed') {
+                                say(job.error, true); finish();
+                            } else if (Date.now() - started > 10 * 60 * 1000) {
+                                say('Still not done after ten minutes. Is the worker running?', true); finish();
+                            } else {
+                                say(data.note + ' Working\u2026 ' + Math.round((Date.now() - started) / 1000) + 's');
+                                setTimeout(poll, 1500);
+                            }
+                        }).catch(function () { setTimeout(poll, 3000); });
+                })();
+            }).catch(function () { say('Could not reach the server.', true); finish(); });
+        });
 
         button.addEventListener('click', function () {
             if (!lyrics.value.trim()) { say('The lyrics box is empty.', true); return; }
@@ -447,7 +517,8 @@
             var body = new URLSearchParams();
             body.append('lyrics', lyrics.value);
             body.append('language', language ? language.value : '');
-            button.disabled = true;
+            body.append('model', picker ? picker.value : '');
+            button.disabled = true; if (scriptButton) scriptButton.disabled = true;
             say('Working out the language\u2026');
 
             fetch(config.dataset.start, {
@@ -467,6 +538,11 @@
                             if (job.state === 'done') {
                                 target.value = job.translation;
                                 target.dispatchEvent(new Event('input', {bubbles: true}));
+                                var romanised = document.getElementById('id_transliteration');
+                                if (romanised && job.transliteration && !romanised.value.trim()) {
+                                    romanised.value = job.transliteration;
+                                    romanised.dispatchEvent(new Event('input', {bubbles: true}));
+                                }
                                 var origin = document.getElementById('id_translation_origin');
                                 if (origin) origin.value = config.dataset.machine;
                                 say('Translated from ' + data.language + ' with ' + job.engine +
