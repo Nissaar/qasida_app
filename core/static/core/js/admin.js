@@ -384,21 +384,138 @@
         });
 
         if (headings.length < 2) return;
-        var tools = document.createElement('div');
-        tools.className = 'q-section-tools';
-        [['Fold all', true], ['Open all', false]].forEach(function (pair) {
+
+        // One tab at a time. The sections stay in the page (so every field still posts); the others are hidden.
+        var holder = sections[0].parentElement;
+        var tabs = document.createElement('div');
+        tabs.className = 'q-tabs';
+        tabs.setAttribute('role', 'tablist');
+        var buttons = [];
+        // Recordings and scanned pages are inlines outside the fieldsets; they get a tab of their own.
+        var inlines = Array.prototype.slice.call(holder.querySelectorAll('.inline-group'));
+        function show(index) {
+            sections.forEach(function (fieldset, i) { fieldset.hidden = i !== index; });
+            inlines.forEach(function (group) { group.hidden = index !== sections.length; });
+            buttons.forEach(function (button, i) { button.setAttribute('aria-selected', i === index ? 'true' : 'false'); });
+            try { history.replaceState(null, '', '#' + buttons[index].dataset.slug); } catch (e) { /* ignore */ }
+        }
+        var firstWithError = -1;
+        sections.forEach(function (fieldset, index) {
+            var heading = fieldset.querySelector('h2');
+            var label = heading ? (heading.firstChild && heading.firstChild.textContent || '').trim() : 'Section ' + (index + 1);
             var button = document.createElement('button');
             button.type = 'button';
-            button.className = 'q-btn-ghost';
-            button.textContent = pair[0];
-            button.addEventListener('click', function () {
-                headings.forEach(function (heading) {
-                    if (heading.classList.contains('q-collapsed') !== pair[1]) heading.click();
-                });
-            });
-            tools.appendChild(button);
+            button.className = 'q-tab';
+            button.setAttribute('role', 'tab');
+            button.dataset.slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || String(index);
+            button.textContent = label;
+            var note = heading && heading.querySelector('.q-section-note');
+            if (note) {
+                var badge = document.createElement('span');
+                badge.className = 'q-tab-badge';
+                button.appendChild(badge);
+                var sync = function () { badge.textContent = note.textContent; };
+                fieldset.addEventListener('change', sync);
+                sync();
+            }
+            if (fieldset.querySelector('.errorlist, .errors')) {
+                button.classList.add('q-tab-error');
+                if (firstWithError < 0) firstWithError = index;
+            }
+            button.addEventListener('click', function () { show(index); });
+            buttons.push(button);
+            tabs.appendChild(button);
         });
-        sections[0].parentElement.insertBefore(tools, sections[0]);
+        if (inlines.length) {
+            var media = document.createElement('button');
+            media.type = 'button';
+            media.className = 'q-tab';
+            media.setAttribute('role', 'tab');
+            media.dataset.slug = 'recordings-and-pages';
+            media.textContent = 'Recordings and pages';
+            if (inlines.some(function (group) { return group.querySelector('.errorlist, .errors'); })) {
+                media.classList.add('q-tab-error');
+                if (firstWithError < 0) firstWithError = sections.length;
+            }
+            media.addEventListener('click', function () { show(sections.length); });
+            buttons.push(media);
+            tabs.appendChild(media);
+        }
+        holder.insertBefore(tabs, sections[0]);
+        holder.classList.add('q-tabs-on');
+        var wanted = buttons.findIndex(function (button) { return '#' + button.dataset.slug === location.hash; });
+        show(firstWithError >= 0 ? firstWithError : (wanted >= 0 ? wanted : 0));
+    })();
+
+    /*
+     * The list's filters live in a drawer, so the table has the whole width.
+     * A Filters button opens it, the active filters show as chips above the
+     * table that each undo themselves, and Esc or a click outside closes it.
+     */
+    (function setUpFilterDrawer() {
+        var drawer = document.getElementById('changelist-filter');
+        var toolbar = document.getElementById('toolbar');
+        if (!drawer || !toolbar) return;
+        var ignore = {p: 1, o: 1, q: 1, _changelist_filters: 1, all: 1, e: 1, _popup: 1, _to_field: 1};
+        var url = new URL(window.location.href);
+        var active = [];
+        url.searchParams.forEach(function (value, key) { if (!ignore[key] && value !== '') active.push([key, value]); });
+
+        var bar = document.createElement('div');
+        bar.className = 'q-filter-bar';
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'q-btn-ghost q-filter-button';
+        button.setAttribute('aria-expanded', 'false');
+        button.setAttribute('aria-controls', 'changelist-filter');
+        button.textContent = 'Filters';
+        if (active.length) { var n = document.createElement('b'); n.textContent = String(active.length); button.appendChild(n); }
+        bar.appendChild(button);
+
+        function nice(key) { return key.replace(/__(exact|icontains|id__exact|isnull|gte|lte)$/, '').replace(/_/g, ' '); }
+        active.forEach(function (pair) {
+            var chip = document.createElement('span');
+            chip.className = 'q-chip';
+            chip.appendChild(document.createTextNode(nice(pair[0]) + ': ' + pair[1]));
+            var off = new URL(window.location.href);
+            off.searchParams.delete(pair[0]); off.searchParams.delete('p');
+            var link = document.createElement('a');
+            link.href = off.pathname + off.search;
+            link.setAttribute('aria-label', 'Remove filter ' + nice(pair[0]));
+            link.textContent = '\u00d7';
+            chip.appendChild(link);
+            bar.appendChild(chip);
+        });
+        if (active.length > 1) {
+            var clear = document.createElement('a');
+            clear.className = 'q-chip-clear';
+            var base = new URL(window.location.href);
+            ['q'].forEach(function () {});
+            var keep = new URLSearchParams();
+            if (url.searchParams.get('q')) keep.set('q', url.searchParams.get('q'));
+            clear.href = base.pathname + (keep.toString() ? '?' + keep.toString() : '');
+            clear.textContent = 'Clear all';
+            bar.appendChild(clear);
+        }
+        toolbar.insertAdjacentElement('afterend', bar);
+
+        var close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'q-btn-ghost q-filter-close';
+        close.textContent = 'Close';
+        drawer.insertBefore(close, drawer.firstChild);
+
+        function set(open) {
+            document.body.classList.toggle('q-filters-open', open);
+            button.setAttribute('aria-expanded', open ? 'true' : 'false');
+            if (open) close.focus(); else if (document.activeElement && drawer.contains(document.activeElement)) button.focus();
+        }
+        button.addEventListener('click', function () { set(!document.body.classList.contains('q-filters-open')); });
+        close.addEventListener('click', function () { set(false); });
+        document.addEventListener('keydown', function (event) { if (event.key === 'Escape') set(false); });
+        document.addEventListener('click', function (event) {
+            if (document.body.classList.contains('q-filters-open') && !drawer.contains(event.target) && !button.contains(event.target)) set(false);
+        });
     })();
 
     /*
