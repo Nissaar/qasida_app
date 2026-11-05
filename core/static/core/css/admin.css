@@ -1644,3 +1644,193 @@ html[data-theme="auto"],
     .q-dup-compare { grid-template-columns: 1fr; }
     .q-dup-text { max-height: 40vh; }
 }
+
+
+/* ---- 2026 refresh ------------------------------------------------------
+ * Two jobs. First, Django 6.1 changed several defaults this stylesheet had
+ * been overriding (square list markers, link underlines on cards, a login
+ * page laid out for the old markup), so those are set explicitly again.
+ * Second, a lighter, more current finish on top: a soft ground, floating
+ * cards that lift on hover, pill controls, a calmer table and a proper login
+ * card. Colours all come from the tokens above, so dark mode follows.
+ */
+
+/* -- Django 6.1 regressions ------------------------------------------- */
+.q-nav-list li, .q-nav-list, #changelist-filter li, .q-activity li, .object-tools li,
+.q-tools, .messagelist li { list-style: none; }
+.q-nav-list li::marker { content: none; }
+/* Django 6.1 underlines every link outside the header and sidebar with a selector that counts an id, so these need
+   an id too. Content links are plain until hovered, as in any current admin. */
+#container #content a:not(.button, [role="button"]) { text-decoration: none; }
+#container #content a:not(.button, [role="button"]):hover { text-decoration: underline; text-underline-offset: .18em; }
+#container #content a.q-stat, #container #content a.q-tool, #container #content a.q-stat:hover, #container #content a.q-tool:hover { text-decoration: none; }
+.q-tool strong { color: var(--q-ink); }
+.q-tool > span:last-child, .q-stats span { color: var(--q-muted); }
+main, #content { min-width: 0; max-width: 100%; box-sizing: border-box; }
+.q-stats { grid-template-columns: repeat(auto-fit, minmax(8.25rem, 1fr)); }
+.q-tool .q-tool-icon { display: grid; place-items: center; }
+#changelist .results { overflow-x: auto; }
+.q-tool-icon svg { width: 1.15rem; height: 1.15rem; }
+.actions select { height: 2.25rem; line-height: 1.4; padding: .35rem 2rem .35rem .9rem; }
+#content-related { background: none; }
+#content-related .module { background: var(--q-surface); border: 1px solid var(--q-line); border-radius: 18px; padding: .4rem .2rem; }
+
+/* -- the ground and the top bar --------------------------------------- */
+body {
+    background:
+        radial-gradient(60rem 28rem at 85% -8rem, color-mix(in srgb, var(--q-accent) 7%, transparent), transparent 70%),
+        var(--q-ground);
+    background-attachment: fixed;
+}
+#header {
+    background: color-mix(in srgb, var(--q-surface) 82%, transparent);
+    -webkit-backdrop-filter: saturate(160%) blur(14px);
+    backdrop-filter: saturate(160%) blur(14px);
+    border-bottom: 1px solid var(--q-line);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .5) inset;
+}
+div.breadcrumbs {
+    background: transparent;
+    border: 0;
+    color: var(--q-muted);
+    font-size: .8125rem;
+}
+div.breadcrumbs a { color: var(--q-ink-soft); text-decoration: none; }
+div.breadcrumbs a:hover { color: var(--q-accent); }
+
+/* -- sidebar: a pill for the current page ------------------------------ */
+#nav-sidebar { background: color-mix(in srgb, var(--q-surface) 70%, transparent); }
+.q-nav-link { border-radius: var(--q-radius-sm); transition: background-color .12s ease, color .12s ease; }
+.q-nav-link[aria-current="page"] {
+    background: var(--q-accent-tint);
+    color: var(--q-accent-ink);
+    font-weight: 600;
+    box-shadow: inset 3px 0 0 var(--q-accent);
+}
+#nav-filter { border-radius: var(--q-radius-pill); padding-left: 1rem; background: var(--q-surface-2); }
+
+/* -- dashboard: cards that lift ---------------------------------------- */
+.q-stats > *, .q-tool {
+    border-radius: 18px;
+    transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+}
+a.q-stat:hover, a.q-tool:hover {
+    transform: translateY(-3px);
+    border-color: var(--q-accent-line);
+    box-shadow: var(--q-shadow-lg);
+}
+.q-stats b { font-size: clamp(1.7rem, 1.2vw + 1.2rem, 2.3rem); }
+.q-tool-icon { border-radius: 12px; }
+.q-hello { font-size: clamp(1.5rem, 1vw + 1.1rem, 1.9rem); letter-spacing: -.03em; }
+
+/* -- tables ------------------------------------------------------------- */
+#changelist, .module { border-radius: 18px; box-shadow: var(--q-shadow); overflow: hidden; }
+#result_list thead th { background: var(--q-surface-2); border-bottom: 1px solid var(--q-line); }
+#result_list tbody tr { transition: background-color .1s ease; }
+#result_list tbody tr:hover { background: var(--q-accent-tint); }
+#result_list tbody tr:nth-child(even), #result_list tbody tr:nth-child(odd) { background-color: transparent; }
+#result_list tbody tr:hover td, #result_list tbody tr:hover th { background: transparent; }
+#result_list td, #result_list th { border-bottom: 1px solid var(--q-line-soft); }
+#result_list th a, #result_list td a { text-decoration: none; }
+#result_list th.field-__str__ a, #result_list th[class*="field-"] a { font-weight: 600; }
+
+/* -- the search box and the action bar --------------------------------- */
+#changelist-search { align-items: center; }
+#changelist-search input[type=text] { border-radius: var(--q-radius-pill); padding: .55rem 1rem; }
+#toolbar #changelist-search input[type=submit], #toolbar form input[type=submit], .actions button, .actions .button {
+    background: var(--q-accent);
+    border-color: var(--q-accent);
+    color: var(--q-on-accent);
+    border-radius: var(--q-radius-pill);
+    padding: .5rem 1.1rem;
+    cursor: pointer;
+}
+#toolbar #changelist-search input[type=submit]:hover, .actions button:hover { background: var(--q-accent-hover); border-color: var(--q-accent-hover); }
+.actions select { border-radius: var(--q-radius-pill); padding: .4rem .8rem; border: 1px solid var(--q-line); background: var(--q-surface); color: var(--q-ink); }
+.actions { background: var(--q-surface-2); border-bottom: 1px solid var(--q-line); }
+
+/* -- buttons: pills, a gentle press ------------------------------------- */
+.button, input[type=submit], input[type=button], .submit-row input, a.button { border-radius: var(--q-radius-pill); padding: .55rem 1.1rem; }
+.button.default, input[type=submit].default, .submit-row input.default { box-shadow: 0 6px 16px -8px var(--q-accent); }
+.object-tools { margin: 0; padding: 0; }
+.object-tools a { border-radius: var(--q-radius-pill); text-decoration: none; letter-spacing: .02em; }
+
+/* -- forms -------------------------------------------------------------- */
+input[type=text], input[type=password], input[type=email], input[type=url], input[type=number], input[type=date], input[type=time],
+textarea, select {
+    border-radius: var(--q-radius-sm);
+    transition: border-color .12s ease, box-shadow .12s ease;
+}
+input:focus, textarea:focus, select:focus { border-color: var(--q-accent); box-shadow: var(--q-ring); outline: none; }
+.related-widget-wrapper-link img, .related-widget-wrapper .inline-deletelink { filter: grayscale(1) opacity(.7); }
+.related-widget-wrapper-link:hover img { filter: none; }
+fieldset.module, .module.aligned { border-radius: 18px; }
+.submit-row { border-radius: 18px; backdrop-filter: blur(10px); box-shadow: var(--q-shadow-lg); }
+
+/* -- the login page: one clear card ------------------------------------- */
+body.login { display: grid; place-items: center; min-height: 100vh; }
+body.login #container { width: min(26rem, calc(100vw - 2rem)); min-height: 0; margin: 0 auto; background: none; border: 0; }
+body.login #header {
+    position: static;
+    height: auto;
+    background: var(--q-surface);
+    border: 1px solid var(--q-line);
+    border-bottom: 0;
+    border-radius: 24px 24px 0 0;
+    padding: 2rem 1.75rem 1.1rem;
+    text-align: center;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+}
+body.login #header { display: block; }
+body.login #branding { display: block; }
+body.login #branding, body.login #site-name { margin: 0; width: 100%; }
+body.login #site-name a {
+    display: block;
+    color: var(--q-ink);
+    font-size: 1.25rem;
+    font-weight: 650;
+    letter-spacing: -.02em;
+    text-decoration: none;
+}
+body.login #site-name a::before {
+    content: "";
+    display: block;
+    width: 3rem;
+    height: 3rem;
+    margin: 0 auto .9rem;
+    border-radius: 16px;
+    background: var(--q-accent) url("../img/favicon-32.png") center / 1.6rem no-repeat;
+    box-shadow: 0 10px 24px -10px var(--q-accent);
+}
+body.login .main, body.login #content, body.login #content-main { padding: 0; margin: 0; width: 100%; }
+body.login #content { background: none; border: 0; box-shadow: none; }
+body.login #login-form {
+    background: var(--q-surface);
+    border: 1px solid var(--q-line);
+    border-top: 0;
+    border-radius: 0 0 24px 24px;
+    padding: .5rem 1.75rem 1.75rem;
+    box-shadow: var(--q-shadow-lg);
+}
+body.login .form-row { padding: .45rem 0; border: 0; background: none; }
+body.login .form-row label { display: block; margin-bottom: .3rem; font-weight: 600; font-size: .8125rem; }
+body.login .form-row input { width: 100%; box-sizing: border-box; padding: .65rem .85rem; }
+body.login .submit-row {
+    position: static;
+    display: block;
+    padding: .9rem 0 0;
+    margin: 0;
+    background: none;
+    border: 0;
+    box-shadow: none;
+}
+body.login .submit-row input { width: 100%; background: var(--q-accent); border-color: var(--q-accent); color: var(--q-on-accent); padding: .75rem 1rem; font-size: .875rem; }
+body.login .submit-row input:hover { background: var(--q-accent-hover); }
+body.login .password-reset-link { text-align: center; padding-top: .8rem; }
+
+@media (prefers-reduced-motion: reduce) {
+    .q-stats > *, .q-tool, .q-nav-link, #result_list tbody tr { transition: none; }
+    a.q-stat:hover, a.q-tool:hover { transform: none; }
+}
