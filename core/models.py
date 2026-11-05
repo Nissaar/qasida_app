@@ -1407,3 +1407,18 @@ class ContactMessage(models.Model):
 
     def __str__(self):
         return f'{self.get_topic_display()} from {self.email}'
+
+
+class GeminiUsage(models.Model):
+    """Gemini API use, one row per day (Mauritius) and model: what ChatOps reads to total spending across projects."""
+    day = models.DateField()
+    model = models.CharField(max_length=80)
+    calls = models.PositiveIntegerField(default=0)
+    tokens_in = models.PositiveBigIntegerField(default=0)
+    tokens_out = models.PositiveBigIntegerField(default=0)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['day', 'model'], name='unique_gemini_usage_day_model')]
+
+    def __str__(self):
+        return f'{self.day} {self.model}: {self.calls} calls'
