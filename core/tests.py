@@ -4252,6 +4252,105 @@ class TranslateButtonTest(TestCase):
             data = self.client.get(reverse('admin:core_qasida_translate_status', args=['job-2'])).json()
         self.assertEqual((data['state'], data['script']), ('done', 'سلام'))
 
+    def test_the_scan_button_is_offered_only_with_gemini_and_saved_scans(self):
+        work = make_qasida(title='Burda')
+        change = reverse('admin:core_qasida_change', args=[work.pk])
+        with override_settings(GEMINI_API_KEY='k'):
+            self.assertNotContains(self.client.get(change), 'data-ocr-scans')
+            QasidaImage.objects.create(qasida=work, image='qasida_scans/page.png')
+            self.assertContains(self.client.get(change),
+                                f'data-ocr-scans="{reverse("admin:core_qasida_ocr_scans", args=[work.pk])}"')
+        with override_settings(GEMINI_API_KEY=''):
+            self.assertNotContains(self.client.get(change), 'data-ocr-scans')
+
+    def test_reading_the_scans_queues_a_gemini_job(self):
+        from unittest import mock
+        from . import tasks
+        work = make_qasida(title='Burda')
+        url = reverse('admin:core_qasida_ocr_scans', args=[work.pk])
+        with override_settings(GEMINI_API_KEY='k', GEMINI_MODELS='m-a,m-b'), \
+                mock.patch.object(tasks.ocr_scans_with_gemini, 'delay', return_value=mock.Mock(id='job-3')) as delay:
+            no_scans = self.client.post(url, {'language': 'Arabic'})
+            QasidaImage.objects.create(qasida=work, image='qasida_scans/page.png')
+            bad_model = self.client.post(url, {'language': 'Arabic', 'model': 'nope'})
+            ok = self.client.post(url, {'language': 'Arabic', 'model': 'm-b'})
+            self.assertEqual(self.client.get(url).status_code, 405)
+        with override_settings(GEMINI_API_KEY=''):
+            self.assertEqual(self.client.post(url).status_code, 400)
+        self.assertEqual((no_scans.status_code, bad_model.status_code), (400, 400))
+        self.assertEqual((ok.json()['job'], ok.json()['pages']), ('job-3', 1))
+        delay.assert_called_once_with(work.pk, 'Arabic', 'm-b')
+
+    def test_a_finished_ocr_job_hands_back_the_text_or_says_why_not(self):
+        from unittest import mock
+        status = reverse('admin:core_qasida_translate_status', args=['job-3'])
+        done = mock.Mock(state='SUCCESS', result={'ocr': 'بيت', 'engine': 'Gemini (m-a)', 'notes': ['page 1: 3 characters']})
+        empty = mock.Mock(state='SUCCESS', result={'ocr': '', 'engine': None, 'error': 'HTTP 403'})
+        with mock.patch('celery.result.AsyncResult', return_value=done):
+            data = self.client.get(status).json()
+        self.assertEqual((data['state'], data['ocr']), ('done', 'بيت'))
+        with mock.patch('celery.result.AsyncResult', return_value=empty):
+            data = self.client.get(status).json()
+        self.assertEqual(data['state'], 'failed')
+        self.assertIn('HTTP 403', data['error'])
+
+    def test_the_worker_reads_the_saved_scans_in_order(self):
+        import tempfile
+        from unittest import mock
+        from django.core.files.base import ContentFile
+        from PIL import Image
+        from . import gemini, tasks
+
+        def png(colour):
+            out = io.BytesIO()
+            Image.new('RGB', (40, 20), colour).save(out, format='PNG')
+            return out.getvalue()
+
+        work = make_qasida(title='Burda')
+        with tempfile.TemporaryDirectory() as media, override_settings(MEDIA_ROOT=media, GEMINI_API_KEY='k'):
+            for position, colour in ((2, 'white'), (1, 'black')):
+                scan = QasidaImage(qasida=work, position=position)
+                scan.image.save(f'{colour}.png', ContentFile(png(colour)), save=True)
+            with mock.patch.object(gemini, 'ocr', return_value={'text': 'a\n\nb', 'pages': ['a', 'b'],
+                                                                'engine': 'Gemini (x)'}) as ocr:
+                result = tasks.ocr_scans_with_gemini.run(work.pk, 'Arabic', None)
+        pages = ocr.call_args[0][0]
+        self.assertEqual([mime for mime, _ in pages], ['image/png', 'image/png'])
+        self.assertEqual(pages[0][1], png('black'))
+        self.assertEqual(result, {'ocr': 'a\n\nb', 'engine': 'Gemini (x)',
+                                  'notes': ['page 1: 1 characters', 'page 2: 1 characters']})
+
+    def test_pages_for_gemini_from_a_pdf_and_an_odd_image(self):
+        import pymupdf
+        from PIL import Image
+        from .ocr_tool import gemini_pages
+
+        doc = pymupdf.open()
+        doc.new_page(); doc.new_page()
+        pages = gemini_pages(doc.tobytes())
+        self.assertEqual([mime for mime, _ in pages], ['image/png', 'image/png'])
+
+        gif = io.BytesIO()
+        Image.new('RGB', (5000, 100), 'white').save(gif, format='GIF')
+        [(mime, data)] = gemini_pages(gif.getvalue())
+        self.assertEqual(mime, 'image/jpeg')
+        self.assertEqual(Image.open(io.BytesIO(data)).size[0], 3072)
+
+    def test_the_extract_text_page_sends_an_upload_to_gemini_when_picked(self):
+        import base64
+        from unittest import mock
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from . import tasks
+        url = reverse('admin:core_qasida_ocr_tool')
+        self.assertNotContains(self.client.get(url), 'Gemini (')
+        with override_settings(GEMINI_API_KEY='k', GEMINI_MODELS='m-a,m-b'), \
+                mock.patch.object(tasks.ocr_upload_with_gemini, 'delay', return_value=mock.Mock(id='job-4')) as delay:
+            self.assertContains(self.client.get(url), 'Gemini: m-b only')
+            page = self.client.post(url, {'upload': SimpleUploadedFile('p.png', b'img'), 'engine': 'gemini:m-b',
+                                          'language': 'urd+eng', 'page_segmentation': '--psm 4'})
+        delay.assert_called_once_with(base64.b64encode(b'img').decode(), 'Urdu', 'm-b')
+        self.assertContains(page, reverse('admin:core_qasida_translate_status', args=['job-4']))
+
     def test_readers_cannot_use_it(self):
         reader = User.objects.create_user('reader', 'r@example.com', GOOD_PASSWORD)
         self.client.force_login(reader)

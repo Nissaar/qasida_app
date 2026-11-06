@@ -1,7 +1,7 @@
 {% extends "admin/change_form.html" %}
 {% comment %}
-Where the "Translate from the lyrics" button beside the translation box sends
-its requests. admin.js adds the button when this is on the page; without the
+Where the "Translate from the lyrics" button beside the translation box, and
+the "Read the scans with Gemini" button beside the lyrics, send their requests. admin.js adds the button when this is on the page; without the
 script the form works exactly as before.
 {% endcomment %}
 {% block admin_change_form_document_ready %}
@@ -11,5 +11,6 @@ script the form works exactly as before.
      data-status="{% url 'admin:core_qasida_translate_status' 'JOB' %}"
      data-to-script="{% url 'admin:core_qasida_to_script' %}"
      data-models="{{ gemini_models|join:',' }}"
-     data-machine="machine"></div>
+     data-machine="machine"
+     {% if ocr_scans_url %}data-ocr-scans="{{ ocr_scans_url }}" data-ocr-quality="ocr"{% endif %}></div>
 {% endblock %}

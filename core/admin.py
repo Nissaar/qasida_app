@@ -246,6 +246,8 @@ class QasidaAdmin(LibraryAdmin):
                  name='core_qasida_translate'),
             path('to-script/', self.admin_site.admin_view(self.to_script_start_view),
                  name='core_qasida_to_script'),
+            path('<int:object_id>/ocr-scans/', self.admin_site.admin_view(self.ocr_scans_start_view),
+                 name='core_qasida_ocr_scans'),
             path('translate/<str:job>/', self.admin_site.admin_view(self.translate_status_view),
                  name='core_qasida_translate_status'),
         ] + super().get_urls()
@@ -323,9 +325,37 @@ class QasidaAdmin(LibraryAdmin):
         return JsonResponse({'job': job.id, 'language': language, 'engine': label,
                              'note': f'Sent to {label}.'})
 
+    def ocr_scans_start_view(self, request, object_id):
+        """Start reading this qasida's saved scans with Gemini, for the button beside the lyrics. Nothing is saved."""
+        from . import gemini
+        from .tasks import ocr_scans_with_gemini
+
+        if request.method != 'POST':
+            return HttpResponseNotAllowed(['POST'])
+        if not self.has_change_permission(request):
+            raise PermissionDenied
+        if not gemini.enabled():
+            return JsonResponse({'error': 'This needs Gemini: GEMINI_API_KEY is not set.'}, status=400)
+        count = QasidaImage.objects.filter(qasida_id=object_id).count()
+        if not count:
+            return JsonResponse({'error': 'This qasida has no saved scans. Add them under the scans '
+                                          'section and save first.'}, status=400)
+        model = (request.POST.get('model') or '').strip() or None
+        if model and model not in gemini.models():
+            return JsonResponse({'error': f'Unknown model {model}.'}, status=400)
+        language = (request.POST.get('language') or '').strip()
+        job = ocr_scans_with_gemini.delay(object_id, language, model)
+        label = gemini.engine_label(model)
+        return JsonResponse({'job': job.id, 'engine': label, 'pages': count,
+                             'note': f'Sent {count} scan(s) to {label}.'})
+
     def render_change_form(self, request, context, *args, **kwargs):
         from . import gemini
         context['gemini_models'] = gemini.models() if gemini.enabled() else []
+        obj = context.get('original')
+        # Only offered once the scans are saved: the worker reads them from storage, not from the form.
+        if gemini.enabled() and obj is not None and obj.pk and obj.images.exists():
+            context['ocr_scans_url'] = reverse('admin:core_qasida_ocr_scans', args=[obj.pk])
         return super().render_change_form(request, context, *args, **kwargs)
 
     def translate_status_view(self, request, job):
@@ -337,6 +367,11 @@ class QasidaAdmin(LibraryAdmin):
         result = AsyncResult(job)
         if result.state == 'SUCCESS':
             value = result.result or {}
+            if 'ocr' in value:
+                if not value['ocr']:
+                    reason = value.get('error') or 'it returned nothing'
+                    return JsonResponse({'state': 'failed', 'error': f'Reading the scans failed: {reason}.'})
+                return JsonResponse({'state': 'done', **value})
             if value.get('script'):
                 return JsonResponse({'state': 'done', **value})
             if not value.get('translation'):
@@ -352,10 +387,17 @@ class QasidaAdmin(LibraryAdmin):
 
     def ocr_tool_view(self, request):
         """Read text off an uploaded PDF or screenshot, for pasting into a record."""
-        text, notes = '', []
+        text, notes, job = '', [], None
         if request.method == 'POST':
             form = OcrUploadForm(request.POST, request.FILES)
-            if form.is_valid():
+            if form.is_valid() and form.gemini_model() is not None:
+                # Gemini runs on the worker; the page asks after the job and shows the text when it is in.
+                import base64
+                from .tasks import ocr_upload_with_gemini
+
+                data = base64.b64encode(form.cleaned_data['upload'].read()).decode('ascii')
+                job = ocr_upload_with_gemini.delay(data, form.language_name(), form.gemini_model() or None).id
+            elif form.is_valid():
                 try:
                     text, notes = run_ocr(
                         form.cleaned_data['upload'],
@@ -374,6 +416,7 @@ class QasidaAdmin(LibraryAdmin):
             'form': form,
             'extracted_text': text,
             'notes': notes,
+            'job_status_url': reverse('admin:core_qasida_translate_status', args=[job]) if job else '',
             'opts': self.model._meta,
         })
 

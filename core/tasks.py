@@ -1728,6 +1728,59 @@ def restore_script(text, language, model=None):
     return {'script': out['text'], 'engine': out['engine']}
 
 
+def _gemini_ocr(pages, language, model):
+    """The OCR result the status endpoint hands back; nothing is saved."""
+    from . import gemini
+    from .ocr_tool import gemini_notes
+
+    if not gemini.enabled():
+        return {'ocr': '', 'engine': None, 'error': 'Gemini is not set up (no GEMINI_API_KEY)'}
+    try:
+        out = gemini.ocr(pages, language, model=model)
+    except gemini.GeminiFailed as failure:
+        logger.warning('Gemini OCR failed (%s)', failure)
+        return {'ocr': '', 'engine': None, 'error': str(failure)}
+    result = {'ocr': out['text'], 'engine': out['engine'], 'notes': gemini_notes(out['pages'])}
+    if not out['text']:
+        result['error'] = 'nothing legible was found on the pages'
+    return result
+
+
+@shared_task(time_limit=20 * 60)
+def ocr_scans_with_gemini(qasida_id, language='', model=None):
+    """
+    Read a qasida's saved scans (images, and PDF pages stored as images) with Gemini, for the button on its form.
+    Only ever started by an editor; the draft goes back to the form and nothing is saved.
+    """
+    from .ocr_tool import gemini_pages
+    from .textrepair import MAX_PDF_PAGES
+
+    pages = []
+    for scan in QasidaImage.objects.filter(qasida_id=qasida_id)[:MAX_PDF_PAGES]:
+        try:
+            with scan.image.open('rb') as handle:
+                pages += gemini_pages(handle.read())
+        except Exception as e:
+            logger.warning('Could not prepare scan %s for Gemini (%s: %s)', scan.image.name, type(e).__name__, e)
+            return {'ocr': '', 'engine': None, 'error': f'the scan {scan.image.name} could not be opened'}
+    if not pages:
+        return {'ocr': '', 'engine': None, 'error': 'this qasida has no saved scans'}
+    return _gemini_ocr(pages, language, model)
+
+
+@shared_task(time_limit=20 * 60)
+def ocr_upload_with_gemini(data_b64, language='', model=None):
+    """Read a PDF or image uploaded on the Extract text page with Gemini. The file travels base64 (JSON broker)."""
+    import base64
+    from .ocr_tool import gemini_pages
+
+    try:
+        pages = gemini_pages(base64.b64decode(data_b64))
+    except Exception as e:
+        return {'ocr': '', 'engine': None, 'error': f'could not read that file ({type(e).__name__})'}
+    return _gemini_ocr(pages, language, model)
+
+
 # How long one crawl may run before the worker kills it. The schedule starts a
 # crawl every midnight, so one still going the following evening has stalled,
 # and would otherwise run into the next.

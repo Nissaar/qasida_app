@@ -14,8 +14,9 @@
 <div id="content-main">
     <p style="max-width:46em;">
         Upload a scanned page, a screenshot or a PDF and the text is read off it with
-        Tesseract, running locally. Copy the result into a qasida's lyrics field and
-        correct it there &mdash; OCR of vocalised script is approximate.
+        Tesseract, running locally{% if 'engine' in form.fields %}, or with Gemini when you pick it
+        under <em>Read with</em> (better on photos, handwriting and vocalised script; billed per page){% endif %}.
+        Copy the result into a qasida's lyrics field and correct it there &mdash; OCR is approximate.
     </p>
 
     <form method="post" enctype="multipart/form-data">
@@ -36,7 +37,7 @@
         </div>
     </form>
 
-    {% if notes %}
+    {% if notes and not job_status_url %}
     <div class="module" style="margin-top:1.5em;">
         <h2>{% translate 'Result' %}</h2>
         <ul style="padding:8px 24px;">
@@ -45,13 +46,14 @@
     </div>
     {% endif %}
 
-    {% if extracted_text %}
-    <div class="module" style="margin-top:1em;">
+    {% if extracted_text or job_status_url %}
+    <div class="module" style="margin-top:1em;"{% if job_status_url %} id="ocr-job" data-status="{{ job_status_url }}"{% endif %}>
         <h2>{% translate 'Extracted text' %}</h2>
         <div style="padding:10px;">
-            <textarea id="ocr-output" rows="26" readonly
+            {% if job_status_url %}<p id="ocr-job-state" role="status" aria-live="polite">{% translate 'Reading with Gemini' %}&hellip;</p>{% endif %}
+            <textarea id="ocr-output" rows="26" readonly{% if job_status_url %} hidden{% endif %}
                       style="width:100%; box-sizing:border-box; font-family:'Noto Naskh Arabic',serif; font-size:1.05rem; line-height:2.1; direction:auto; unicode-bidi:plaintext;">{{ extracted_text }}</textarea>
-            <p style="margin-top:8px;">
+            <p style="margin-top:8px;" id="ocr-copy-row"{% if job_status_url %} hidden{% endif %}>
                 <button type="button" class="button" id="ocr-copy">{% translate 'Copy to clipboard' %}</button>
                 <span id="ocr-copied" style="margin-left:8px; display:none;">{% translate 'Copied.' %}</span>
             </p>
@@ -69,6 +71,33 @@
             /* Older browsers: the text is already selected for a manual copy. */
         });
     });
+    /* Gemini reads on the worker: ask after the job until the text is in. */
+    (function () {
+        var job = document.getElementById('ocr-job');
+        if (!job) return;
+        var state = document.getElementById('ocr-job-state');
+        var started = Date.now();
+        (function poll() {
+            fetch(job.dataset.status, {credentials: 'same-origin'})
+                .then(function (response) { return response.json(); })
+                .then(function (result) {
+                    if (result.state === 'done') {
+                        var output = document.getElementById('ocr-output');
+                        output.value = result.ocr;
+                        output.hidden = false;
+                        document.getElementById('ocr-copy-row').hidden = false;
+                        state.textContent = 'Read with ' + result.engine + ': ' + (result.notes || []).join(', ') + '.';
+                    } else if (result.state === 'failed') {
+                        state.textContent = result.error;
+                    } else if (Date.now() - started > 15 * 60 * 1000) {
+                        state.textContent = 'Still not done after fifteen minutes. Is the worker running?';
+                    } else {
+                        state.textContent = 'Reading with Gemini\u2026 ' + Math.round((Date.now() - started) / 1000) + 's';
+                        setTimeout(poll, 2000);
+                    }
+                }).catch(function () { setTimeout(poll, 3000); });
+        })();
+    })();
     </script>
     {% endif %}
 </div>

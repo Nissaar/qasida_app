@@ -115,3 +115,34 @@ class GeminiModelsTests(SimpleTestCase):
         with mock.patch('urllib.request.urlopen', return_value=_answer(text='')):
             with self.assertRaises(gemini.GeminiFailed):
                 gemini.to_script('salam', 'Urdu')
+
+
+@override_settings(GEMINI_API_KEY='sekret', GEMINI_MODEL='', GEMINI_MODELS='model-a, model-b')
+class GeminiOcrTests(SimpleTestCase):
+    def test_each_page_is_sent_as_an_image_and_the_pages_are_joined(self):
+        with mock.patch('urllib.request.urlopen', side_effect=[_answer(text='سطر'), _answer(text=''),
+                                                               _answer(text='بيت')]) as op:
+            out = gemini.ocr([('image/png', b'one'), ('image/jpeg', b'two'), ('image/png', b'three')], 'Arabic')
+        self.assertEqual(op.call_count, 3)
+        self.assertEqual((out['text'], out['pages'], out['engine']), ('سطر\n\nبيت', ['سطر', '', 'بيت'], 'Gemini (model-a)'))
+        parts = json.loads(op.call_args_list[0][0][0].data)['contents'][0]['parts']
+        self.assertEqual(parts[0]['inlineData'], {'mimeType': 'image/png', 'data': 'b25l'})
+        self.assertIn('Arabic', parts[1]['text'])
+
+    def test_a_failing_model_hands_the_whole_document_to_the_next(self):
+        err = urllib.error.HTTPError('u', 404, 'gone', {}, io.BytesIO(b''))
+        with mock.patch('urllib.request.urlopen', side_effect=[_answer(text='a'), err, _answer(text='a'),
+                                                               _answer(text='b')]):
+            out = gemini.ocr([('image/png', b'1'), ('image/png', b'2')])
+        self.assertEqual((out['text'], out['engine']), ('a\n\nb', 'Gemini (model-b)'))
+
+    def test_an_unsupported_image_type_is_refused_before_any_call(self):
+        with mock.patch('urllib.request.urlopen') as op:
+            with self.assertRaises(gemini.GeminiFailed):
+                gemini.ocr([('image/gif', b'x')])
+        op.assert_not_called()
+
+    def test_needs_the_key(self):
+        with override_settings(GEMINI_API_KEY=''):
+            with self.assertRaises(gemini.GeminiFailed):
+                gemini.ocr([('image/png', b'x')])

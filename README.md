@@ -5,7 +5,7 @@ A searchable library of qasidas, naats and other devotional poetry. It collects 
 ## What it does
 
 - **Crawls** a list of source sites politely (robots.txt, rate limits, honest user agent) with Celery; the default list is in [core/sources.py](core/sources.py) and is reconciled into the database at start (`manage.py ensure_sources`). Pausing a site in the admin sticks across restarts.
-- **Cleans and enriches**: de-duplicates (`find_duplicates`), repairs shattered Arabic text from PDFs, OCRs scanned pages (`ocr_scans`), detects collections, translates missing texts offline (Argos Translate, so Urdu and Persian work without the internet).
+- **Cleans and enriches**: de-duplicates (`find_duplicates`), repairs shattered Arabic text from PDFs, OCRs scanned pages (`ocr_scans`, Tesseract; Gemini only when an editor asks, from a qasida's form or the Extract text page), detects collections, translates missing texts offline (Argos Translate, so Urdu and Persian work without the internet).
 - **Serves** the library with full-text search, poets, tags, collections, favourites, reading history, reader profiles, user suggestions and contributions, and a contact form. Django admin for curation; XML sitemaps for search engines.
 
 ## Stack

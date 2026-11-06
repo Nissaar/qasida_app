@@ -683,6 +683,86 @@
     })();
 
     /*
+     * "Read the scans with Gemini", beside the lyrics box. Only there when
+     * Gemini is set up and the qasida has saved scans (pictures, or the pages
+     * of a PDF). Gemini reads them on the worker; the text goes into the box
+     * marked as reconstructed, and nothing is saved until the editor saves.
+     */
+    (function setUpOcrButton() {
+        var config = document.getElementById('q-translate-config');
+        var lyrics = document.getElementById('id_lyrics');
+        if (!config || !lyrics || !config.dataset.ocrScans) return;
+
+        var bar = document.createElement('div');
+        bar.className = 'q-translate-bar';
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'q-btn-ghost';
+        button.textContent = 'Read the scans with Gemini';
+        var status = document.createElement('span');
+        status.className = 'q-translate-status';
+        status.setAttribute('role', 'status');
+        status.setAttribute('aria-live', 'polite');
+        bar.appendChild(button);
+        bar.appendChild(status);
+        lyrics.insertAdjacentElement('afterend', bar);
+
+        function say(text, isError) {
+            status.textContent = text;
+            status.classList.toggle('q-translate-error', !!isError);
+        }
+        function csrf() {
+            var field = document.querySelector('input[name=csrfmiddlewaretoken]');
+            return field ? field.value : '';
+        }
+
+        button.addEventListener('click', function () {
+            if (lyrics.value.trim() && !window.confirm(
+                    'Replace the lyrics already in the box with what Gemini reads off the scans?')) return;
+            var language = document.getElementById('id_language');
+            // The model picker the translate button adds, when there are several models.
+            var picker = document.querySelector('.q-translate-bar select');
+            var body = new URLSearchParams();
+            body.append('language', language ? language.value : '');
+            body.append('model', picker ? picker.value : '');
+            button.disabled = true;
+            say('Starting\u2026');
+            fetch(config.dataset.ocrScans, {
+                method: 'POST', credentials: 'same-origin', body: body, headers: {'X-CSRFToken': csrf()}
+            }).then(function (response) {
+                return response.json().then(function (data) { return [response.ok, data]; });
+            }).then(function (pair) {
+                var data = pair[1];
+                if (!pair[0]) { say(data.error || 'Could not start.', true); button.disabled = false; return; }
+                var started = Date.now();
+                (function poll() {
+                    fetch(config.dataset.status.replace('JOB', data.job), {credentials: 'same-origin'})
+                        .then(function (response) { return response.json(); })
+                        .then(function (job) {
+                            if (job.state === 'done') {
+                                lyrics.value = job.ocr;
+                                lyrics.dispatchEvent(new Event('input', {bubbles: true}));
+                                var quality = document.getElementById('id_text_quality');
+                                if (quality) quality.value = config.dataset.ocrQuality;
+                                say('Read ' + data.pages + ' scan(s) with ' + job.engine + ' (' +
+                                    (job.notes || []).join(', ') + '). OCR is a draft: check it against the scans before saving.');
+                                button.disabled = false;
+                            } else if (job.state === 'failed') {
+                                say(job.error, true); button.disabled = false;
+                            } else if (Date.now() - started > 15 * 60 * 1000) {
+                                say('Still not done after fifteen minutes. Is the worker running?', true);
+                                button.disabled = false;
+                            } else {
+                                say(data.note + ' Reading\u2026 ' + Math.round((Date.now() - started) / 1000) + 's');
+                                setTimeout(poll, 2000);
+                            }
+                        }).catch(function () { setTimeout(poll, 3000); });
+                })();
+            }).catch(function () { say('Could not reach the server.', true); button.disabled = false; });
+        });
+    })();
+
+    /*
      * The duplicate comparison: the two copies scroll as one, so the stanza
      * being read on one side is the stanza shown on the other. The two are
      * rarely the same length, so each follows the other's position as a
