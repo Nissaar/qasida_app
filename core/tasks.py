@@ -20,7 +20,7 @@ from PIL import Image
 
 from .extract import _as_text, extract_work
 from .fetching import BotChallenge, RateLimited, USER_AGENT, polite_get
-from .models import Poet, Qasida, QasidaImage, Tag, SourceWebsite
+from .models import DeletedSource, Poet, Qasida, QasidaImage, Tag, SourceWebsite
 from .textrepair import (arabic_len, looks_shattered, ocr_is_improvement, ocr_pdf,
                          pdf_page_pngs, pdf_text, reassemble_pdf_text,
                          reassembly_is_improvement, strip_viewer_chrome)
@@ -101,6 +101,8 @@ def _safe_source_url(url):
     url = (url or '').strip()
     parts = urlsplit(url)
     if parts.scheme not in ('http', 'https') or not parts.hostname or len(url) > 500:
+        return ''
+    if DeletedSource.objects.filter(source_url=url).exists():
         return ''
     return url
 
@@ -720,6 +722,7 @@ def _import_damas_post(website, post, term_slugs, stats):
     if scan_only:
         if not added:
             # Every candidate failed to decode, so there is nothing to show.
+            qasida._skip_tombstone = True
             qasida.delete()
             stats['image_fetch_failed'] += 1
             print(f"  SKIP (scans unreadable): {title[:70]}")
@@ -1119,7 +1122,8 @@ def scrape_generic(website, limit=None):
         if stats['saved'] >= ceiling:
             print(f"  stopping at {ceiling} saved works for this pass")
             break
-        if Qasida.objects.filter(source_url=url).exists():
+        if (Qasida.objects.filter(source_url=url).exists()
+                or DeletedSource.objects.filter(source_url=url).exists()):
             stats['already_present'] += 1
             continue
         try:

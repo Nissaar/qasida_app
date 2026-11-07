@@ -4,6 +4,8 @@ from django.conf import settings
 from django.contrib.postgres.indexes import GinIndex
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models, transaction
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
 from django.utils import timezone
 from django.utils.text import slugify
 
@@ -1033,6 +1035,29 @@ class SourceWebsite(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class DeletedSource(models.Model):
+    """
+    A source address an editor deleted a qasida for.
+
+    The crawler skips a URL it already holds, so a deleted row used to be
+    imported again on the next pass. Keeping the address here stops that.
+    Remove the entry to allow the page to be crawled again.
+    """
+    source_url = models.URLField(max_length=500, unique=True)
+    deleted_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.source_url
+
+
+@receiver(post_delete, sender=Qasida)
+def remember_deleted_source(sender, instance, **kwargs):
+    # A crawler that discards its own half-made row sets `_skip_tombstone`,
+    # so that page is still retried later.
+    if instance.source_url and not getattr(instance, '_skip_tombstone', False):
+        DeletedSource.objects.get_or_create(source_url=instance.source_url)
 
 
 class Favourite(models.Model):

@@ -21,7 +21,7 @@ from .textdiff import highlight_differences
 admin.site.site_header = "Qasida Library"
 admin.site.site_title = "Qasida Library"
 admin.site.index_title = "Library administration"
-from .models import (Collection, ContactMessage, Contribution, Dedication,
+from .models import (DeletedSource, Collection, ContactMessage, Contribution, Dedication,
                      DuplicateLink, Tag, Poet, Qasida, QasidaImage,
                      QasidaMedia, ReaderProfile, Suggestion, SourceWebsite)
 
@@ -1111,3 +1111,10 @@ class ContactMessageAdmin(LibraryAdmin):
     def mark_handled(self, request, queryset):
         count = queryset.update(is_handled=True)
         self.message_user(request, f"{count} message(s) marked as dealt with.")
+
+
+@admin.register(DeletedSource)
+class DeletedSourceAdmin(admin.ModelAdmin):
+    """Addresses the crawler skips. Delete an entry to let it be crawled again."""
+    list_display = ('source_url', 'deleted_at')
+    search_fields = ('source_url',)
